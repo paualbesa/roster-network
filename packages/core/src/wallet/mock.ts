@@ -4,13 +4,19 @@ import { WalletProviderError } from "./errors.js";
 import type { TransferRequest, TransferResult, WalletProvider } from "./types.js";
 
 export interface MockWalletProviderOptions {
-  /** Label only. Balances stay inside this process; nothing is broadcast. */
+  /** Label only. Nothing is broadcast. */
   chain?: ChainId;
+}
+
+/** Balances and the mock transfer counter. No keys, addresses are opaque ids. */
+export interface MockWalletSnapshot {
+  balances: { address: string; balanceUsdc: string }[];
+  sequence: number;
 }
 
 /**
  * In-memory USDC ledger. Addresses are opaque mock ids, not blockchain accounts.
- * There are no keys to export.
+ * There are no keys to export. A snapshot can be restored after a process restart.
  */
 export class MockWalletProvider implements WalletProvider {
   readonly id = "mock" as const;
@@ -55,5 +61,26 @@ export class MockWalletProvider implements WalletProvider {
       status: "settled",
       chain: this.chain,
     };
+  }
+
+  exportState(): MockWalletSnapshot {
+    const balances = [...this.balances.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([address, micros]) => ({ address, balanceUsdc: formatUsdc(micros) }));
+    return { balances, sequence: this.sequence };
+  }
+
+  importState(snapshot: MockWalletSnapshot): void {
+    if (!Number.isInteger(snapshot.sequence) || snapshot.sequence < 0) {
+      throw new WalletProviderError("Mock wallet sequence must be a non-negative integer.");
+    }
+    const next = new Map<string, bigint>();
+    for (const entry of snapshot.balances) {
+      if (!entry.address) throw new WalletProviderError("Mock wallet snapshot has an empty address.");
+      next.set(entry.address, parseUsdc(entry.balanceUsdc));
+    }
+    this.balances.clear();
+    for (const [address, amount] of next) this.balances.set(address, amount);
+    this.sequence = snapshot.sequence;
   }
 }

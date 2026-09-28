@@ -5,6 +5,7 @@ import {
   createSandboxApiKey,
   evaluateSpend,
   formatUsdc,
+  hashSandboxApiKey,
   MockWalletProvider,
   parseUsdc,
   quoteSandboxFee,
@@ -116,7 +117,7 @@ export class AgentFinanceService {
   }
 
   authenticate(apiKey: string): string | null {
-    return this.store.apiKeys.get(apiKey) ?? null;
+    return this.store.apiKeys.get(hashSandboxApiKey(apiKey)) ?? null;
   }
 
   createOrganization(name: string): Promise<CreateOrganizationResult> {
@@ -204,11 +205,12 @@ export class AgentFinanceService {
     this.store.wallets.set(wallet.id, wallet);
     this.store.organizations.set(organization.id, organization);
     const apiKey = createSandboxApiKey();
-    this.store.apiKeys.set(apiKey, organization.id);
+    this.store.apiKeys.set(hashSandboxApiKey(apiKey), organization.id);
 
     if (this.mode === "sandbox") {
       await this.mintSandboxGrant(organization, wallet, createdAt);
     }
+    this.commit();
 
     return {
       organization,
@@ -290,6 +292,7 @@ export class AgentFinanceService {
     this.store.wallets.set(wallet.id, wallet);
     this.store.policies.set(policy.id, policy);
     this.store.agents.set(agent.id, agent);
+    this.commit();
     return {
       agent,
       wallet,
@@ -352,6 +355,7 @@ export class AgentFinanceService {
       createdAt,
     });
     this.store.transactions.push(transaction);
+    this.commit();
     return { transaction, balanceUsdc: await this.wallets.getBalance(wallet.address) };
   }
 
@@ -457,6 +461,7 @@ export class AgentFinanceService {
       createdAt,
     };
     this.store.transactions.push(transaction);
+    this.commit();
     return { transaction, balanceUsdc: await this.wallets.getBalance(wallet.address) };
   }
 
@@ -522,6 +527,7 @@ export class AgentFinanceService {
       createdAt: this.now().toISOString(),
     };
     this.store.transactions.push(transaction);
+    this.commit();
     return transaction;
   }
 
@@ -578,6 +584,10 @@ export class AgentFinanceService {
 
   private notFound(message: string): ServiceError {
     return new ServiceError(404, "not_found", message);
+  }
+
+  private commit(): void {
+    this.store.commit(this.wallets instanceof MockWalletProvider ? this.wallets.exportState() : null);
   }
 
   private enqueue<T>(task: () => Promise<T>): Promise<T> {

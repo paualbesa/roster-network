@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 
@@ -172,5 +176,152 @@ describe("agent finance API", () => {
     });
     expect(extra.status).toBe(403);
     expect(((await extra.json()) as ErrorBody).error.code).toBe("agent_limit");
+  });
+
+  it("rejects missing and unknown API keys on org-scoped routes", async () => {
+    const { app, auth } = await bootstrap();
+    const missing = await app.request("/v1/treasury");
+    expect(missing.status).toBe(401);
+    expect(((await missing.json()) as ErrorBody).error.code).toBe("unauthorized");
+
+    const malformed = await app.request("/v1/agents", {
+      method: "POST",
+      headers: { authorization: "Token secret", "content-type": "application/json" },
+      body: JSON.stringify({ name: "buyer", dailySpendLimitUsdc: "1", vendorAllowlist: [] }),
+    });
+    expect(malformed.status).toBe(401);
+
+    const unknown = await app.request("/v1/agents/agt_missing/balance", {
+      headers: { authorization: "Bearer sk_sandbox_not_a_real_key" },
+    });
+    expect(unknown.status).toBe(401);
+
+    const treasury = await app.request("/v1/treasury", { headers: auth });
+    expect(treasury.status).toBe(200);
+    const health = await app.request("/health");
+    expect(health.status).toBe(200);
+  });
+});
+
+describe("durable sandbox file", () => {
+  it("reloads organizations, balances, and transactions after a new app opens the same file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "albesa-sandbox-"));
+    const dataFile = join(dir, "sandbox.json");
+    try {
+      const first = createApp({ mode: "sandbox", dataFile });
+      const created = await first.request("/v1/organizations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Acme" }),
+      });
+      expect(created.status).toBe(201);
+      const org = (await created.json()) as OrgBody;
+      const auth = { authorization: `Bearer ${org.apiKey}`, "content-type": "application/json" };
+
+      const agentResponse = await first.request("/v1/agents", {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({
+          name: "buyer",
+          dailySpendLimitUsdc: "10.00",
+          vendorAllowlist: ["vendor_data"],
+        }),
+      });
+      const agentId = ((await agentResponse.json()) as AgentBody).agent.id;
+      await first.request(`/v1/agents/${agentId}/fund`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ amountUsdc: "5.00" }),
+      });
+      const paid = await first.request(`/v1/agents/${agentId}/payments`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ vendorId: "vendor_data", amountUsdc: "0.15", memo: "dataset" }),
+      });
+      expect(paid.status).toBe(200);
+      const blocked = await first.request(`/v1/agents/${agentId}/payments`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ vendorId: "vendor_other", amountUsdc: "0.10" }),
+      });
+      expect(blocked.status).toBe(403);
+
+      const other = await first.request("/v1/organizations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Other" }),
+      });
+      const otherKey = ((await other.json()) as OrgBody).apiKey;
+      const otherAgent = await first.request("/v1/agents", {
+        method: "POST",
+        headers: { authorization: `Bearer ${otherKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ name: "secret", dailySpendLimitUsdc: "1", vendorAllowlist: ["vendor_data"] }),
+      });
+      const otherAgentId = ((await otherAgent.json()) as AgentBody).agent.id;
+
+      const onDisk = readFileSync(dataFile, "utf8");
+      expect(onDisk.includes(org.apiKey)).toBe(false);
+      expect(onDisk.includes(otherKey)).toBe(false);
+      expect(onDisk.includes(createHash("sha256").update(org.apiKey, "utf8").digest("hex"))).toBe(true);
+      expect(onDisk.includes("sk_sandbox_")).toBe(false);
+
+      const second = createApp({ mode: "sandbox", dataFile });
+      const denied = await second.request(`/v1/agents/${agentId}/balance`);
+      expect(denied.status).toBe(401);
+      const wrongOrg = await second.request(`/v1/agents/${otherAgentId}/balance`, { headers: auth });
+      expect(wrongOrg.status).toBe(404);
+
+      const balance = await second.request(`/v1/agents/${agentId}/balance`, { headers: auth });
+      expect(balance.status).toBe(200);
+      expect(((await balance.json()) as { balanceUsdc: string }).balanceUsdc).toBe("4.838500");
+
+      const treasury = await second.request("/v1/treasury", { headers: auth });
+      expect(((await treasury.json()) as { balanceUsdc: string }).balanceUsdc).toBe("995.000000");
+
+      const history = await second.request(`/v1/agents/${agentId}/transactions`, { headers: auth });
+      const transactions = ((await history.json()) as { transactions: { type: string; status: string }[] }).transactions;
+      expect(transactions.map((tx) => `${tx.type}:${tx.status}`)).toEqual([
+        "payment:rejected",
+        "payment:settled",
+        "fund:settled",
+      ]);
+
+      const ledger = await second.request(`/v1/agents/${agentId}/ledger`, { headers: auth });
+      const entries = ((await ledger.json()) as { entries: { direction: string; amountUsdc: string }[] }).entries;
+      expect(entries.map((entry) => `${entry.direction}:${entry.amountUsdc}`)).toEqual([
+        "credit:5.000000",
+        "debit:0.150000",
+        "debit:0.011500",
+      ]);
+
+      const otherBalance = await second.request(`/v1/agents/${otherAgentId}/balance`, {
+        headers: { authorization: `Bearer ${otherKey}` },
+      });
+      expect(otherBalance.status).toBe(200);
+      expect(((await otherBalance.json()) as { balanceUsdc: string }).balanceUsdc).toBe("0.000000");
+
+      const fundedAgain = await second.request(`/v1/agents/${otherAgentId}/fund`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${otherKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ amountUsdc: "1.00" }),
+      });
+      expect(fundedAgain.status).toBe(200);
+      const again = (await fundedAgain.json()) as { transaction: { providerRef: string }; balanceUsdc: string };
+      expect(again.balanceUsdc).toBe("1.000000");
+      expect(again.transaction.providerRef).toBe("mock_tx_4");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a sandbox file that is not version 1", () => {
+    const dir = mkdtempSync(join(tmpdir(), "albesa-bad-"));
+    const dataFile = join(dir, "sandbox.json");
+    try {
+      writeFileSync(dataFile, JSON.stringify({ version: 2 }));
+      expect(() => createApp({ mode: "sandbox", dataFile })).toThrow(/version 1/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

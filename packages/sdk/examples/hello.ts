@@ -1,14 +1,18 @@
 /**
  * Runnable hello path. The five statements below are the developer example.
  * In an app you would import { Albesa } from "@albesa/sdk" and point at a running API.
- * This file boots that API locally so `pnpm demo` works with no keys and no chain.
+ * This file boots that API on a local sandbox file so `pnpm demo` works with no keys and no chain.
  */
 import { serve } from "@hono/node-server";
 import { createApp } from "@albesa/api";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Albesa, createSandboxOrganization } from "../src/index.js";
 
 const port = Number(process.env.PORT ?? 8787);
-const app = createApp({ mode: "sandbox" });
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+const dataFile = process.env.ALBESA_DATA_FILE ?? join(repoRoot, "data", "sandbox.json");
+const app = createApp({ mode: "sandbox", dataFile });
 const server = serve({ fetch: app.fetch, port });
 await new Promise<void>((resolve, reject) => {
   server.once("listening", () => resolve());
@@ -28,6 +32,19 @@ try {
   console.log(
     `${payment.status} ${payment.amountUsdc} USDC to ${payment.vendorId} from ${agent.address} (${payment.id})`,
   );
+
+  const restored = createApp({ mode: "sandbox", dataFile });
+  const balanceResponse = await restored.request(`/v1/agents/${agent.id}/balance`, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  });
+  if (!balanceResponse.ok) {
+    throw new Error(`Restored balance read failed (${balanceResponse.status.toString()}).`);
+  }
+  const restoredBody = (await balanceResponse.json()) as { balanceUsdc?: string };
+  if (restoredBody.balanceUsdc !== payment.balanceUsdc) {
+    throw new Error("Restored balance did not match the settled payment.");
+  }
+  console.log(`restored ${restoredBody.balanceUsdc} USDC for ${agent.id} from ${dataFile}`);
 } finally {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
