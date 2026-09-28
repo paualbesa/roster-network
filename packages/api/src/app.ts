@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { MockWalletProvider, resolveRuntimeMode, type RuntimeMode } from "@albesa/core";
+import { JsonReputationLedger, type ReputationEventInput, type ReputationLedger } from "@albesa/reputation";
 import { AgentFinanceService, ServiceError, type CreateAgentInput, type PaymentInput } from "./service.js";
 import { JsonFileStore } from "./store.js";
 
@@ -18,6 +19,9 @@ export interface AppOptions {
    * Omit it to keep state in memory (tests and one-off callers).
    */
   dataFile?: string;
+  reputation?: ReputationLedger;
+  /** Versioned JSON metrics file. Ignored when `service` or `reputation` is passed. */
+  reputationFile?: string;
 }
 
 export function createApp(options: AppOptions = {}): Hono<AppEnv> {
@@ -96,6 +100,17 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return c.json(result);
   });
 
+  app.post("/v1/agents/:agentId/reputation/events", async (c) => {
+    const input = parseReputationEvent(await readJson(c));
+    const result = await service.recordReputationEvent(c.get("orgId"), c.req.param("agentId"), input);
+    return c.json(result, 201);
+  });
+
+  app.get("/v1/agents/:agentId/passport", async (c) => {
+    const passport = await service.getPassport(c.req.param("agentId"));
+    return c.json({ passport });
+  });
+
   app.onError((error, c) => {
     if (error instanceof ServiceError) {
       const body = error.transaction
@@ -163,14 +178,48 @@ function parsePayment(body: unknown): PaymentInput {
   };
 }
 
+function parseReputationEvent(body: unknown): ReputationEventInput {
+  if (!isRecord(body)) throw new ServiceError(400, "invalid_request", "Expected a JSON object.");
+  const outcome = body.outcome;
+  const latencyMs = body.latencyMs;
+  const volumeUsdc = body.volumeUsdc;
+  if (outcome !== "success" && outcome !== "failure") {
+    throw new ServiceError(400, "invalid_request", 'outcome must be "success" or "failure".');
+  }
+  if (typeof latencyMs !== "number" || typeof volumeUsdc !== "string") {
+    throw new ServiceError(400, "invalid_request", "latencyMs (number) and volumeUsdc (string) are required.");
+  }
+  if (body.error !== undefined && typeof body.error !== "boolean") {
+    throw new ServiceError(400, "invalid_request", "error must be a boolean.");
+  }
+  if (body.hallucination !== undefined && typeof body.hallucination !== "boolean") {
+    throw new ServiceError(400, "invalid_request", "hallucination must be a boolean.");
+  }
+  if (body.sourceRef !== undefined && body.sourceRef !== null && typeof body.sourceRef !== "string") {
+    throw new ServiceError(400, "invalid_request", "sourceRef must be a string.");
+  }
+  return {
+    outcome,
+    latencyMs,
+    volumeUsdc,
+    ...(typeof body.error === "boolean" ? { error: body.error } : {}),
+    ...(typeof body.hallucination === "boolean" ? { hallucination: body.hallucination } : {}),
+    ...(typeof body.sourceRef === "string" || body.sourceRef === null ? { sourceRef: body.sourceRef } : {}),
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function openService(options: AppOptions, mode: RuntimeMode): AgentFinanceService {
+  const reputationPath = options.reputationFile?.trim();
+  const reputation =
+    options.reputation ?? (reputationPath ? JsonReputationLedger.open(reputationPath) : undefined);
   const shared = {
     mode,
     ...(options.now ? { now: options.now } : {}),
+    ...(reputation ? { reputation } : {}),
   };
   const dataFile = options.dataFile?.trim();
   if (!dataFile) return new AgentFinanceService(shared);

@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { JsonReputationLedger } from "@albesa/reputation";
 import { createApp } from "./app.js";
+import { AgentFinanceService } from "./service.js";
 
 interface ErrorBody {
   error: { code: string; message: string };
@@ -338,3 +340,141 @@ describe("durable sandbox file", () => {
     }
   });
 });
+
+interface PassportBody {
+  passport: {
+    score: string;
+    metrics: { volumeSettledUsdc: string; eventCount: number; successRate: string };
+  };
+}
+
+describe("reputation passport", () => {
+  const directories: string[] = [];
+
+  afterEach(() => {
+    for (const directory of directories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("records events and returns the updated passport score", async () => {
+    const { app, auth } = await bootstrap(new Date("2026-09-28T12:00:00.000Z"));
+    const agentId = await createBuyer(app, auth);
+
+    const empty = await app.request(`/v1/agents/${agentId}/passport`, { headers: auth });
+    expect(empty.status).toBe(200);
+    expect(((await empty.json()) as PassportBody).passport.score).toBe("0.0000");
+
+    const recorded = await app.request(`/v1/agents/${agentId}/reputation/events`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ outcome: "success", latencyMs: 500, volumeUsdc: "100", sourceRef: "job_1" }),
+    });
+    expect(recorded.status).toBe(201);
+    expect(((await recorded.json()) as PassportBody).passport.score).toBe("84.7500");
+
+    const failed = await app.request(`/v1/agents/${agentId}/reputation/events`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        outcome: "failure",
+        latencyMs: 3000,
+        volumeUsdc: "50",
+        error: true,
+        hallucination: true,
+      }),
+    });
+    expect(failed.status).toBe(201);
+    expect(((await failed.json()) as PassportBody).passport.score).toBe("26.6250");
+
+    const passport = await app.request(`/v1/agents/${agentId}/passport`, { headers: auth });
+    const body = (await passport.json()) as PassportBody;
+    expect(body.passport.score).toBe("26.6250");
+    expect(body.passport.metrics.volumeSettledUsdc).toBe("100.000000");
+    expect(body.passport.metrics.eventCount).toBe(2);
+    expect(body.passport.metrics.successRate).toBe("0.500000");
+  });
+
+  it("lets another organization read a passport but not record events", async () => {
+    const { app, auth } = await bootstrap();
+    const other = await app.request("/v1/organizations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Other" }),
+    });
+    const otherAuth = {
+      authorization: `Bearer ${((await other.json()) as OrgBody).apiKey}`,
+      "content-type": "application/json",
+    };
+    const agentId = await createBuyer(app, otherAuth);
+
+    const peek = await app.request(`/v1/agents/${agentId}/passport`, { headers: auth });
+    expect(peek.status).toBe(200);
+    expect(((await peek.json()) as PassportBody).passport.score).toBe("0.0000");
+
+    const write = await app.request(`/v1/agents/${agentId}/reputation/events`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ outcome: "success", latencyMs: 10, volumeUsdc: "1" }),
+    });
+    expect(write.status).toBe(404);
+  });
+
+  it("rejects a malformed reputation event", async () => {
+    const { app, auth } = await bootstrap();
+    const agentId = await createBuyer(app, auth);
+    const response = await app.request(`/v1/agents/${agentId}/reputation/events`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ outcome: "success", latencyMs: -1, volumeUsdc: "1" }),
+    });
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as ErrorBody).error.code).toBe("invalid_request");
+  });
+
+  it("updates the passport from an escrow completion hook and reloads it from JSON", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "roster-reputation-"));
+    directories.push(directory);
+    const ledger = JsonReputationLedger.open(join(directory, "reputation.json"));
+    const now = new Date("2026-09-28T12:00:00.000Z");
+    const service = new AgentFinanceService({ mode: "sandbox", now: () => now, reputation: ledger });
+    const org = await service.createOrganization("Acme");
+    const agent = await service.createAgent(org.organization.id, {
+      name: "seller",
+      dailySpendLimitUsdc: "10",
+      vendorAllowlist: ["vendor_data"],
+    });
+    const passport = await service.recordEscrowCompletion({
+      organizationId: org.organization.id,
+      agentId: agent.agent.id,
+      outcome: "success",
+      latencyMs: 500,
+      volumeUsdc: "100",
+      escrowId: "esc_1",
+    });
+    expect(passport.score).toBe("84.7500");
+    expect(passport.metrics.volumeSettledUsdc).toBe("100.000000");
+
+    const reloaded = new AgentFinanceService({
+      mode: "sandbox",
+      reputation: JsonReputationLedger.open(join(directory, "reputation.json")),
+    });
+    const again = await reloaded.getPassport(agent.agent.id);
+    expect(again.score).toBe("84.7500");
+    expect(again.metrics.eventCount).toBe(1);
+  });
+});
+
+async function createBuyer(app: ReturnType<typeof createApp>, auth: Record<string, string>): Promise<string> {
+  const created = await app.request("/v1/agents", {
+    method: "POST",
+    headers: auth,
+    body: JSON.stringify({
+      name: "seller",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: ["vendor_data"],
+    }),
+  });
+  expect(created.status).toBe(201);
+  return ((await created.json()) as AgentBody).agent.id;
+}

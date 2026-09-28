@@ -89,6 +89,8 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `GET` | `/v1/agents/:id/transactions` | Fund and payment history |
 | `GET` | `/v1/agents/:id/ledger` | Credits and debits for the agent wallet |
 | `GET` | `/v1/treasury` | Treasury wallet and balance |
+| `POST` | `/v1/agents/:id/reputation/events` | Record a reliability event for that agent |
+| `GET` | `/v1/agents/:id/passport` | Public reputation passport (any API key) |
 | `GET` | `/health` | Process check (`product: "Roster"`, `rail: mock`) |
 
 `POST /v1/organizations` and `GET /health` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
@@ -105,12 +107,38 @@ Before any send, `evaluateSpend` in `@albesa/core`:
 
 The sandbox fee is extra and does not count toward the daily limit. Funding from the treasury is not a vendor payment, so the policy does not apply to it.
 
+## Reputation passport
+
+Roster keeps a **mock** reliability ledger per agent. Nothing here is written to a chain. Callers record a job outcome, or a future escrow package calls `recordEscrowCompletion` on `AgentFinanceService` when a job releases or fails. Only the organization that owns the agent can record. Any authenticated caller can read the passport.
+
+```bash
+curl -s -X POST "http://127.0.0.1:8787/v1/agents/$AGENT_ID/reputation/events" \
+  -H "authorization: Bearer $ALBESA_API_KEY" \
+  -H 'content-type: application/json' \
+  -d '{"outcome":"success","latencyMs":500,"volumeUsdc":"100"}'
+```
+
+`GET /v1/agents/:id/passport` returns `score` from `0.0000` to `100.0000` using formula `roster.passport.v1`:
+
+```text
+successRate   = successCount / eventCount
+errorIndex    = min(1, (errorCount + hallucinationCount) / eventCount)
+latencyFactor = max(0, 1 - avgLatencyMs / 2000)
+volumeFactor  = min(1, volumeSettledUsdc / 1000)
+score         = 100 * (0.45*successRate + 0.25*latencyFactor + 0.20*(1-errorIndex) + 0.10*volumeFactor)
+```
+
+Settled volume increases only when `outcome` is `"success"`. With zero events the score is `0.0000`. Rates are floored to 6 decimal places and the score is floored to 4. The same object is on every passport as `formula`.
+
+The API process writes the metrics ledger to `data/reputation.json` (override with `ROSTER_REPUTATION_FILE`): versioned JSON, atomic replace. Wallets, organizations, and the payment ledger stay in the sandbox file (`ALBESA_DATA_FILE`).
+
 ## Repo map
 
 ```text
-packages/core   Domain types, USDC math, policy engine, wallet provider interface
-packages/api    Hono HTTP API, JSON sandbox file, and ledger
-packages/sdk    TypeScript client used by the sandbox payment demo
+packages/core        Domain types, USDC math, policy engine, wallet provider interface
+packages/reputation  Passport score, metrics ledger, escrow completion hook
+packages/api         Hono HTTP API, JSON sandbox file, and ledger
+packages/sdk         TypeScript client used by the sandbox payment demo
 ```
 
 `MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. `BaseUsdcWalletProvider` implements the same interface and throws on every call.

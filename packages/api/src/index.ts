@@ -9,6 +9,7 @@ export type {
   FundResult,
   PaymentInput,
   PaymentResult,
+  RecordReputationResult,
   ServiceOptions,
   TreasuryResult,
 } from "./service.js";
