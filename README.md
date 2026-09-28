@@ -11,7 +11,7 @@ This repository is the v0 scaffold. Payments settle on an **in-memory mock rail*
 3. Fund the agent from the organization treasury.
 4. The agent pays a vendor. The policy engine runs first. Compliant payments settle and a sandbox fee is recorded: **1% + 0.01 USDC**.
 
-State lives in the API process. Restarting the server clears it.
+State lives in a JSON file (`ALBESA_DATA_FILE`, default `data/sandbox.json` in the API process working directory). Restarting the API reloads organizations, agents, policies, mock balances, transactions, and the ledger. `createApp()` without `dataFile` keeps the in-memory store for tests. One API process should own a given file.
 
 ## Pricing context
 
@@ -25,7 +25,7 @@ Fees below are the product plan, not a live billing integration. v0 always appli
 
 ## Hello, agent payment
 
-Start the API (`pnpm dev`), create an organization, and export the returned `apiKey` as `ALBESA_API_KEY`. Then:
+Start the API (`pnpm dev`). `POST /v1/organizations` needs no key. Copy `apiKey` from that response into `ALBESA_API_KEY`. The secret is shown once. Later calls, including the SDK, send `Authorization: Bearer <api key>`. The API stores only the SHA-256 hash. Then:
 
 ```typescript
 import { Albesa } from "@albesa/sdk";
@@ -59,7 +59,7 @@ curl -s -X POST http://127.0.0.1:8787/v1/organizations \
   -d '{"name":"Acme"}'
 ```
 
-Use the `apiKey` from that response:
+Use the `apiKey` from that response on every later call. The header is `Authorization: Bearer <api key>`:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8787/v1/agents \
@@ -80,6 +80,8 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `GET` | `/v1/treasury` | Treasury wallet and balance |
 | `GET` | `/health` | Process check (`rail: mock`) |
 
+`POST /v1/organizations` and `GET /health` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
+
 Set `ALBESA_MODE=testnet` to label the org as testnet. v0 still uses the mock adapter, and testnet orgs do **not** receive the 1000 USDC grant. `ALBESA_MODE=mainnet` exits on startup.
 
 ## Policy
@@ -96,7 +98,7 @@ The sandbox fee is extra and does not count toward the daily limit. Funding from
 
 ```text
 packages/core   Domain types, USDC math, policy engine, wallet provider interface
-packages/api    Hono HTTP API and in-memory ledger
+packages/api    Hono HTTP API, JSON sandbox file, and ledger
 packages/sdk    TypeScript client used in the hello example
 ```
 
@@ -118,6 +120,6 @@ CI on pull requests and pushes to `main` runs lint, typecheck, and tests.
 
 ## Safety
 
-- Sandbox and testnet mock paths only. No chain RPC client is installed.
-- Do not commit `.env` files, API keys, or key material. Runtime sandbox keys are random and stay in memory.
+- Sandbox and testnet mock paths only. No chain RPC client is installed. `MockWalletProvider` is still the only settlement path.
+- Do not commit `.env` files or `data/`. Sandbox API keys are random. The data file stores a SHA-256 hash, and the secret is returned once when the organization is created.
 - The Base adapter's options object has no field for a private key, mnemonic, or seed.

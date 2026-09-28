@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import type { RuntimeMode } from "@albesa/core";
-import { resolveRuntimeMode } from "@albesa/core";
+import { MockWalletProvider, resolveRuntimeMode, type RuntimeMode } from "@albesa/core";
 import { AgentFinanceService, ServiceError, type CreateAgentInput, type PaymentInput } from "./service.js";
+import { JsonFileStore } from "./store.js";
 
 type AppEnv = {
   Variables: {
@@ -13,16 +13,16 @@ export interface AppOptions {
   mode?: RuntimeMode;
   now?: () => Date;
   service?: AgentFinanceService;
+  /**
+   * JSON file for organizations, agents, balances, and the ledger.
+   * Omit it to keep state in memory (tests and one-off callers).
+   */
+  dataFile?: string;
 }
 
 export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const mode = options.mode ?? resolveRuntimeMode();
-  const service =
-    options.service ??
-    new AgentFinanceService({
-      mode,
-      ...(options.now ? { now: options.now } : {}),
-    });
+  const service = options.service ?? openService(options, mode);
   const app = new Hono<AppEnv>();
 
   app.get("/health", (c) => c.json({ ok: true, mode, rail: "mock", asset: "USDC" }));
@@ -165,4 +165,17 @@ function parsePayment(body: unknown): PaymentInput {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function openService(options: AppOptions, mode: RuntimeMode): AgentFinanceService {
+  const shared = {
+    mode,
+    ...(options.now ? { now: options.now } : {}),
+  };
+  const dataFile = options.dataFile?.trim();
+  if (!dataFile) return new AgentFinanceService(shared);
+  const store = JsonFileStore.open(dataFile);
+  const wallets = new MockWalletProvider();
+  wallets.importState(store.readWalletState());
+  return new AgentFinanceService({ ...shared, store, wallets });
 }

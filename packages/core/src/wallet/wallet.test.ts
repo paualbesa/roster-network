@@ -28,6 +28,29 @@ describe("MockWalletProvider", () => {
       }),
     ).rejects.toThrow(/Insufficient balance/);
   });
+
+  it("restores balances and continues the transfer sequence", async () => {
+    const first = new MockWalletProvider();
+    const treasury = await first.createAddress("treasury:org_1");
+    await first.credit(treasury.address, "2");
+    await first.transfer({
+      fromAddress: treasury.address,
+      toAddress: "mock:vendor:vendor_data",
+      amountUsdc: "0.50",
+      idempotencyKey: "pay_1",
+    });
+    const second = new MockWalletProvider();
+    second.importState(first.exportState());
+    expect(await second.getBalance(treasury.address)).toBe("1.500000");
+    const next = await second.transfer({
+      fromAddress: treasury.address,
+      toAddress: "mock:vendor:vendor_data",
+      amountUsdc: "0.25",
+      idempotencyKey: "pay_2",
+    });
+    expect(next.providerRef).toBe("mock_tx_2");
+    expect(await second.getBalance(treasury.address)).toBe("1.250000");
+  });
 });
 
 describe("BaseUsdcWalletProvider", () => {
