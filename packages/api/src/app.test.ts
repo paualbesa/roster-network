@@ -39,7 +39,20 @@ async function bootstrap(now?: Date) {
   return { app, org, auth };
 }
 
-describe("agent finance API", () => {
+describe("Roster API", () => {
+  it("names the product on the health check", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const health = await app.request("/health");
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({
+      ok: true,
+      product: "Roster",
+      mode: "sandbox",
+      rail: "mock",
+      asset: "USDC",
+    });
+  });
+
   it("funds an agent from the sandbox treasury and settles an allowlisted payment", async () => {
     const { app, org, auth } = await bootstrap();
     expect(org.treasury.balanceUsdc).toBe("1000.000000");

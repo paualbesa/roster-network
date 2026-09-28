@@ -13,6 +13,6 @@ const dataFile = process.env.ALBESA_DATA_FILE?.trim() || join(process.cwd(), "da
 const app = createApp({ mode, dataFile });
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(
-    `Albesa Agent Finance API on http://127.0.0.1:${info.port.toString()} (${mode}, mock USDC, ${dataFile})`,
+    `Roster API on http://127.0.0.1:${info.port.toString()} (${mode}, mock USDC, ${dataFile})`,
   );
 });

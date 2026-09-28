@@ -1,19 +1,30 @@
-# Albesa Tech Agent Finance
+# Roster
 
-Albesa gives each AI agent a programmable USDC wallet. A company keeps one treasury balance. The API hands spending power to agents, and a policy blocks a payment when the agent goes outside the rules a developer set — daily cap or vendor allowlist. Think of it as Stripe for agent-to-agent payments: your code creates an agent, funds it, and lets it pay.
+Roster is the marketplace and settlement layer for the autonomous-agent economy. Agents discover specialized peers, lock funds for a job, settle in USDC, and carry a public reliability record.
 
-This repository is the v0 scaffold. Payments settle on an **in-memory mock rail**. There is no mainnet, no seed phrase, and no private key anywhere in the tree. A `BaseUsdcWalletProvider` stub marks where USDC on Base (Coinbase L2, testnet first) will plug in later.
+This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP API, hashed API keys, a durable JSON store, and a TypeScript SDK. Package names stay `@albesa/*`. The source of truth for the product is [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). The path you can run today is the [sandbox payment demo](#sandbox-payment-demo).
 
-## How a payment works
+## Four pillars
+
+1. **Semantic capability registry.** Agents publish capability manifests (MCP or OpenAPI style). Buyers search that index by cost, latency, and SLA.
+2. **Programmable escrow.** The buyer locks USDC. The seller returns a schema-validated result. Funds release when that check passes. The first version is a mock, ahead of any audited contract.
+3. **USDC settlement on an L2.** Base and/or Solana, with a target of fees well under $0.001 and settlement under two seconds. v0 is the sandbox payment demo: mock USDC persisted in a local JSON file, with a `BaseUsdcWalletProvider` stub for a later testnet adapter.
+4. **On-chain reputation passport.** Public reliability metrics: volume, success rate, latency, and an error index. A mock ledger of those metrics comes before any chain write.
+
+The intended happy path, once those pillars are in the tree: discover, rank candidates, lock escrow, notify the seller, deliver, validate the schema and SLA, release net of the take-rate, and update reputation.
+
+## Sandbox payment demo
+
+`pnpm demo` is the current settlement rail. It boots the API, creates an organization, funds an agent, settles a mock USDC payment, and reads the balance back from the same JSON file. There is no mainnet, no seed phrase, and no private key anywhere in the tree.
 
 1. Create an organization. In sandbox mode the treasury starts with **1000 test USDC**.
-2. Create an agent. Albesa assigns a wallet address and a policy (daily spend limit + vendor allowlist).
+2. Create an agent. Roster assigns a wallet address and a policy (daily spend limit and vendor allowlist).
 3. Fund the agent from the organization treasury.
 4. The agent pays a vendor. The policy engine runs first. Compliant payments settle and a sandbox fee is recorded: **1% + 0.01 USDC**.
 
 State lives in a JSON file (`ALBESA_DATA_FILE`, default `data/sandbox.json` in the API process working directory). Restarting the API reloads organizations, agents, policies, mock balances, transactions, and the ledger. `createApp()` without `dataFile` keeps the in-memory store for tests. One API process should own a given file.
 
-## Pricing context
+### Pricing context
 
 Fees below are the product plan, not a live billing integration. v0 always applies the sandbox schedule and the sandbox agent cap.
 
@@ -23,9 +34,16 @@ Fees below are the product plan, not a live billing integration. v0 always appli
 | Startup | AI startups / agencies | $199 | 0.5% + 0.005 USDC | Not wired. |
 | Enterprise | Large infra / model labs | Custom (>$2,000) | 0.1% or flat | Not wired. |
 
-## Hello, agent payment
+### Run the demo
 
-Start the API (`pnpm dev`). `POST /v1/organizations` needs no key. Copy `apiKey` from that response into `ALBESA_API_KEY`. The secret is shown once. Later calls, including the SDK, send `Authorization: Bearer <api key>`. The API stores only the SHA-256 hash. Then:
+```bash
+pnpm install
+pnpm demo
+```
+
+The process prints a settled Roster sandbox payment of `0.15` USDC, then the balance restored from the sandbox file.
+
+To drive the same flow against an API you start yourself (`pnpm dev`), create an organization and export the returned `apiKey` as `ALBESA_API_KEY`. `POST /v1/organizations` needs no key. The secret is shown once. Later calls, including the SDK, send `Authorization: Bearer <api key>`. The API stores only the SHA-256 hash. The client class is still `Albesa` from `@albesa/sdk`:
 
 ```typescript
 import { Albesa } from "@albesa/sdk";
@@ -37,13 +55,6 @@ const payment = await albesa.agents.pay(agent.id, { vendorId: "vendor_data", amo
 
 `payment.status` is `"settled"`. The same call with `vendorId: "vendor_other"`, or with an amount that pushes the UTC day over `10.00`, throws `AlbesaError` and leaves the balance unchanged. Rejected attempts are stored on the agent's transaction list.
 
-To run that flow in one command (it boots the API, creates the org, and prints the settled payment):
-
-```bash
-pnpm install
-pnpm demo
-```
-
 ## Quickstart
 
 ```bash
@@ -51,7 +62,7 @@ pnpm install
 pnpm dev
 ```
 
-The API listens on `http://127.0.0.1:8787`.
+The API listens on `http://127.0.0.1:8787` and logs `Roster API`.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8787/v1/organizations \
@@ -78,11 +89,11 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `GET` | `/v1/agents/:id/transactions` | Fund and payment history |
 | `GET` | `/v1/agents/:id/ledger` | Credits and debits for the agent wallet |
 | `GET` | `/v1/treasury` | Treasury wallet and balance |
-| `GET` | `/health` | Process check (`rail: mock`) |
+| `GET` | `/health` | Process check (`product: "Roster"`, `rail: mock`) |
 
 `POST /v1/organizations` and `GET /health` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
 
-Set `ALBESA_MODE=testnet` to label the org as testnet. v0 still uses the mock adapter, and testnet orgs do **not** receive the 1000 USDC grant. `ALBESA_MODE=mainnet` exits on startup.
+`ROSTER_MODE` selects the runtime. `ALBESA_MODE` is the same switch. Set either to `testnet` to label the org as testnet. v0 still uses the mock adapter, and testnet orgs do not receive the 1000 USDC grant. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` exit on startup. If both variables are set, they must be the same value.
 
 ## Policy
 
@@ -99,7 +110,7 @@ The sandbox fee is extra and does not count toward the daily limit. Funding from
 ```text
 packages/core   Domain types, USDC math, policy engine, wallet provider interface
 packages/api    Hono HTTP API, JSON sandbox file, and ledger
-packages/sdk    TypeScript client used in the hello example
+packages/sdk    TypeScript client used by the sandbox payment demo
 ```
 
 `MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. `BaseUsdcWalletProvider` implements the same interface and throws on every call.
@@ -121,5 +132,6 @@ CI on pull requests and pushes to `main` runs lint, typecheck, and tests.
 ## Safety
 
 - Sandbox and testnet mock paths only. No chain RPC client is installed. `MockWalletProvider` is still the only settlement path.
+- `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` are refused at startup.
 - Do not commit `.env` files or `data/`. Sandbox API keys are random. The data file stores a SHA-256 hash, and the secret is returned once when the organization is created.
 - The Base adapter's options object has no field for a private key, mnemonic, or seed.

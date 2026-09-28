@@ -71,9 +71,24 @@ describe("BaseUsdcWalletProvider", () => {
 });
 
 describe("resolveRuntimeMode", () => {
-  it("defaults to sandbox and rejects mainnet", () => {
+  it("defaults to sandbox and accepts either mode alias", () => {
     expect(resolveRuntimeMode({})).toBe("sandbox");
     expect(resolveRuntimeMode({ ALBESA_MODE: "testnet" })).toBe("testnet");
+    expect(resolveRuntimeMode({ ROSTER_MODE: "testnet" })).toBe("testnet");
+    expect(resolveRuntimeMode({ ROSTER_MODE: "  ", ALBESA_MODE: "testnet" })).toBe("testnet");
+    expect(resolveRuntimeMode({ ROSTER_MODE: "sandbox", ALBESA_MODE: "sandbox" })).toBe("sandbox");
+  });
+
+  it("rejects mainnet on ROSTER_MODE and ALBESA_MODE", () => {
     expect(() => resolveRuntimeMode({ ALBESA_MODE: "mainnet" })).toThrow(/mainnet is disabled/);
+    expect(() => resolveRuntimeMode({ ROSTER_MODE: "mainnet" })).toThrow(/mainnet is disabled/);
+    expect(() => resolveRuntimeMode({ ROSTER_MODE: "mainnet", ALBESA_MODE: "mainnet" })).toThrow(
+      /mainnet is disabled/,
+    );
+  });
+
+  it("rejects a disagreement or an unknown value", () => {
+    expect(() => resolveRuntimeMode({ ROSTER_MODE: "sandbox", ALBESA_MODE: "testnet" })).toThrow(/disagree/);
+    expect(() => resolveRuntimeMode({ ROSTER_MODE: "prod" })).toThrow(/Unsupported runtime mode/);
   });
 });

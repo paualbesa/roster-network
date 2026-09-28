@@ -1,5 +1,6 @@
 {
   "name": "@albesa/core",
+  "description": "Roster domain types, spend policies, and mock USDC wallets.",
   "version": "0.0.0",
   "private": true,
   "type": "module",
