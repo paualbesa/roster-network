@@ -1,6 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Agent, LedgerEntry, MockWalletSnapshot, Organization, Policy, Transaction, Wallet } from "@albesa/core";
+import type {
+  Agent,
+  Escrow,
+  LedgerEntry,
+  MockWalletSnapshot,
+  Organization,
+  Policy,
+  Transaction,
+  Wallet,
+} from "@albesa/core";
 
 const FILE_VERSION = 1;
 
@@ -21,6 +30,7 @@ export class MemoryStore {
   readonly agents = new Map<string, Agent>();
   readonly wallets = new Map<string, Wallet>();
   readonly policies = new Map<string, Policy>();
+  readonly escrows = new Map<string, Escrow>();
   readonly transactions: Transaction[] = [];
   readonly ledger: LedgerEntry[] = [];
 
@@ -38,6 +48,7 @@ interface FileDocument {
   agents: Agent[];
   wallets: Wallet[];
   policies: Policy[];
+  escrows: Escrow[];
   transactions: Transaction[];
   ledger: LedgerEntry[];
   wallet: MockWalletSnapshot;
@@ -45,7 +56,8 @@ interface FileDocument {
 
 /**
  * JSON file for one API process. Writes are atomic (temp file, then rename).
- * Wallet balances are included so a restart can refill the mock wallet provider.
+ * Wallet balances are included so a restart can refill the mock wallet provider,
+ * including escrow custody holds. Escrows are optional on older version-1 files.
  */
 export class JsonFileStore extends MemoryStore {
   private wallet: MockWalletSnapshot = { balances: [], sequence: 0 };
@@ -94,6 +106,7 @@ export class JsonFileStore extends MemoryStore {
     for (const agent of document.agents) this.agents.set(agent.id, agent);
     for (const wallet of document.wallets) this.wallets.set(wallet.id, wallet);
     for (const policy of document.policies) this.policies.set(policy.id, policy);
+    for (const escrow of document.escrows) this.escrows.set(escrow.id, escrow);
     this.transactions.push(...document.transactions);
     this.ledger.push(...document.ledger);
     this.wallet = document.wallet;
@@ -107,6 +120,7 @@ export class JsonFileStore extends MemoryStore {
       agents: [...this.agents.values()],
       wallets: [...this.wallets.values()],
       policies: [...this.policies.values()],
+      escrows: [...this.escrows.values()],
       transactions: this.transactions.slice(),
       ledger: this.ledger.slice(),
       wallet: this.readWalletState(),
@@ -130,6 +144,7 @@ function parseDocument(value: unknown): FileDocument {
     agents: asEntities<Agent>(value.agents, "agents"),
     wallets: asEntities<Wallet>(value.wallets, "wallets"),
     policies: asEntities<Policy>(value.policies, "policies"),
+    escrows: value.escrows === undefined ? [] : asEntities<Escrow>(value.escrows, "escrows"),
     transactions: asEntities<Transaction>(value.transactions, "transactions"),
     ledger: asEntities<LedgerEntry>(value.ledger, "ledger"),
     wallet: parseWallet(value.wallet),

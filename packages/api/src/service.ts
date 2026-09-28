@@ -3,21 +3,29 @@ import {
   compareUsdc,
   createId,
   createSandboxApiKey,
+  decideSettlement,
+  EscrowSchemaError,
+  EscrowTransitionError,
   evaluateSpend,
   formatUsdc,
   hashSandboxApiKey,
   MockWalletProvider,
+  parseResultSchema,
   parseUsdc,
+  quoteEscrowSettlement,
   quoteSandboxFee,
   SANDBOX_MAX_ACTIVE_AGENTS,
   SANDBOX_TREASURY_GRANT_USDC,
   sumSpentTodayUsdc,
+  WalletProviderError,
   type Agent,
+  type Escrow,
   type LedgerDirection,
   type LedgerEntry,
   type Organization,
   type Policy,
   type RuntimeMode,
+  type SchemaValidationHook,
   type Transaction,
   type Wallet,
   type WalletProvider,
@@ -107,6 +115,33 @@ export interface TreasuryResult {
   balanceUsdc: string;
 }
 
+export interface CreateEscrowInput {
+  buyerAgentId: string;
+  sellerAgentId: string;
+  amountUsdc: string;
+  schema: unknown;
+  memo: string | null;
+}
+
+export interface EscrowNotification {
+  type: "escrow.held";
+  escrowId: string;
+  sellerAgentId: string;
+  buyerAgentId: string;
+  amountUsdc: string;
+  notifiedAt: string;
+}
+
+export interface EscrowResult {
+  escrow: Escrow;
+  buyerBalanceUsdc: string;
+  sellerBalanceUsdc: string;
+}
+
+export interface CreateEscrowResult extends EscrowResult {
+  notification: EscrowNotification;
+}
+
 const NAME_MAX = 80;
 const VENDOR_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -121,6 +156,7 @@ export interface ServiceOptions {
   wallets?: WalletProvider;
   store?: MemoryStore;
   reputation?: ReputationLedger;
+  schemaHook?: SchemaValidationHook;
 }
 
 export class AgentFinanceService implements ReputationHook {
@@ -129,6 +165,7 @@ export class AgentFinanceService implements ReputationHook {
   private readonly reputation: ReputationLedger;
   private readonly mode: RuntimeMode;
   private readonly now: () => Date;
+  private readonly schemaHook: SchemaValidationHook | null;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: ServiceOptions = {}) {
@@ -137,6 +174,7 @@ export class AgentFinanceService implements ReputationHook {
     this.reputation = options.reputation ?? new MemoryReputationLedger();
     this.mode = options.mode ?? "sandbox";
     this.now = options.now ?? (() => new Date());
+    this.schemaHook = options.schemaHook ?? null;
   }
 
   authenticate(apiKey: string): string | null {
@@ -216,6 +254,27 @@ export class AgentFinanceService implements ReputationHook {
       signal.agentId,
       reputationEventFromEscrow(signal),
     ).then((result) => result.passport);
+  }
+
+  createEscrow(organizationId: string, input: CreateEscrowInput): Promise<CreateEscrowResult> {
+    return this.enqueue(() => this.createEscrowUnlocked(organizationId, input));
+  }
+
+  submitEscrowResult(organizationId: string, escrowId: string, result: unknown): Promise<EscrowResult> {
+    return this.enqueue(() => this.submitEscrowResultUnlocked(organizationId, escrowId, result));
+  }
+
+  getEscrow(organizationId: string, escrowId: string): Promise<EscrowResult> {
+    return this.enqueue(() => this.escrowView(this.requireEscrow(organizationId, escrowId)));
+  }
+
+  listEscrows(organizationId: string): Promise<Escrow[]> {
+    return this.enqueue(async () => {
+      this.requireOrganization(organizationId);
+      return [...this.store.escrows.values()]
+        .filter((escrow) => escrow.organizationId === organizationId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    });
   }
 
   listLedger(organizationId: string, walletId: string): Promise<LedgerEntry[]> {
@@ -630,6 +689,304 @@ export class AgentFinanceService implements ReputationHook {
     };
     this.reputation.append(next, event);
     return { event, passport: projectPassport(next) };
+  }
+
+  private async createEscrowUnlocked(organizationId: string, input: CreateEscrowInput): Promise<CreateEscrowResult> {
+    const organization = this.requireOrganization(organizationId);
+    const canonical = this.parsePositiveAmount(input.amountUsdc);
+    const schema = this.parseEscrowSchema(input.schema);
+    const memo = normalizeMemo(input.memo);
+    if (input.buyerAgentId === input.sellerAgentId) {
+      throw new ServiceError(400, "invalid_request", "Buyer and seller must be different agents.");
+    }
+    const buyer = this.requireActiveAgent(organization.id, input.buyerAgentId);
+    const seller = this.requireActiveAgent(organization.id, input.sellerAgentId);
+    const quote = quoteEscrowSettlement(canonical);
+    const buyerWallet = this.requireWallet(buyer.walletId);
+    const sellerWallet = this.requireWallet(seller.walletId);
+    const buyerBalance = await this.wallets.getBalance(buyerWallet.address);
+    if (compareUsdc(buyerBalance, canonical) < 0) {
+      throw new ServiceError(409, "insufficient_balance", "Buyer balance cannot cover the escrow lock.");
+    }
+
+    const createdAt = this.now().toISOString();
+    const escrowId = createId("esc");
+    const transactionId = createId("txn");
+    const minted = await this.wallets.createAddress(`escrow:${escrowId}`);
+    const transfer = await this.transferOrInsufficient({
+      fromAddress: buyerWallet.address,
+      toAddress: minted.address,
+      amountUsdc: canonical,
+      idempotencyKey: `${escrowId}:lock`,
+    });
+    const escrow: Escrow = {
+      id: escrowId,
+      organizationId: organization.id,
+      buyerAgentId: buyer.id,
+      sellerAgentId: seller.id,
+      buyerWalletId: buyerWallet.id,
+      sellerWalletId: sellerWallet.id,
+      amountUsdc: canonical,
+      takeRateBps: quote.takeRateBps,
+      takeRateUsdc: quote.takeRateUsdc,
+      sellerNetUsdc: quote.sellerNetUsdc,
+      status: "held",
+      schema,
+      result: null,
+      validationErrors: null,
+      holdAddress: minted.address,
+      chain: transfer.chain,
+      asset: "USDC",
+      lockProviderRef: transfer.providerRef,
+      settlementProviderRef: null,
+      feeProviderRef: null,
+      memo,
+      createdAt,
+      notifiedAt: createdAt,
+      settledAt: null,
+    };
+    await this.appendLedger({
+      organizationId: organization.id,
+      wallet: buyerWallet,
+      transactionId,
+      direction: "debit",
+      amountUsdc: canonical,
+      memo: `Escrow hold ${escrowId}`,
+      createdAt,
+    });
+    this.store.transactions.push({
+      id: transactionId,
+      organizationId: organization.id,
+      agentId: buyer.id,
+      type: "escrow_lock",
+      status: "settled",
+      fromWalletId: buyerWallet.id,
+      toAddress: minted.address,
+      vendorId: null,
+      amountUsdc: canonical,
+      feeUsdc: "0.000000",
+      rejectionReason: null,
+      providerRef: transfer.providerRef,
+      chain: transfer.chain,
+      memo: memo ?? `Lock escrow ${escrowId}`,
+      escrowId,
+      createdAt,
+    });
+    this.store.escrows.set(escrow.id, escrow);
+    this.commit();
+    const balances = await this.escrowBalances(escrow);
+    return {
+      escrow,
+      notification: {
+        type: "escrow.held",
+        escrowId: escrow.id,
+        sellerAgentId: seller.id,
+        buyerAgentId: buyer.id,
+        amountUsdc: canonical,
+        notifiedAt: createdAt,
+      },
+      ...balances,
+    };
+  }
+
+  private async submitEscrowResultUnlocked(
+    organizationId: string,
+    escrowId: string,
+    result: unknown,
+  ): Promise<EscrowResult> {
+    const escrow = this.requireEscrow(organizationId, escrowId);
+    let decision: ReturnType<typeof decideSettlement>;
+    try {
+      decision = this.schemaHook
+        ? decideSettlement(escrow.status, escrow.schema, result, this.schemaHook)
+        : decideSettlement(escrow.status, escrow.schema, result);
+    } catch (error) {
+      if (error instanceof EscrowTransitionError) {
+        throw new ServiceError(409, "invalid_state", error.message);
+      }
+      throw error;
+    }
+
+    const settledAt = this.now().toISOString();
+    const moved =
+      decision.status === "released"
+        ? await this.releaseEscrow(escrow, settledAt)
+        : await this.refundEscrow(escrow, settledAt);
+    const settled: Escrow = {
+      ...escrow,
+      status: decision.status,
+      result,
+      validationErrors: decision.validationErrors,
+      settlementProviderRef: moved.settlementProviderRef,
+      feeProviderRef: moved.feeProviderRef,
+      settledAt,
+    };
+    this.store.escrows.set(escrow.id, settled);
+    this.commit();
+    return this.escrowView(settled);
+  }
+
+  private async releaseEscrow(
+    escrow: Escrow,
+    createdAt: string,
+  ): Promise<{ settlementProviderRef: string; feeProviderRef: string | null }> {
+    const gross = parseUsdc(escrow.amountUsdc);
+    const take = parseUsdc(escrow.takeRateUsdc);
+    const net = parseUsdc(escrow.sellerNetUsdc);
+    if (take + net !== gross || take < 0n || net < 0n) {
+      throw new Error("Escrow settlement amounts do not balance.");
+    }
+    const sellerWallet = this.requireWallet(escrow.sellerWalletId);
+    const transactionId = createId("txn");
+    let settlementProviderRef: string | null = null;
+    let feeProviderRef: string | null = null;
+    if (net > 0n) {
+      const payout = await this.wallets.transfer({
+        fromAddress: escrow.holdAddress,
+        toAddress: sellerWallet.address,
+        amountUsdc: escrow.sellerNetUsdc,
+        idempotencyKey: `${escrow.id}:release`,
+      });
+      settlementProviderRef = payout.providerRef;
+      await this.appendLedger({
+        organizationId: escrow.organizationId,
+        wallet: sellerWallet,
+        transactionId,
+        direction: "credit",
+        amountUsdc: escrow.sellerNetUsdc,
+        memo: `Escrow release ${escrow.id}`,
+        createdAt,
+      });
+    }
+    if (take > 0n) {
+      const fee = await this.wallets.transfer({
+        fromAddress: escrow.holdAddress,
+        toAddress: `mock:fees:${escrow.organizationId}`,
+        amountUsdc: escrow.takeRateUsdc,
+        idempotencyKey: `${escrow.id}:fee`,
+      });
+      feeProviderRef = fee.providerRef;
+    }
+    const providerRef = settlementProviderRef ?? feeProviderRef;
+    if (!providerRef) {
+      throw new Error("Escrow release did not move funds.");
+    }
+    this.store.transactions.push({
+      id: transactionId,
+      organizationId: escrow.organizationId,
+      agentId: escrow.sellerAgentId,
+      type: "escrow_release",
+      status: "settled",
+      fromWalletId: null,
+      toAddress: sellerWallet.address,
+      vendorId: null,
+      amountUsdc: escrow.sellerNetUsdc,
+      feeUsdc: escrow.takeRateUsdc,
+      rejectionReason: null,
+      providerRef,
+      chain: escrow.chain,
+      memo: `Escrow ${escrow.id} released to seller`,
+      escrowId: escrow.id,
+      createdAt,
+    });
+    return { settlementProviderRef: providerRef, feeProviderRef };
+  }
+
+  private async refundEscrow(
+    escrow: Escrow,
+    createdAt: string,
+  ): Promise<{ settlementProviderRef: string; feeProviderRef: null }> {
+    const buyerWallet = this.requireWallet(escrow.buyerWalletId);
+    const transactionId = createId("txn");
+    const transfer = await this.wallets.transfer({
+      fromAddress: escrow.holdAddress,
+      toAddress: buyerWallet.address,
+      amountUsdc: escrow.amountUsdc,
+      idempotencyKey: `${escrow.id}:refund`,
+    });
+    await this.appendLedger({
+      organizationId: escrow.organizationId,
+      wallet: buyerWallet,
+      transactionId,
+      direction: "credit",
+      amountUsdc: escrow.amountUsdc,
+      memo: `Escrow refund ${escrow.id}`,
+      createdAt,
+    });
+    this.store.transactions.push({
+      id: transactionId,
+      organizationId: escrow.organizationId,
+      agentId: escrow.buyerAgentId,
+      type: "escrow_refund",
+      status: "settled",
+      fromWalletId: null,
+      toAddress: buyerWallet.address,
+      vendorId: null,
+      amountUsdc: escrow.amountUsdc,
+      feeUsdc: "0.000000",
+      rejectionReason: null,
+      providerRef: transfer.providerRef,
+      chain: transfer.chain,
+      memo: `Escrow ${escrow.id} refunded to buyer`,
+      escrowId: escrow.id,
+      createdAt,
+    });
+    return { settlementProviderRef: transfer.providerRef, feeProviderRef: null };
+  }
+
+  private async escrowView(escrow: Escrow): Promise<EscrowResult> {
+    const balances = await this.escrowBalances(escrow);
+    return { escrow, ...balances };
+  }
+
+  private async escrowBalances(escrow: Escrow): Promise<{ buyerBalanceUsdc: string; sellerBalanceUsdc: string }> {
+    const buyer = this.requireWallet(escrow.buyerWalletId);
+    const seller = this.requireWallet(escrow.sellerWalletId);
+    return {
+      buyerBalanceUsdc: await this.wallets.getBalance(buyer.address),
+      sellerBalanceUsdc: await this.wallets.getBalance(seller.address),
+    };
+  }
+
+  private parseEscrowSchema(schema: unknown): Escrow["schema"] {
+    try {
+      return parseResultSchema(schema);
+    } catch (error) {
+      if (error instanceof EscrowSchemaError) {
+        throw new ServiceError(400, "invalid_schema", error.message);
+      }
+      throw error;
+    }
+  }
+
+  private async transferOrInsufficient(request: {
+    fromAddress: string;
+    toAddress: string;
+    amountUsdc: string;
+    idempotencyKey: string;
+  }): Promise<{ providerRef: string; chain: Wallet["chain"] }> {
+    try {
+      return await this.wallets.transfer(request);
+    } catch (error) {
+      if (error instanceof WalletProviderError && error.message.includes("Insufficient balance")) {
+        throw new ServiceError(409, "insufficient_balance", "Buyer balance cannot cover the escrow lock.");
+      }
+      throw error;
+    }
+  }
+
+  private requireActiveAgent(organizationId: string, agentId: string): Agent {
+    const agent = this.requireAgent(organizationId, agentId);
+    if (agent.status !== "active") {
+      throw new ServiceError(403, "agent_suspended", "Escrow requires an active agent.");
+    }
+    return agent;
+  }
+
+  private requireEscrow(organizationId: string, escrowId: string): Escrow {
+    const escrow = this.store.escrows.get(escrowId);
+    if (!escrow || escrow.organizationId !== organizationId) throw this.notFound("Escrow not found.");
+    return escrow;
   }
 
   private requireOrganization(organizationId: string): Organization {

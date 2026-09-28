@@ -54,4 +54,56 @@ describe("Albesa SDK", () => {
     expect(read.score).toBe("84.7500");
     expect(read.metrics.volumeSettledUsdc).toBe("100.000000");
   });
+
+  it("settles a schema-valid escrow and refunds a schema failure", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));
+    const { client } = await createSandboxOrganization({
+      name: "Acme",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+    const buyer = await client.agents.create({
+      name: "buyer",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: [],
+    });
+    const seller = await client.agents.create({
+      name: "seller",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: [],
+    });
+    await client.agents.fund(buyer.id, "3.00");
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["rows"],
+      properties: { rows: { type: "integer", minimum: 1 } },
+    };
+
+    const held = await client.escrows.create({
+      buyerAgentId: buyer.id,
+      sellerAgentId: seller.id,
+      amountUsdc: "1.00",
+      schema,
+    });
+    expect(held.status).toBe("held");
+    expect(held.buyerBalanceUsdc).toBe("2.000000");
+
+    const released = await client.escrows.submit(held.id, { rows: 2 });
+    expect(released.status).toBe("released");
+    expect(released.sellerNetUsdc).toBe("0.990000");
+    expect(released.sellerBalanceUsdc).toBe("0.990000");
+
+    const refundHold = await client.escrows.create({
+      buyerAgentId: buyer.id,
+      sellerAgentId: seller.id,
+      amountUsdc: "1.00",
+      schema,
+    });
+    const refunded = await client.escrows.submit(refundHold.id, { rows: 0 });
+    expect(refunded.status).toBe("refunded");
+    expect(refunded.validationErrors).toEqual(["result.rows: expected >= 1."]);
+    expect(refunded.buyerBalanceUsdc).toBe("2.000000");
+  });
 });
