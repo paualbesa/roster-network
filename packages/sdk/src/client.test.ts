@@ -30,4 +30,28 @@ describe("Albesa SDK", () => {
       albesa.agents.pay(agent.id, { vendorId: "vendor_other", amountUsdc: "0.10" }),
     ).rejects.toBeInstanceOf(AlbesaError);
   });
+
+  it("records a reputation event and reads the passport score", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));
+    const { client } = await createSandboxOrganization({
+      name: "Acme",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+    const agent = await client.agents.create({
+      name: "seller",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: ["vendor_data"],
+    });
+    const passport = await client.reputation.recordEvent(agent.id, {
+      outcome: "success",
+      latencyMs: 500,
+      volumeUsdc: "100",
+    });
+    expect(passport.score).toBe("84.7500");
+    const read = await client.reputation.passport(agent.id);
+    expect(read.score).toBe("84.7500");
+    expect(read.metrics.volumeSettledUsdc).toBe("100.000000");
+  });
 });

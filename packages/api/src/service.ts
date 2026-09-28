@@ -22,6 +22,21 @@ import {
   type Wallet,
   type WalletProvider,
 } from "@albesa/core";
+import {
+  applyReputationEvent,
+  emptyReputationTotals,
+  MemoryReputationLedger,
+  normalizeReputationEvent,
+  projectPassport,
+  reputationEventFromEscrow,
+  ReputationInputError,
+  type EscrowCompletionSignal,
+  type ReputationEventInput,
+  type ReputationEventRecord,
+  type ReputationHook,
+  type ReputationLedger,
+  type ReputationPassport,
+} from "@albesa/reputation";
 import { MemoryStore } from "./store.js";
 
 export type ErrorStatus = 400 | 403 | 404 | 409;
@@ -95,16 +110,23 @@ export interface TreasuryResult {
 const NAME_MAX = 80;
 const VENDOR_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
+export interface RecordReputationResult {
+  event: ReputationEventRecord;
+  passport: ReputationPassport;
+}
+
 export interface ServiceOptions {
   mode?: RuntimeMode;
   now?: () => Date;
   wallets?: WalletProvider;
   store?: MemoryStore;
+  reputation?: ReputationLedger;
 }
 
-export class AgentFinanceService {
+export class AgentFinanceService implements ReputationHook {
   private readonly store: MemoryStore;
   private readonly wallets: WalletProvider;
+  private readonly reputation: ReputationLedger;
   private readonly mode: RuntimeMode;
   private readonly now: () => Date;
   private queue: Promise<unknown> = Promise.resolve();
@@ -112,6 +134,7 @@ export class AgentFinanceService {
   constructor(options: ServiceOptions = {}) {
     this.store = options.store ?? new MemoryStore();
     this.wallets = options.wallets ?? new MockWalletProvider();
+    this.reputation = options.reputation ?? new MemoryReputationLedger();
     this.mode = options.mode ?? "sandbox";
     this.now = options.now ?? (() => new Date());
   }
@@ -167,6 +190,32 @@ export class AgentFinanceService {
         .slice()
         .reverse();
     });
+  }
+
+  recordReputationEvent(
+    organizationId: string,
+    agentId: string,
+    input: ReputationEventInput,
+  ): Promise<RecordReputationResult> {
+    return this.enqueue(async () => this.recordReputationEventUnlocked(organizationId, agentId, input));
+  }
+
+  getPassport(agentId: string): Promise<ReputationPassport> {
+    return this.enqueue(async () => {
+      const totals = this.reputation.readTotals(agentId);
+      if (totals) return projectPassport(totals);
+      const agent = this.store.agents.get(agentId);
+      if (!agent) throw this.notFound("Agent not found.");
+      return emptyPassport(agent.id, agent.organizationId);
+    });
+  }
+
+  recordEscrowCompletion(signal: EscrowCompletionSignal): Promise<ReputationPassport> {
+    return this.recordReputationEvent(
+      signal.organizationId,
+      signal.agentId,
+      reputationEventFromEscrow(signal),
+    ).then((result) => result.passport);
   }
 
   listLedger(organizationId: string, walletId: string): Promise<LedgerEntry[]> {
@@ -554,6 +603,35 @@ export class AgentFinanceService {
     this.store.ledger.push(entry);
   }
 
+  private recordReputationEventUnlocked(
+    organizationId: string,
+    agentId: string,
+    input: ReputationEventInput,
+  ): RecordReputationResult {
+    const agent = this.requireAgent(organizationId, agentId);
+    let normalized;
+    try {
+      normalized = normalizeReputationEvent(input);
+    } catch (error) {
+      if (error instanceof ReputationInputError) {
+        throw new ServiceError(400, "invalid_request", error.message);
+      }
+      throw error;
+    }
+    const createdAt = this.now().toISOString();
+    const current = this.reputation.readTotals(agent.id) ?? emptyReputationTotals(agent.id, agent.organizationId);
+    const next = applyReputationEvent(current, normalized, createdAt);
+    const event: ReputationEventRecord = {
+      id: createId("rev"),
+      agentId: agent.id,
+      organizationId: agent.organizationId,
+      createdAt,
+      ...normalized,
+    };
+    this.reputation.append(next, event);
+    return { event, passport: projectPassport(next) };
+  }
+
   private requireOrganization(organizationId: string): Organization {
     const organization = this.store.organizations.get(organizationId);
     if (!organization) throw this.notFound("Organization not found.");
@@ -598,6 +676,10 @@ export class AgentFinanceService {
     );
     return run;
   }
+}
+
+function emptyPassport(agentId: string, organizationId: string): ReputationPassport {
+  return projectPassport(emptyReputationTotals(agentId, organizationId));
 }
 
 function canonicalOrRaw(amountUsdc: string): string {

@@ -1,6 +1,5 @@
 {
-  "name": "@albesa/api",
-  "description": "Roster HTTP API for sandbox USDC agent payments.",
+  "name": "@albesa/reputation",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,19 +13,13 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --environment node",
-    "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js"
+    "test": "vitest run --environment node"
   },
   "dependencies": {
-    "@albesa/core": "workspace:*",
-    "@albesa/reputation": "workspace:*",
-    "@hono/node-server": "^1.19.5",
-    "hono": "^4.9.8"
+    "@albesa/core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.18.6",
-    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }

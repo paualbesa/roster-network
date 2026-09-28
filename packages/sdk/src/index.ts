@@ -68,6 +68,30 @@ export interface TransactionRecord {
   createdAt: string;
 }
 
+export interface RecordReputationEventInput {
+  outcome: "success" | "failure";
+  latencyMs: number;
+  volumeUsdc: string;
+  error?: boolean;
+  hallucination?: boolean;
+  sourceRef?: string | null;
+}
+
+export interface ReputationPassport {
+  agentId: string;
+  score: string;
+  metrics: {
+    eventCount: number;
+    successCount: number;
+    failureCount: number;
+    volumeSettledUsdc: string;
+    avgLatencyMs: string;
+    successRate: string;
+    errorIndex: string;
+  };
+  updatedAt: string | null;
+}
+
 export class AlbesaError extends Error {
   readonly status: number;
   readonly code: string;
@@ -124,6 +148,11 @@ export class Albesa {
     transactions: (agentId: string) => Promise<TransactionRecord[]>;
   };
 
+  readonly reputation: {
+    recordEvent: (agentId: string, input: RecordReputationEventInput) => Promise<ReputationPassport>;
+    passport: (agentId: string) => Promise<ReputationPassport>;
+  };
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -139,6 +168,10 @@ export class Albesa {
       pay: (agentId, input) => this.payAgent(agentId, input),
       balance: (agentId) => this.getBalance(agentId),
       transactions: (agentId) => this.listTransactions(agentId),
+    };
+    this.reputation = {
+      recordEvent: (agentId, input) => this.recordReputationEvent(agentId, input),
+      passport: (agentId) => this.getPassport(agentId),
     };
   }
 
@@ -185,6 +218,21 @@ export class Albesa {
 
   private getBalance(agentId: string): Promise<Balance> {
     return this.request<Balance>("GET", `/v1/agents/${agentId}/balance`);
+  }
+
+  private async recordReputationEvent(agentId: string, input: RecordReputationEventInput): Promise<ReputationPassport> {
+    const raw = await this.request<{ passport: ReputationPassport }>(
+      "POST",
+      `/v1/agents/${agentId}/reputation/events`,
+      input,
+    );
+    return raw.passport;
+  }
+
+  private getPassport(agentId: string): Promise<ReputationPassport> {
+    return this.request<{ passport: ReputationPassport }>("GET", `/v1/agents/${agentId}/passport`).then(
+      (raw) => raw.passport,
+    );
   }
 
   private async listTransactions(agentId: string): Promise<TransactionRecord[]> {
