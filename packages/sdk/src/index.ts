@@ -1,0 +1,259 @@
+export interface AlbesaOptions {
+  apiKey: string;
+  /** Defaults to the local sandbox API. */
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}
+
+export interface CreateAgentInput {
+  name: string;
+  dailySpendLimitUsdc: string;
+  vendorAllowlist: string[];
+}
+
+export interface AgentHandle {
+  id: string;
+  name: string;
+  address: string;
+  walletId: string;
+  policyId: string;
+  dailySpendLimitUsdc: string;
+  vendorAllowlist: string[];
+  balanceUsdc: string;
+  status: "active" | "suspended";
+  createdAt: string;
+}
+
+export interface FundResult {
+  transactionId: string;
+  amountUsdc: string;
+  balanceUsdc: string;
+}
+
+export interface PayInput {
+  vendorId: string;
+  amountUsdc: string;
+  memo?: string;
+}
+
+export interface Payment {
+  id: string;
+  status: "settled";
+  agentId: string;
+  vendorId: string;
+  amountUsdc: string;
+  feeUsdc: string;
+  toAddress: string;
+  balanceUsdc: string;
+  createdAt: string;
+}
+
+export interface Balance {
+  agentId: string;
+  walletId: string;
+  address: string;
+  asset: "USDC";
+  chain: "mock" | "base-sepolia";
+  balanceUsdc: string;
+}
+
+export interface TransactionRecord {
+  id: string;
+  type: "sandbox_grant" | "fund" | "payment";
+  status: "settled" | "rejected";
+  amountUsdc: string;
+  feeUsdc: string;
+  vendorId: string | null;
+  rejectionReason: string | null;
+  createdAt: string;
+}
+
+export class AlbesaError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "AlbesaError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+interface ApiAgentResponse {
+  agent: {
+    id: string;
+    name: string;
+    walletId: string;
+    policyId: string;
+    status: "active" | "suspended";
+    createdAt: string;
+  };
+  wallet: { id: string; address: string };
+  policy: { id: string; dailySpendLimitUsdc: string; vendorAllowlist: string[] };
+  balanceUsdc: string;
+}
+
+interface ApiFundResponse {
+  transaction: { id: string; amountUsdc: string };
+  balanceUsdc: string;
+}
+
+interface ApiPayResponse {
+  transaction: {
+    id: string;
+    status: "settled";
+    agentId: string;
+    vendorId: string;
+    amountUsdc: string;
+    feeUsdc: string;
+    toAddress: string;
+    createdAt: string;
+  };
+  balanceUsdc: string;
+}
+
+const DEFAULT_BASE_URL = "http://127.0.0.1:8787";
+
+export class Albesa {
+  readonly agents: {
+    create: (input: CreateAgentInput) => Promise<AgentHandle>;
+    fund: (agentId: string, amountUsdc: string) => Promise<FundResult>;
+    pay: (agentId: string, input: PayInput) => Promise<Payment>;
+    balance: (agentId: string) => Promise<Balance>;
+    transactions: (agentId: string) => Promise<TransactionRecord[]>;
+  };
+
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(options: AlbesaOptions) {
+    if (!options.apiKey.trim()) throw new Error("Albesa apiKey is required.");
+    this.apiKey = options.apiKey.trim();
+    this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    this.agents = {
+      create: (input) => this.createAgent(input),
+      fund: (agentId, amountUsdc) => this.fundAgent(agentId, amountUsdc),
+      pay: (agentId, input) => this.payAgent(agentId, input),
+      balance: (agentId) => this.getBalance(agentId),
+      transactions: (agentId) => this.listTransactions(agentId),
+    };
+  }
+
+  private async createAgent(input: CreateAgentInput): Promise<AgentHandle> {
+    const raw = await this.request<ApiAgentResponse>("POST", "/v1/agents", input);
+    return {
+      id: raw.agent.id,
+      name: raw.agent.name,
+      address: raw.wallet.address,
+      walletId: raw.wallet.id,
+      policyId: raw.policy.id,
+      dailySpendLimitUsdc: raw.policy.dailySpendLimitUsdc,
+      vendorAllowlist: raw.policy.vendorAllowlist,
+      balanceUsdc: raw.balanceUsdc,
+      status: raw.agent.status,
+      createdAt: raw.agent.createdAt,
+    };
+  }
+
+  private async fundAgent(agentId: string, amountUsdc: string): Promise<FundResult> {
+    const raw = await this.request<ApiFundResponse>("POST", `/v1/agents/${agentId}/fund`, { amountUsdc });
+    return {
+      transactionId: raw.transaction.id,
+      amountUsdc: raw.transaction.amountUsdc,
+      balanceUsdc: raw.balanceUsdc,
+    };
+  }
+
+  private async payAgent(agentId: string, input: PayInput): Promise<Payment> {
+    const body = input.memo === undefined ? { vendorId: input.vendorId, amountUsdc: input.amountUsdc } : input;
+    const raw = await this.request<ApiPayResponse>("POST", `/v1/agents/${agentId}/payments`, body);
+    return {
+      id: raw.transaction.id,
+      status: "settled",
+      agentId: raw.transaction.agentId,
+      vendorId: raw.transaction.vendorId,
+      amountUsdc: raw.transaction.amountUsdc,
+      feeUsdc: raw.transaction.feeUsdc,
+      toAddress: raw.transaction.toAddress,
+      balanceUsdc: raw.balanceUsdc,
+      createdAt: raw.transaction.createdAt,
+    };
+  }
+
+  private getBalance(agentId: string): Promise<Balance> {
+    return this.request<Balance>("GET", `/v1/agents/${agentId}/balance`);
+  }
+
+  private async listTransactions(agentId: string): Promise<TransactionRecord[]> {
+    const raw = await this.request<{ transactions: TransactionRecord[] }>(
+      "GET",
+      `/v1/agents/${agentId}/transactions`,
+    );
+    return raw.transactions;
+  }
+
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.apiKey}`,
+      accept: "application/json",
+    };
+    const init: RequestInit = { method, headers };
+    if (body !== undefined) {
+      headers["content-type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, init);
+    const payload: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = readError(payload);
+      throw new AlbesaError(response.status, error.code, error.message);
+    }
+    return payload as T;
+  }
+}
+
+export async function createSandboxOrganization(input: {
+  name: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}): Promise<{ apiKey: string; organizationId: string; client: Albesa }> {
+  const baseUrl = (input.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+  const fetchImpl = input.fetch ?? globalThis.fetch;
+  const response = await fetchImpl(`${baseUrl}/v1/organizations`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ name: input.name }),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = readError(payload);
+    throw new AlbesaError(response.status, error.code, error.message);
+  }
+  if (!isRecord(payload) || typeof payload.apiKey !== "string") {
+    throw new AlbesaError(response.status, "invalid_response", "Organization response did not include an API key.");
+  }
+  const organization = payload.organization;
+  const organizationId =
+    isRecord(organization) && typeof organization.id === "string" ? organization.id : "";
+  return {
+    apiKey: payload.apiKey,
+    organizationId,
+    client: new Albesa({ apiKey: payload.apiKey, baseUrl, fetch: fetchImpl }),
+  };
+}
+
+function readError(payload: unknown): { code: string; message: string } {
+  if (isRecord(payload) && isRecord(payload.error)) {
+    const code = typeof payload.error.code === "string" ? payload.error.code : "request_failed";
+    const message = typeof payload.error.message === "string" ? payload.error.message : "Request failed.";
+    return { code, message };
+  }
+  return { code: "request_failed", message: "Request failed." };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
