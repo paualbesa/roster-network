@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { MockWalletProvider, resolveRuntimeMode, type RuntimeMode } from "@albesa/core";
+import { CapabilityRegistry, parseSearchQuery, RegistryError } from "@albesa/registry";
 import { JsonReputationLedger, type ReputationEventInput, type ReputationLedger } from "@albesa/reputation";
 import {
   AgentFinanceService,
@@ -28,11 +29,14 @@ export interface AppOptions {
   reputation?: ReputationLedger;
   /** Versioned JSON metrics file. Ignored when `service` or `reputation` is passed. */
   reputationFile?: string;
+  /** Capability index. Omit it to keep listings in memory. */
+  registry?: CapabilityRegistry;
 }
 
 export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const mode = options.mode ?? resolveRuntimeMode();
   const service = options.service ?? openService(options, mode);
+  const registry = options.registry ?? new CapabilityRegistry(options.now ? { now: options.now } : {});
   const app = new Hono<AppEnv>();
 
   app.get("/health", (c) => c.json({ ok: true, product: "Roster", mode, rail: "mock", asset: "USDC" }));
@@ -139,12 +143,44 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return c.json(result);
   });
 
+  app.post("/v1/registry/listings", async (c) => {
+    const listing = registry.register(c.get("orgId"), await readJson(c));
+    return c.json({ listing }, 201);
+  });
+
+  app.put("/v1/registry/listings/:id", async (c) => {
+    const listing = registry.update(c.get("orgId"), c.req.param("id"), await readJson(c));
+    return c.json({ listing });
+  });
+
+  app.get("/v1/registry/listings/:id", (c) => {
+    const listing = registry.get(c.req.param("id"));
+    if (!listing) throw new RegistryError(404, "not_found", "Capability listing not found.");
+    return c.json({ listing });
+  });
+
+  app.get("/v1/registry/search", (c) => {
+    const hits = registry.search(
+      parseSearchQuery({
+        q: c.req.query("q"),
+        tags: c.req.query("tags"),
+        maxPriceUsdc: c.req.query("maxPriceUsdc"),
+        maxP95Ms: c.req.query("maxP95Ms"),
+        limit: c.req.query("limit"),
+      }),
+    );
+    return c.json({ hits });
+  });
+
   app.onError((error, c) => {
     if (error instanceof ServiceError) {
       const body = error.transaction
         ? { error: { code: error.code, message: error.message }, transaction: error.transaction }
         : { error: { code: error.code, message: error.message } };
       return c.json(body, error.status);
+    }
+    if (error instanceof RegistryError) {
+      return c.json({ error: { code: error.code, message: error.message } }, error.status);
     }
     console.error(error);
     return c.json({ error: { code: "internal", message: "Internal error." } }, 500);

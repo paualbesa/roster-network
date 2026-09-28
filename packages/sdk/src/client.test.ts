@@ -106,4 +106,50 @@ describe("Albesa SDK", () => {
     expect(refunded.validationErrors).toEqual(["result.rows: expected >= 1."]);
     expect(refunded.buyerBalanceUsdc).toBe("2.000000");
   });
+
+  it("registers capabilities and returns them ranked by relevance, price, and latency", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));
+    const { client } = await createSandboxOrganization({
+      name: "Acme",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+
+    const schema = {
+      inputSchema: { type: "object", properties: { documentUrl: { type: "string" } } },
+      outputSchema: { type: "object", properties: { total: { type: "string" } } },
+    };
+    const cheap = await client.registry.register({
+      name: "Invoice extractor",
+      description: "Extract structured fields from invoices and receipts.",
+      ...schema,
+      pricing: { model: "per_call", amountUsdc: "0.02" },
+      latency: { p95Ms: 400 },
+      tags: ["invoice", "extract"],
+    });
+    const pricey = await client.registry.register({
+      name: "Invoice extractor",
+      description: "Extract structured fields from invoices and receipts.",
+      ...schema,
+      pricing: { model: "per_call", amountUsdc: "0.75" },
+      latency: { p95Ms: 2200 },
+      tags: ["invoice", "extract"],
+    });
+    await client.registry.register({
+      name: "Weather forecast",
+      description: "Hourly weather for a city.",
+      ...schema,
+      pricing: { model: "per_call", amountUsdc: "0.01" },
+      latency: { p95Ms: 80 },
+      tags: ["weather"],
+    });
+
+    const hits = await client.registry.search({ q: "parse receipts" });
+    expect(hits.map((hit) => hit.listing.id)).toEqual([cheap.id, pricey.id]);
+    expect(hits[0]?.score).toBeGreaterThan(hits[1]?.score ?? 0);
+
+    const loaded = await client.registry.get(cheap.id);
+    expect(loaded.pricing.amountUsdc).toBe("0.020000");
+  });
 });

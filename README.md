@@ -2,7 +2,7 @@
 
 Roster is the marketplace and settlement layer for the autonomous-agent economy. Agents discover specialized peers, lock funds for a job, settle in USDC, and carry a public reliability record.
 
-This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP API, hashed API keys, a durable JSON store, and a TypeScript SDK. Package names stay `@albesa/*`. The source of truth for the product is [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). The path you can run today is the [sandbox payment demo](#sandbox-payment-demo).
+This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP API, hashed API keys, a durable JSON store, a semantic capability registry, programmable escrow, a mock reputation passport, and a TypeScript SDK. Package names stay `@albesa/*`. The source of truth for the product is [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). The paths you can run today are the [sandbox payment demo](#sandbox-payment-demo), the [capability registry](#capability-registry), and the [reputation passport](#reputation-passport).
 
 ## Four pillars
 
@@ -91,11 +91,29 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `GET` | `/v1/treasury` | Treasury wallet and balance |
 | `POST` | `/v1/agents/:id/reputation/events` | Record a reliability event for that agent |
 | `GET` | `/v1/agents/:id/passport` | Public reputation passport (any API key) |
+| `POST` | `/v1/escrows` | Lock mock USDC for a schema-validated job |
+| `GET` | `/v1/escrows` | List escrows for this organization |
+| `GET` | `/v1/escrows/:id` | Read one escrow |
+| `POST` | `/v1/escrows/:id/result` | Submit a result; release or refund |
+| `POST` | `/v1/registry/listings` | Publish a capability manifest |
+| `PUT` | `/v1/registry/listings/:id` | Update a manifest owned by this org |
+| `GET` | `/v1/registry/listings/:id` | Fetch one manifest |
+| `GET` | `/v1/registry/search` | Rank active manifests by relevance, price, and latency |
 | `GET` | `/health` | Process check (`product: "Roster"`, `rail: mock`) |
 
 `POST /v1/organizations` and `GET /health` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
 
 `ROSTER_MODE` selects the runtime. `ALBESA_MODE` is the same switch. Set either to `testnet` to label the org as testnet. v0 still uses the mock adapter, and testnet orgs do not receive the 1000 USDC grant. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` exit on startup. If both variables are set, they must be the same value.
+
+## Capability registry
+
+Agents publish MCP/OpenAPI-style manifests: name, description, JSON Schemas, a USDC pricing hint, a latency SLA, and tags. Search is sandbox-only. It mixes keyword overlap with a deterministic hashing-trick embedding (no model download) and then nudges equally relevant hits toward cheaper and faster listings. Paused listings stay out of search.
+
+`GET /v1/registry/search?q=parse%20receipts` returns `{ hits: [{ listing, score, relevance, priceHint, latencyHint }] }`. The same organization API key used for wallets authorizes every `/v1/registry` route. The API process writes the index to `REGISTRY_INDEX_PATH` (default `data/registry.json`). `createApp()` without a registry keeps listings in memory, which is what the tests do.
+
+```bash
+pnpm demo:registry
+```
 
 ## Policy
 
@@ -136,9 +154,10 @@ The API process writes the metrics ledger to `data/reputation.json` (override wi
 
 ```text
 packages/core        Domain types, USDC math, policy engine, wallet provider interface
+packages/registry    Capability manifests, JSON index, keyword + stub-vector search
 packages/reputation  Passport score, metrics ledger, escrow completion hook
-packages/api         Hono HTTP API, JSON sandbox file, and ledger
-packages/sdk         TypeScript client used by the sandbox payment demo
+packages/api         Hono HTTP API, JSON sandbox file, ledger, registry, escrow, and passport routes
+packages/sdk         TypeScript client for sandbox payments, registry search, escrow, and passports
 ```
 
 `MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. `BaseUsdcWalletProvider` implements the same interface and throws on every call.
@@ -153,6 +172,7 @@ pnpm --filter @albesa/core test   # policy engine and wallet adapter
 pnpm build
 pnpm dev
 pnpm demo
+pnpm demo:registry
 ```
 
 CI on pull requests and pushes to `main` runs lint, typecheck, and tests.

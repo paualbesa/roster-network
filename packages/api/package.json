@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@albesa/core": "workspace:*",
+    "@albesa/registry": "workspace:*",
     "@albesa/reputation": "workspace:*",
     "@hono/node-server": "^1.19.5",
     "hono": "^4.9.8"
