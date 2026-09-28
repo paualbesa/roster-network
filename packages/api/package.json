@@ -1,5 +1,6 @@
 {
   "name": "@albesa/api",
+  "description": "Roster HTTP API for sandbox USDC agent payments.",
   "version": "0.0.0",
   "private": true,
   "type": "module",

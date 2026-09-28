@@ -25,7 +25,7 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const service = options.service ?? openService(options, mode);
   const app = new Hono<AppEnv>();
 
-  app.get("/health", (c) => c.json({ ok: true, mode, rail: "mock", asset: "USDC" }));
+  app.get("/health", (c) => c.json({ ok: true, product: "Roster", mode, rail: "mock", asset: "USDC" }));
 
   app.use("/v1/*", async (c, next) => {
     if (c.req.path === "/v1/organizations" && c.req.method === "POST") {

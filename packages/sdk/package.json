@@ -1,5 +1,6 @@
 {
   "name": "@albesa/sdk",
+  "description": "Roster TypeScript client for the sandbox payment API.",
   "version": "0.0.0",
   "private": true,
   "type": "module",

@@ -1,5 +1,5 @@
 /**
- * Runnable hello path. The five statements below are the developer example.
+ * Roster sandbox payment demo.
  * In an app you would import { Albesa } from "@albesa/sdk" and point at a running API.
  * This file boots that API on a local sandbox file so `pnpm demo` works with no keys and no chain.
  */
@@ -30,7 +30,7 @@ try {
   const payment = await albesa.agents.pay(agent.id, { vendorId: "vendor_data", amountUsdc: "0.15" });
 
   console.log(
-    `${payment.status} ${payment.amountUsdc} USDC to ${payment.vendorId} from ${agent.address} (${payment.id})`,
+    `Roster sandbox payment ${payment.status}: ${payment.amountUsdc} USDC to ${payment.vendorId} from ${agent.address} (${payment.id})`,
   );
 
   const restored = createApp({ mode: "sandbox", dataFile });
@@ -44,7 +44,7 @@ try {
   if (restoredBody.balanceUsdc !== payment.balanceUsdc) {
     throw new Error("Restored balance did not match the settled payment.");
   }
-  console.log(`restored ${restoredBody.balanceUsdc} USDC for ${agent.id} from ${dataFile}`);
+  console.log(`Roster restored ${restoredBody.balanceUsdc} USDC for ${agent.id} from ${dataFile}`);
 } finally {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
