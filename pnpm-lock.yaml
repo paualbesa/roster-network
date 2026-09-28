@@ -32,6 +32,9 @@ importers:
       '@albesa/core':
         specifier: workspace:*
         version: link:../core
+      '@albesa/registry':
+        specifier: workspace:*
+        version: link:../registry
       '@albesa/reputation':
         specifier: workspace:*
         version: link:../reputation
@@ -56,6 +59,22 @@ importers:
         version: 3.2.7(@types/node@22.20.4)(tsx@4.23.15)
 
   packages/core:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.18.6
+        version: 22.20.4
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.4)(tsx@4.23.15)
+
+  packages/registry:
+    dependencies:
+      '@albesa/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: ^22.18.6

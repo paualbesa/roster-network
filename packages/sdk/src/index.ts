@@ -116,6 +116,62 @@ export interface EscrowHandle {
   sellerBalanceUsdc: string;
 }
 
+export interface RegistryListing {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  version: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  pricing: { model: "per_call" | "per_1k_tokens" | "free"; amountUsdc: string };
+  latency: { p95Ms: number; p50Ms: number | null };
+  tags: string[];
+  status: "active" | "paused";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RegisterCapabilityInput {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  pricing: { model: "per_call" | "per_1k_tokens" | "free"; amountUsdc: string };
+  latency: { p95Ms: number; p50Ms?: number };
+  tags?: string[];
+  version?: string;
+  status?: "active" | "paused";
+}
+
+export interface UpdateCapabilityInput {
+  name?: string;
+  description?: string;
+  version?: string;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  pricing?: { model: "per_call" | "per_1k_tokens" | "free"; amountUsdc: string };
+  latency?: { p95Ms: number; p50Ms?: number | null };
+  tags?: string[];
+  status?: "active" | "paused";
+}
+
+export interface RegistrySearchQuery {
+  q?: string;
+  tags?: string[];
+  maxPriceUsdc?: string;
+  maxP95Ms?: number;
+  limit?: number;
+}
+
+export interface RegistrySearchHit {
+  listing: RegistryListing;
+  score: number;
+  relevance: number;
+  priceHint: number;
+  latencyHint: number;
+}
+
 export class AlbesaError extends Error {
   readonly status: number;
   readonly code: string;
@@ -200,6 +256,13 @@ export class Albesa {
     get: (escrowId: string) => Promise<EscrowHandle>;
   };
 
+  readonly registry: {
+    register: (input: RegisterCapabilityInput) => Promise<RegistryListing>;
+    update: (id: string, input: UpdateCapabilityInput) => Promise<RegistryListing>;
+    get: (id: string) => Promise<RegistryListing>;
+    search: (query?: RegistrySearchQuery) => Promise<RegistrySearchHit[]>;
+  };
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -224,6 +287,12 @@ export class Albesa {
       create: (input) => this.createEscrow(input),
       submit: (escrowId, result) => this.submitEscrow(escrowId, result),
       get: (escrowId) => this.getEscrow(escrowId),
+    };
+    this.registry = {
+      register: (input) => this.registerCapability(input),
+      update: (id, input) => this.updateCapability(id, input),
+      get: (id) => this.getCapability(id),
+      search: (query) => this.searchCapabilities(query),
     };
   }
 
@@ -316,6 +385,36 @@ export class Albesa {
       `/v1/agents/${agentId}/transactions`,
     );
     return raw.transactions;
+  }
+
+  private async registerCapability(input: RegisterCapabilityInput): Promise<RegistryListing> {
+    const raw = await this.request<{ listing: RegistryListing }>("POST", "/v1/registry/listings", input);
+    return raw.listing;
+  }
+
+  private async updateCapability(id: string, input: UpdateCapabilityInput): Promise<RegistryListing> {
+    const raw = await this.request<{ listing: RegistryListing }>("PUT", `/v1/registry/listings/${id}`, input);
+    return raw.listing;
+  }
+
+  private async getCapability(id: string): Promise<RegistryListing> {
+    const raw = await this.request<{ listing: RegistryListing }>("GET", `/v1/registry/listings/${id}`);
+    return raw.listing;
+  }
+
+  private async searchCapabilities(query: RegistrySearchQuery = {}): Promise<RegistrySearchHit[]> {
+    const params = new URLSearchParams();
+    if (query.q !== undefined) params.set("q", query.q);
+    if (query.tags !== undefined && query.tags.length > 0) params.set("tags", query.tags.join(","));
+    if (query.maxPriceUsdc !== undefined) params.set("maxPriceUsdc", query.maxPriceUsdc);
+    if (query.maxP95Ms !== undefined) params.set("maxP95Ms", query.maxP95Ms.toString());
+    if (query.limit !== undefined) params.set("limit", query.limit.toString());
+    const search = params.toString();
+    const raw = await this.request<{ hits: RegistrySearchHit[] }>(
+      "GET",
+      `/v1/registry/search${search.length > 0 ? `?${search}` : ""}`,
+    );
+    return raw.hits;
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {

@@ -1,6 +1,6 @@
 {
-  "name": "@albesa/sdk",
-  "description": "Roster TypeScript client for the sandbox payment API.",
+  "name": "@albesa/registry",
+  "description": "Roster semantic capability registry for the sandbox index.",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,15 +14,13 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --environment node",
-    "demo": "tsx examples/hello.ts",
-    "demo:registry": "tsx examples/registry.ts"
+    "test": "vitest run --environment node"
+  },
+  "dependencies": {
+    "@albesa/core": "workspace:*"
   },
   "devDependencies": {
-    "@albesa/api": "workspace:*",
-    "@hono/node-server": "^1.19.5",
     "@types/node": "^22.18.6",
-    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
