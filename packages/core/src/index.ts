@@ -1,3 +1,17 @@
+export { decideSettlement, quoteEscrowSettlement } from "./escrow/machine.js";
+export type { SettlementDecision } from "./escrow/machine.js";
+export { EscrowTransitionError } from "./escrow/machine.js";
+export { EscrowSchemaError, parseResultSchema, validateResult } from "./escrow/schema.js";
+export { ESCROW_TAKE_RATE_BPS } from "./escrow/types.js";
+export type {
+  Escrow,
+  EscrowSettlementQuote,
+  EscrowStatus,
+  ResultSchema,
+  SchemaHookResult,
+  SchemaNode,
+  SchemaValidationHook,
+} from "./escrow/types.js";
 export { quoteSandboxFee, SANDBOX_FEE_SCHEDULE, SANDBOX_MAX_ACTIVE_AGENTS, SANDBOX_TREASURY_GRANT_USDC } from "./fees.js";
 export { createId, createSandboxApiKey, hashSandboxApiKey } from "./ids.js";
 export { resolveRuntimeMode } from "./mode.js";

@@ -59,12 +59,13 @@ export interface Balance {
 
 export interface TransactionRecord {
   id: string;
-  type: "sandbox_grant" | "fund" | "payment";
+  type: "sandbox_grant" | "fund" | "payment" | "escrow_lock" | "escrow_release" | "escrow_refund";
   status: "settled" | "rejected";
   amountUsdc: string;
   feeUsdc: string;
   vendorId: string | null;
   rejectionReason: string | null;
+  escrowId?: string;
   createdAt: string;
 }
 
@@ -90,6 +91,29 @@ export interface ReputationPassport {
     errorIndex: string;
   };
   updatedAt: string | null;
+}
+
+export interface EscrowCreateInput {
+  buyerAgentId: string;
+  sellerAgentId: string;
+  amountUsdc: string;
+  schema: unknown;
+  memo?: string;
+}
+
+export interface EscrowHandle {
+  id: string;
+  status: "held" | "released" | "refunded";
+  buyerAgentId: string;
+  sellerAgentId: string;
+  amountUsdc: string;
+  takeRateUsdc: string;
+  sellerNetUsdc: string;
+  holdAddress: string;
+  validationErrors: string[] | null;
+  result: unknown;
+  buyerBalanceUsdc: string;
+  sellerBalanceUsdc: string;
 }
 
 export class AlbesaError extends Error {
@@ -123,6 +147,23 @@ interface ApiFundResponse {
   balanceUsdc: string;
 }
 
+interface ApiEscrowResponse {
+  escrow: {
+    id: string;
+    status: "held" | "released" | "refunded";
+    buyerAgentId: string;
+    sellerAgentId: string;
+    amountUsdc: string;
+    takeRateUsdc: string;
+    sellerNetUsdc: string;
+    holdAddress: string;
+    validationErrors: string[] | null;
+    result: unknown;
+  };
+  buyerBalanceUsdc: string;
+  sellerBalanceUsdc: string;
+}
+
 interface ApiPayResponse {
   transaction: {
     id: string;
@@ -153,6 +194,12 @@ export class Albesa {
     passport: (agentId: string) => Promise<ReputationPassport>;
   };
 
+  readonly escrows: {
+    create: (input: EscrowCreateInput) => Promise<EscrowHandle>;
+    submit: (escrowId: string, result: unknown) => Promise<EscrowHandle>;
+    get: (escrowId: string) => Promise<EscrowHandle>;
+  };
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -172,6 +219,11 @@ export class Albesa {
     this.reputation = {
       recordEvent: (agentId, input) => this.recordReputationEvent(agentId, input),
       passport: (agentId) => this.getPassport(agentId),
+    };
+    this.escrows = {
+      create: (input) => this.createEscrow(input),
+      submit: (escrowId, result) => this.submitEscrow(escrowId, result),
+      get: (escrowId) => this.getEscrow(escrowId),
     };
   }
 
@@ -214,6 +266,29 @@ export class Albesa {
       balanceUsdc: raw.balanceUsdc,
       createdAt: raw.transaction.createdAt,
     };
+  }
+
+  private async createEscrow(input: EscrowCreateInput): Promise<EscrowHandle> {
+    const body = input.memo === undefined
+      ? {
+          buyerAgentId: input.buyerAgentId,
+          sellerAgentId: input.sellerAgentId,
+          amountUsdc: input.amountUsdc,
+          schema: input.schema,
+        }
+      : input;
+    const raw = await this.request<ApiEscrowResponse>("POST", "/v1/escrows", body);
+    return toEscrowHandle(raw);
+  }
+
+  private async submitEscrow(escrowId: string, result: unknown): Promise<EscrowHandle> {
+    const raw = await this.request<ApiEscrowResponse>("POST", `/v1/escrows/${escrowId}/result`, { result });
+    return toEscrowHandle(raw);
+  }
+
+  private async getEscrow(escrowId: string): Promise<EscrowHandle> {
+    const raw = await this.request<ApiEscrowResponse>("GET", `/v1/escrows/${escrowId}`);
+    return toEscrowHandle(raw);
   }
 
   private getBalance(agentId: string): Promise<Balance> {
@@ -290,6 +365,23 @@ export async function createSandboxOrganization(input: {
     apiKey: payload.apiKey,
     organizationId,
     client: new Albesa({ apiKey: payload.apiKey, baseUrl, fetch: fetchImpl }),
+  };
+}
+
+function toEscrowHandle(raw: ApiEscrowResponse): EscrowHandle {
+  return {
+    id: raw.escrow.id,
+    status: raw.escrow.status,
+    buyerAgentId: raw.escrow.buyerAgentId,
+    sellerAgentId: raw.escrow.sellerAgentId,
+    amountUsdc: raw.escrow.amountUsdc,
+    takeRateUsdc: raw.escrow.takeRateUsdc,
+    sellerNetUsdc: raw.escrow.sellerNetUsdc,
+    holdAddress: raw.escrow.holdAddress,
+    validationErrors: raw.escrow.validationErrors,
+    result: raw.escrow.result,
+    buyerBalanceUsdc: raw.buyerBalanceUsdc,
+    sellerBalanceUsdc: raw.sellerBalanceUsdc,
   };
 }
 

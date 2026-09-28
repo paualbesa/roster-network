@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import { MockWalletProvider, resolveRuntimeMode, type RuntimeMode } from "@albesa/core";
 import { JsonReputationLedger, type ReputationEventInput, type ReputationLedger } from "@albesa/reputation";
-import { AgentFinanceService, ServiceError, type CreateAgentInput, type PaymentInput } from "./service.js";
+import {
+  AgentFinanceService,
+  ServiceError,
+  type CreateAgentInput,
+  type CreateEscrowInput,
+  type PaymentInput,
+} from "./service.js";
 import { JsonFileStore } from "./store.js";
 
 type AppEnv = {
@@ -15,7 +21,7 @@ export interface AppOptions {
   now?: () => Date;
   service?: AgentFinanceService;
   /**
-   * JSON file for organizations, agents, balances, and the ledger.
+   * JSON file for organizations, agents, escrows, balances, and the ledger.
    * Omit it to keep state in memory (tests and one-off callers).
    */
   dataFile?: string;
@@ -109,6 +115,28 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   app.get("/v1/agents/:agentId/passport", async (c) => {
     const passport = await service.getPassport(c.req.param("agentId"));
     return c.json({ passport });
+  });
+
+  app.post("/v1/escrows", async (c) => {
+    const input = parseCreateEscrow(await readJson(c));
+    const result = await service.createEscrow(c.get("orgId"), input);
+    return c.json(result, 201);
+  });
+
+  app.get("/v1/escrows", async (c) => {
+    const escrows = await service.listEscrows(c.get("orgId"));
+    return c.json({ escrows });
+  });
+
+  app.get("/v1/escrows/:escrowId", async (c) => {
+    const result = await service.getEscrow(c.get("orgId"), c.req.param("escrowId"));
+    return c.json(result);
+  });
+
+  app.post("/v1/escrows/:escrowId/result", async (c) => {
+    const resultPayload = parseEscrowResult(await readJson(c));
+    const result = await service.submitEscrowResult(c.get("orgId"), c.req.param("escrowId"), resultPayload);
+    return c.json(result);
   });
 
   app.onError((error, c) => {
@@ -206,6 +234,42 @@ function parseReputationEvent(body: unknown): ReputationEventInput {
     ...(typeof body.hallucination === "boolean" ? { hallucination: body.hallucination } : {}),
     ...(typeof body.sourceRef === "string" || body.sourceRef === null ? { sourceRef: body.sourceRef } : {}),
   };
+}
+
+function parseCreateEscrow(body: unknown): CreateEscrowInput {
+  if (!isRecord(body)) throw new ServiceError(400, "invalid_request", "Expected a JSON object.");
+  const buyerAgentId = body.buyerAgentId;
+  const sellerAgentId = body.sellerAgentId;
+  const amountUsdc = body.amountUsdc;
+  if (
+    typeof buyerAgentId !== "string" ||
+    typeof sellerAgentId !== "string" ||
+    typeof amountUsdc !== "string" ||
+    !("schema" in body)
+  ) {
+    throw new ServiceError(
+      400,
+      "invalid_request",
+      "buyerAgentId, sellerAgentId, amountUsdc, and schema are required.",
+    );
+  }
+  if (body.memo !== undefined && body.memo !== null && typeof body.memo !== "string") {
+    throw new ServiceError(400, "invalid_request", "memo must be a string.");
+  }
+  return {
+    buyerAgentId,
+    sellerAgentId,
+    amountUsdc,
+    schema: body.schema,
+    memo: typeof body.memo === "string" ? body.memo : null,
+  };
+}
+
+function parseEscrowResult(body: unknown): unknown {
+  if (!isRecord(body) || !("result" in body)) {
+    throw new ServiceError(400, "invalid_request", "result is required.");
+  }
+  return body.result;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

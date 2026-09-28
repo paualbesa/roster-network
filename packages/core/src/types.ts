@@ -8,7 +8,13 @@ export type AgentStatus = "active" | "suspended";
 
 export type WalletOwnerType = "organization" | "agent";
 
-export type TransactionType = "sandbox_grant" | "fund" | "payment";
+export type TransactionType =
+  | "sandbox_grant"
+  | "fund"
+  | "payment"
+  | "escrow_lock"
+  | "escrow_release"
+  | "escrow_refund";
 
 export type TransactionStatus = "settled" | "rejected";
 
@@ -74,6 +80,7 @@ export interface Transaction {
   providerRef: string | null;
   chain: ChainId;
   memo: string | null;
+  escrowId?: string;
   createdAt: string;
 }
 
