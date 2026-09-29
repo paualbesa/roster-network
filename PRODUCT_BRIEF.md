@@ -26,6 +26,10 @@ Discover → rank candidates → lock escrow → notify seller → deliver → s
 2. SDK + free credits for developers
 3. Open protocol + institutional fleets
 
+## Agent access (MCP)
+
+A human signs up for a Roster account and receives a sandbox USDC treasury with free demo credits. Agents keep using the HTTP API and the TypeScript SDK. They can also attach the stdio MCP server (`packages/mcp`) and pass that account's API key as `ROSTER_API_KEY`. The server sends it as `Authorization: Bearer` and exposes tools for balance, funding an agent, capability search, marketplace job create/result, and the reputation passport. A key is scoped to the account that issued it. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` refuse to start the API and the MCP server.
+
 ## Engineering constraints (hard)
 - Cryptx (coordinator) launches many Cursor cloud agents; each owns a vertical slice; **merge to `main` when CI is green** without waiting for human review unless CI fails or secrets/mainnet appear.
 - Sandbox-first: mock wallets, local/JSON or test DB persistence, hashed API keys.

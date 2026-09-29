@@ -22,12 +22,16 @@ export type {
 } from "./jobs.js";
 export { AgentFinanceService, ServiceError } from "./service.js";
 export type {
+  AccountView,
   BalanceResult,
+  CreateAccountInput,
+  CreateAccountResult,
   CreateAgentInput,
   CreateAgentResult,
   CreateEscrowInput,
   CreateEscrowResult,
   CreateOrganizationResult,
+  LoginAccountResult,
   EscrowNotification,
   EscrowResult,
   FundResult,

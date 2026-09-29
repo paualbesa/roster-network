@@ -35,6 +35,15 @@ export interface Organization {
   createdAt: string;
 }
 
+/** Human owner of one organization and its sandbox treasury wallet. */
+export interface UserAccount {
+  id: string;
+  email: string;
+  displayName: string;
+  organizationId: string;
+  createdAt: string;
+}
+
 export interface Agent {
   id: string;
   organizationId: string;

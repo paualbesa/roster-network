@@ -27,6 +27,7 @@ export type {
   LedgerEntry,
   Organization,
   Policy,
+  UserAccount,
   PolicyBlockReason,
   RejectionReason,
   RuntimeMode,

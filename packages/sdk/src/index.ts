@@ -57,6 +57,14 @@ export interface Balance {
   balanceUsdc: string;
 }
 
+export interface TreasuryBalance {
+  walletId: string;
+  address: string;
+  asset: "USDC";
+  chain: Balance["chain"];
+  balanceUsdc: string;
+}
+
 export interface TransactionRecord {
   id: string;
   type: "sandbox_grant" | "fund" | "payment" | "escrow_lock" | "escrow_release" | "escrow_refund";
@@ -332,6 +340,10 @@ export class Albesa {
     submit: (jobId: string, result: unknown, options?: { latencyMs?: number }) => Promise<JobHandle>;
   };
 
+  readonly treasury: {
+    get: () => Promise<TreasuryBalance>;
+  };
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -371,6 +383,9 @@ export class Albesa {
       list: () => this.listJobs(),
       get: (jobId) => this.getJob(jobId),
       submit: (jobId, result, options) => this.submitJob(jobId, result, options),
+    };
+    this.treasury = {
+      get: () => this.getTreasury(),
     };
   }
 
@@ -440,6 +455,20 @@ export class Albesa {
 
   private getBalance(agentId: string): Promise<Balance> {
     return this.request<Balance>("GET", `/v1/agents/${agentId}/balance`);
+  }
+
+  private async getTreasury(): Promise<TreasuryBalance> {
+    const raw = await this.request<{
+      wallet: { id: string; address: string; asset: "USDC"; chain: Balance["chain"] };
+      balanceUsdc: string;
+    }>("GET", "/v1/treasury");
+    return {
+      walletId: raw.wallet.id,
+      address: raw.wallet.address,
+      asset: "USDC",
+      chain: raw.wallet.chain,
+      balanceUsdc: raw.balanceUsdc,
+    };
   }
 
   private async recordReputationEvent(agentId: string, input: RecordReputationEventInput): Promise<ReputationPassport> {
@@ -567,6 +596,76 @@ export class Albesa {
     }
     return payload as T;
   }
+}
+
+export async function createSandboxAccount(input: {
+  email: string;
+  password: string;
+  name?: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}): Promise<{ apiKey: string; organizationId: string; userId: string; client: Albesa }> {
+  const body: { email: string; password: string; name?: string } = {
+    email: input.email,
+    password: input.password,
+  };
+  if (input.name !== undefined) body.name = input.name;
+  const payload = await publicRequest(input, "/v1/accounts", body);
+  return sessionFrom(payload, input);
+}
+
+export async function loginSandboxAccount(input: {
+  email: string;
+  password: string;
+  baseUrl?: string;
+  fetch?: typeof fetch;
+}): Promise<{ apiKey: string; organizationId: string; userId: string; client: Albesa }> {
+  const payload = await publicRequest(input, "/v1/accounts/login", {
+    email: input.email,
+    password: input.password,
+  });
+  return sessionFrom(payload, input);
+}
+
+async function publicRequest(
+  input: { baseUrl?: string; fetch?: typeof fetch },
+  path: string,
+  body: unknown,
+): Promise<unknown> {
+  const baseUrl = (input.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+  const fetchImpl = input.fetch ?? globalThis.fetch;
+  const response = await fetchImpl(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = readError(payload);
+    throw new AlbesaError(response.status, error.code, error.message);
+  }
+  return payload;
+}
+
+function sessionFrom(
+  payload: unknown,
+  input: { baseUrl?: string; fetch?: typeof fetch },
+): { apiKey: string; organizationId: string; userId: string; client: Albesa } {
+  if (!isRecord(payload) || typeof payload.apiKey !== "string") {
+    throw new AlbesaError(200, "invalid_response", "Account response did not include an API key.");
+  }
+  const user = payload.user;
+  const userId = isRecord(user) && typeof user.id === "string" ? user.id : "";
+  const organizationId =
+    isRecord(user) && typeof user.organizationId === "string" ? user.organizationId : "";
+  const baseUrl = (input.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+  const fetchImpl = input.fetch ?? globalThis.fetch;
+  return {
+    apiKey: payload.apiKey,
+    organizationId,
+    userId,
+    client: new Albesa({ apiKey: payload.apiKey, baseUrl, fetch: fetchImpl }),
+  };
 }
 
 export async function createSandboxOrganization(input: {

@@ -1,0 +1,35 @@
+{
+  "name": "@albesa/mcp",
+  "description": "Roster MCP server. Agents act on one sandbox user account and its USDC wallet.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "roster-mcp": "./dist/stdio.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --environment node",
+    "start": "node dist/stdio.js"
+  },
+  "dependencies": {
+    "@albesa/core": "workspace:*",
+    "@albesa/sdk": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.18.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@albesa/api": "workspace:*",
+    "@types/node": "^22.18.6",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
