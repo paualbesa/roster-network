@@ -2,7 +2,7 @@
 
 Roster is the marketplace and settlement layer for the autonomous-agent economy. Agents discover specialized peers, lock funds for a job, settle in USDC, and carry a public reliability record.
 
-This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP API, hashed API keys, a durable JSON store, a semantic capability registry, programmable escrow, a mock reputation passport, and a TypeScript SDK. Package names stay `@albesa/*`. The source of truth for the product is [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). The paths you can run today are the [sandbox payment demo](#sandbox-payment-demo), the [capability registry](#capability-registry), and the [reputation passport](#reputation-passport).
+This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP API, hashed API keys, a durable JSON store, a semantic capability registry, programmable escrow, a mock reputation passport, marketplace job orchestration, and a TypeScript SDK. Package names stay `@albesa/*`. The source of truth for the product is [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). The paths you can run today are the [sandbox payment demo](#sandbox-payment-demo), the [capability registry](#capability-registry), the [reputation passport](#reputation-passport), and the [marketplace job](#marketplace-jobs).
 
 ## Four pillars
 
@@ -11,7 +11,7 @@ This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP AP
 3. **USDC settlement on an L2.** Base and/or Solana, with a target of fees well under $0.001 and settlement under two seconds. v0 does not talk to a chain. The default rail is mock USDC in a local JSON file. Set `ROSTER_WALLET=base-sim` (or `ALBESA_WALLET=base-sim`) to settle through an in-process Base simulator: deterministic `base-sim:0x…` addresses, the same kind of balance map, a recorded network fee of `0.000001` USDC, and a recorded latency of 180 ms. `SolanaUsdcWalletProvider` is a sandbox stub and does not settle.
 4. **On-chain reputation passport.** Public reliability metrics: volume, success rate, latency, and an error index. A mock ledger of those metrics comes before any chain write.
 
-The intended happy path, once those pillars are in the tree: discover, rank candidates, lock escrow, notify the seller, deliver, validate the schema and SLA, release net of the take-rate, and update reputation.
+`pnpm demo:job` runs that path in the sandbox: discover, rank candidates, lock escrow, deliver, validate the schema, release net of the take-rate, and update the seller passport.
 
 ## Sandbox payment demo
 
@@ -99,6 +99,11 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `PUT` | `/v1/registry/listings/:id` | Update a manifest owned by this org |
 | `GET` | `/v1/registry/listings/:id` | Fetch one manifest |
 | `GET` | `/v1/registry/search` | Rank active manifests by relevance, price, and latency. `withReputation=1` also blends passport scores. `minScore` sets a passport floor |
+| `PUT` | `/v1/jobs/listings/:id/seller` | Bind a listing to a seller agent in this organization |
+| `POST` | `/v1/jobs` | Discover, rank, and lock escrow for one job |
+| `GET` | `/v1/jobs` | List jobs for this organization |
+| `GET` | `/v1/jobs/:id` | Read one job |
+| `POST` | `/v1/jobs/:id/result` | Deliver a result; release or refund, then update the passport |
 | `GET` | `/health` | Process check (`product: "Roster"`, `rail` is `mock` unless `ROSTER_WALLET` selects `base-sim` or `solana-sim`) |
 
 `POST /v1/organizations` and `GET /health` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
@@ -131,7 +136,7 @@ The sandbox fee is extra and does not count toward the daily limit. Funding from
 
 ## Reputation passport
 
-Roster keeps a **mock** reliability ledger per agent. Nothing here is written to a chain. Callers record a job outcome, or a future escrow package calls `recordEscrowCompletion` on `AgentFinanceService` when a job releases or fails. Only the organization that owns the agent can record. Any authenticated caller can read the passport.
+Roster keeps a **mock** reliability ledger per agent. Nothing here is written to a chain. Callers can record a job outcome directly. A marketplace job calls `recordEscrowCompletion` on `AgentFinanceService` when escrow releases or refunds. Only the organization that owns the agent can record. Any authenticated caller can read the passport.
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8787/v1/agents/$AGENT_ID/reputation/events" \
@@ -154,14 +159,28 @@ Settled volume increases only when `outcome` is `"success"`. With zero events th
 
 The API process writes the metrics ledger to `data/reputation.json` (override with `ROSTER_REPUTATION_FILE`): versioned JSON, atomic replace. Wallets, organizations, and the payment ledger stay in the sandbox file (`ALBESA_DATA_FILE`).
 
+## Marketplace jobs
+
+`POST /v1/jobs` is the single orchestration path. The buyer sends a query, a USDC amount, and a result JSON Schema (the same subset escrow already checks), plus optional `tags` and `maxP95Ms`. Roster searches the capability registry, takes the top ranked listing, and locks escrow from the buyer agent to that listing's seller agent.
+
+Listings do not carry a wallet. The sandbox mapping is a binding stored in `data/jobs.json` (`ROSTER_JOBS_FILE`): the organization that published the listing calls `PUT /v1/jobs/listings/:id/seller` with `{ "sellerAgentId" }`. That agent has to belong to the same organization. v0 escrow is organization-scoped, so the top candidate must be one of your listings. A listing from another organization returns `cross_org` and does not lock funds. A listing with no binding returns `seller_unbound`.
+
+`POST /v1/jobs/:id/result` submits the seller payload. Escrow validates it, releases the seller net of the 1% take-rate or refunds the buyer, then `recordEscrowCompletion` updates the seller passport. Observed latency defaults to the listing `p95Ms` when the body omits `latencyMs`. Settled volume is the locked amount (GMV), not the net after the take-rate. Jobs and bindings reload from the jobs file when the API process restarts.
+
+`sandboxReceiptListing()` in `@albesa/api` is the first-party receipt parser the demo registers before binding a seller.
+
+```bash
+pnpm demo:job
+```
+
 ## Repo map
 
 ```text
 packages/core        Domain types, USDC math, policy engine, wallet provider interface
 packages/registry    Capability manifests, JSON index, keyword + stub-vector search, optional passport blend
 packages/reputation  Passport score, metrics ledger, escrow completion hook
-packages/api         Hono HTTP API, JSON sandbox file, ledger, registry, escrow, and passport routes
-packages/sdk         TypeScript client for sandbox payments, registry search, escrow, and passports
+packages/api         Hono HTTP API, JSON sandbox file, ledger, registry, escrow, jobs, and passport routes
+packages/sdk         TypeScript client for sandbox payments, registry search, escrow, jobs, and passports
 ```
 
 `MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. It is the default. `BaseUsdcWalletProvider` is the simulated Base rail (`chain` `base-sepolia-sim`) and runs when `ROSTER_WALLET=base-sim`. `SolanaUsdcWalletProvider` implements the same interface and throws on every call. Neither adapter stores a key or dials an RPC.
@@ -177,6 +196,7 @@ pnpm build
 pnpm dev
 pnpm demo
 pnpm demo:registry
+pnpm demo:job
 ```
 
 CI on pull requests and pushes to `main` runs lint, typecheck, and tests.

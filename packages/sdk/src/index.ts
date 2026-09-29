@@ -182,6 +182,53 @@ export interface RegistrySearchHit {
   reputationScore?: number;
 }
 
+export interface CreateJobInput {
+  buyerAgentId: string;
+  query: string;
+  amountUsdc: string;
+  schema: unknown;
+  tags?: string[];
+  maxP95Ms?: number;
+  memo?: string;
+}
+
+export interface JobPassportChange {
+  agentId: string;
+  scoreBefore: string;
+  scoreAfter: string;
+}
+
+export interface JobHandle {
+  id: string;
+  status: "held" | "released" | "refunded";
+  buyerAgentId: string;
+  sellerAgentId: string;
+  listingId: string;
+  listingName: string;
+  query: string;
+  amountUsdc: string;
+  escrowId: string;
+  rankScore: number;
+  takeRateUsdc: string;
+  sellerNetUsdc: string;
+  holdAddress: string;
+  result: unknown;
+  validationErrors: string[] | null;
+  latencyMs: number | null;
+  buyerBalanceUsdc: string;
+  sellerBalanceUsdc: string;
+  passport: JobPassportChange | null;
+  createdAt: string;
+  settledAt: string | null;
+}
+
+export interface ListingSellerBinding {
+  listingId: string;
+  organizationId: string;
+  sellerAgentId: string;
+  createdAt: string;
+}
+
 export class AlbesaError extends Error {
   readonly status: number;
   readonly code: string;
@@ -273,6 +320,13 @@ export class Albesa {
     search: (query?: RegistrySearchQuery) => Promise<RegistrySearchHit[]>;
   };
 
+  readonly jobs: {
+    bindSeller: (listingId: string, sellerAgentId: string) => Promise<ListingSellerBinding>;
+    create: (input: CreateJobInput) => Promise<JobHandle>;
+    get: (jobId: string) => Promise<JobHandle>;
+    submit: (jobId: string, result: unknown, options?: { latencyMs?: number }) => Promise<JobHandle>;
+  };
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -303,6 +357,12 @@ export class Albesa {
       update: (id, input) => this.updateCapability(id, input),
       get: (id) => this.getCapability(id),
       search: (query) => this.searchCapabilities(query),
+    };
+    this.jobs = {
+      bindSeller: (listingId, sellerAgentId) => this.bindJobSeller(listingId, sellerAgentId),
+      create: (input) => this.createJob(input),
+      get: (jobId) => this.getJob(jobId),
+      submit: (jobId, result, options) => this.submitJob(jobId, result, options),
     };
   }
 
@@ -410,6 +470,43 @@ export class Albesa {
   private async getCapability(id: string): Promise<RegistryListing> {
     const raw = await this.request<{ listing: RegistryListing }>("GET", `/v1/registry/listings/${id}`);
     return raw.listing;
+  }
+
+  private async bindJobSeller(listingId: string, sellerAgentId: string): Promise<ListingSellerBinding> {
+    const raw = await this.request<{ binding: ListingSellerBinding }>(
+      "PUT",
+      `/v1/jobs/listings/${listingId}/seller`,
+      { sellerAgentId },
+    );
+    return raw.binding;
+  }
+
+  private async createJob(input: CreateJobInput): Promise<JobHandle> {
+    const body: Record<string, unknown> = {
+      buyerAgentId: input.buyerAgentId,
+      query: input.query,
+      amountUsdc: input.amountUsdc,
+      schema: input.schema,
+    };
+    if (input.tags !== undefined) body.tags = input.tags;
+    if (input.maxP95Ms !== undefined) body.maxP95Ms = input.maxP95Ms;
+    if (input.memo !== undefined) body.memo = input.memo;
+    const raw = await this.request<{ job: JobHandle }>("POST", "/v1/jobs", body);
+    return raw.job;
+  }
+
+  private getJob(jobId: string): Promise<JobHandle> {
+    return this.request<{ job: JobHandle }>("GET", `/v1/jobs/${jobId}`).then((raw) => raw.job);
+  }
+
+  private async submitJob(
+    jobId: string,
+    result: unknown,
+    options?: { latencyMs?: number },
+  ): Promise<JobHandle> {
+    const body = options?.latencyMs === undefined ? { result } : { result, latencyMs: options.latencyMs };
+    const raw = await this.request<{ job: JobHandle }>("POST", `/v1/jobs/${jobId}/result`, body);
+    return raw.job;
   }
 
   private async searchCapabilities(query: RegistrySearchQuery = {}): Promise<RegistrySearchHit[]> {

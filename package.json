@@ -15,6 +15,7 @@
     "dev": "pnpm --filter @albesa/api dev",
     "demo": "pnpm build && pnpm --filter @albesa/sdk demo",
     "demo:registry": "pnpm build && pnpm --filter @albesa/sdk demo:registry",
+    "demo:job": "pnpm build && pnpm --filter @albesa/sdk demo:job",
     "start": "pnpm --filter @albesa/api start"
   },
   "pnpm": {

@@ -152,4 +152,75 @@ describe("Albesa SDK", () => {
     const loaded = await client.registry.get(cheap.id);
     expect(loaded.pricing.amountUsdc).toBe("0.020000");
   });
+
+  it("runs a marketplace job through create, get, and submit", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));
+    const { client } = await createSandboxOrganization({
+      name: "Acme",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+    const buyer = await client.agents.create({
+      name: "buyer",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: [],
+    });
+    const seller = await client.agents.create({
+      name: "seller",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: [],
+    });
+    await client.agents.fund(buyer.id, "5.00");
+    const listing = await client.registry.register({
+      name: "Receipt parser",
+      description: "Parse receipts and invoices into a structured total.",
+      inputSchema: { type: "object", properties: { documentUrl: { type: "string" } } },
+      outputSchema: { type: "object", properties: { total: { type: "string" } } },
+      pricing: { model: "per_call", amountUsdc: "0.02" },
+      latency: { p95Ms: 400 },
+      tags: ["receipt", "invoice"],
+    });
+    const binding = await client.jobs.bindSeller(listing.id, seller.id);
+    expect(binding.sellerAgentId).toBe(seller.id);
+
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["total"],
+      properties: { total: { type: "string", minLength: 1 } },
+    };
+    const held = await client.jobs.create({
+      buyerAgentId: buyer.id,
+      query: "parse receipts",
+      amountUsdc: "1.00",
+      schema,
+    });
+    expect(held.status).toBe("held");
+    expect(held.listingId).toBe(listing.id);
+    const loaded = await client.jobs.get(held.id);
+    expect(loaded.status).toBe("held");
+
+    const released = await client.jobs.submit(held.id, { total: "12.50" });
+    expect(released.status).toBe("released");
+    expect(released.sellerNetUsdc).toBe("0.990000");
+    expect(released.passport?.scoreBefore).toBe("0.0000");
+    expect(released.passport?.scoreAfter).toBe("85.0100");
+
+    const refundHold = await client.jobs.create({
+      buyerAgentId: buyer.id,
+      query: "parse receipts",
+      amountUsdc: "1.00",
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["rows"],
+        properties: { rows: { type: "integer", minimum: 1 } },
+      },
+    });
+    const refunded = await client.jobs.submit(refundHold.id, { rows: 0 });
+    expect(refunded.status).toBe("refunded");
+    expect(refunded.validationErrors).toEqual(["result.rows: expected >= 1."]);
+    expect(refunded.buyerBalanceUsdc).toBe("4.000000");
+  });
 });
