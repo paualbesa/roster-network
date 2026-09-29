@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { resolveRuntimeMode } from "../mode.js";
-import { BaseUsdcWalletProvider } from "./base.js";
 import { MockWalletProvider } from "./mock.js";
+import { createWalletProvider, resolveWalletRail } from "./select.js";
+import { SolanaUsdcWalletProvider, type SolanaUsdcWalletOptions } from "./solana.js";
 
 describe("MockWalletProvider", () => {
   it("moves USDC between mock addresses and refuses an overdraft", async () => {
@@ -17,6 +18,8 @@ describe("MockWalletProvider", () => {
     });
     expect(result.status).toBe("settled");
     expect(result.chain).toBe("mock");
+    expect(result.networkFeeUsdc).toBeUndefined();
+    expect(result.latencyMs).toBeUndefined();
     expect(await wallets.getBalance(treasury.address)).toBe("3.750000");
     expect(await wallets.getBalance(agent.address)).toBe("1.250000");
     await expect(
@@ -53,20 +56,44 @@ describe("MockWalletProvider", () => {
   });
 });
 
-describe("BaseUsdcWalletProvider", () => {
-  it("stays a stub and does not settle", async () => {
-    const wallets = new BaseUsdcWalletProvider({ rpcUrl: "https://sepolia.base.org" });
-    expect(wallets.chain).toBe("base-sepolia");
+describe("SolanaUsdcWalletProvider", () => {
+  it("stays a sandbox stub and refuses RPC URLs and key material", async () => {
+    const wallets = new SolanaUsdcWalletProvider();
+    expect(wallets.id).toBe("solana-usdc");
+    expect(wallets.chain).toBe("solana-devnet-sim");
     await expect(wallets.createAddress("agent:agt_1")).rejects.toThrow(/not implemented/);
-    await expect(wallets.getBalance("0xabc")).rejects.toThrow(/not implemented/);
+    await expect(wallets.getBalance("addr")).rejects.toThrow(/No chain calls are made/);
     await expect(
       wallets.transfer({
-        fromAddress: "0xabc",
-        toAddress: "0xdef",
+        fromAddress: "addr",
+        toAddress: "other",
         amountUsdc: "1",
         idempotencyKey: "tx_1",
       }),
     ).rejects.toThrow(/not implemented/);
+    expect(() => new SolanaUsdcWalletProvider({ rpcUrl: "https://api.devnet.solana.com" })).toThrow(/RPC URLs/);
+    expect(() => new SolanaUsdcWalletProvider({ mnemonic: "abandon abandon" } as SolanaUsdcWalletOptions)).toThrow(
+      /private keys, mnemonics, and seeds/,
+    );
+  });
+});
+
+describe("resolveWalletRail", () => {
+  it("defaults to mock and accepts the sandbox aliases", () => {
+    expect(resolveWalletRail({})).toBe("mock");
+    expect(resolveWalletRail({ ROSTER_WALLET: "  " })).toBe("mock");
+    expect(resolveWalletRail({ ROSTER_WALLET: "base-sim" })).toBe("base-sim");
+    expect(resolveWalletRail({ ALBESA_WALLET: "BASE-SIM" })).toBe("base-sim");
+    expect(resolveWalletRail({ ROSTER_WALLET: "solana-sim", ALBESA_WALLET: "solana-sim" })).toBe("solana-sim");
+    expect(createWalletProvider("mock")).toBeInstanceOf(MockWalletProvider);
+    expect(createWalletProvider("base-sim").id).toBe("base-usdc");
+    expect(createWalletProvider("base-sim").chain).toBe("base-sepolia-sim");
+    expect(createWalletProvider("solana-sim")).toBeInstanceOf(SolanaUsdcWalletProvider);
+  });
+
+  it("rejects an unknown rail, a disagreement, and does not add a mainnet wallet", () => {
+    expect(() => resolveWalletRail({ ROSTER_WALLET: "mainnet" })).toThrow(/Unsupported wallet rail/);
+    expect(() => resolveWalletRail({ ROSTER_WALLET: "mock", ALBESA_WALLET: "base-sim" })).toThrow(/disagree/);
   });
 });
 

@@ -53,7 +53,7 @@ export interface Balance {
   walletId: string;
   address: string;
   asset: "USDC";
-  chain: "mock" | "base-sepolia";
+  chain: "mock" | "base-sepolia" | "base-sepolia-sim" | "solana-devnet-sim";
   balanceUsdc: string;
 }
 

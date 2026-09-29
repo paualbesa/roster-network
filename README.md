@@ -8,7 +8,7 @@ This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP AP
 
 1. **Semantic capability registry.** Agents publish capability manifests (MCP or OpenAPI style). Buyers search that index by cost, latency, and SLA.
 2. **Programmable escrow.** The buyer locks USDC. The seller returns a schema-validated result. Funds release when that check passes. The first version is a mock, ahead of any audited contract.
-3. **USDC settlement on an L2.** Base and/or Solana, with a target of fees well under $0.001 and settlement under two seconds. v0 is the sandbox payment demo: mock USDC persisted in a local JSON file, with a `BaseUsdcWalletProvider` stub for a later testnet adapter.
+3. **USDC settlement on an L2.** Base and/or Solana, with a target of fees well under $0.001 and settlement under two seconds. v0 does not talk to a chain. The default rail is mock USDC in a local JSON file. Set `ROSTER_WALLET=base-sim` (or `ALBESA_WALLET=base-sim`) to settle through an in-process Base simulator: deterministic `base-sim:0x…` addresses, the same kind of balance map, a recorded network fee of `0.000001` USDC, and a recorded latency of 180 ms. `SolanaUsdcWalletProvider` is a sandbox stub and does not settle.
 4. **On-chain reputation passport.** Public reliability metrics: volume, success rate, latency, and an error index. A mock ledger of those metrics comes before any chain write.
 
 The intended happy path, once those pillars are in the tree: discover, rank candidates, lock escrow, notify the seller, deliver, validate the schema and SLA, release net of the take-rate, and update reputation.
@@ -99,11 +99,13 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `PUT` | `/v1/registry/listings/:id` | Update a manifest owned by this org |
 | `GET` | `/v1/registry/listings/:id` | Fetch one manifest |
 | `GET` | `/v1/registry/search` | Rank active manifests by relevance, price, and latency. `withReputation=1` also blends passport scores. `minScore` sets a passport floor |
-| `GET` | `/health` | Process check (`product: "Roster"`, `rail: mock`) |
+| `GET` | `/health` | Process check (`product: "Roster"`, `rail` is `mock` unless `ROSTER_WALLET` selects `base-sim` or `solana-sim`) |
 
 `POST /v1/organizations` and `GET /health` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
 
-`ROSTER_MODE` selects the runtime. `ALBESA_MODE` is the same switch. Set either to `testnet` to label the org as testnet. v0 still uses the mock adapter, and testnet orgs do not receive the 1000 USDC grant. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` exit on startup. If both variables are set, they must be the same value.
+`ROSTER_MODE` selects the runtime. `ALBESA_MODE` is the same switch. Set either to `testnet` to label the org as testnet. Testnet orgs do not receive the 1000 USDC grant. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` exit on startup. If both variables are set, they must be the same value.
+
+`ROSTER_WALLET` selects the settlement adapter. `ALBESA_WALLET` is the same switch, and the two must match when both are set. The default is `mock`. `base-sim` uses the simulated Base rail and still grants sandbox funds in sandbox mode. `solana-sim` selects a stub that refuses transfers. The simulated network fee and latency are on each Base-sim transfer result and on `diagnostics()`. They are not deducted from the agent balance, so the sandbox fee schedule and escrow principal stay exact. Use a fresh data file when switching rails.
 
 ## Capability registry
 
@@ -162,7 +164,7 @@ packages/api         Hono HTTP API, JSON sandbox file, ledger, registry, escrow,
 packages/sdk         TypeScript client for sandbox payments, registry search, escrow, and passports
 ```
 
-`MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. `BaseUsdcWalletProvider` implements the same interface and throws on every call.
+`MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. It is the default. `BaseUsdcWalletProvider` is the simulated Base rail (`chain` `base-sepolia-sim`) and runs when `ROSTER_WALLET=base-sim`. `SolanaUsdcWalletProvider` implements the same interface and throws on every call. Neither adapter stores a key or dials an RPC.
 
 ## Scripts
 
@@ -181,7 +183,7 @@ CI on pull requests and pushes to `main` runs lint, typecheck, and tests.
 
 ## Safety
 
-- Sandbox and testnet mock paths only. No chain RPC client is installed. `MockWalletProvider` is still the only settlement path.
+- Sandbox and testnet paths only. No chain RPC client is installed. `MockWalletProvider` is the default settlement path. `ROSTER_WALLET=base-sim` stays in-process: a recorded L2 fee and latency, and no network call.
 - `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` are refused at startup.
 - Do not commit `.env` files or `data/`. Sandbox API keys are random. The data file stores a SHA-256 hash, and the secret is returned once when the organization is created.
-- The Base adapter's options object has no field for a private key, mnemonic, or seed.
+- Wallet options have no field for a private key, mnemonic, or seed. Passing one, or an RPC URL, throws before any balance changes.
