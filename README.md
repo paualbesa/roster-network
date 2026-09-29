@@ -248,6 +248,7 @@ packages/api         Hono HTTP API, JSON sandbox file, ledger, accounts, registr
 packages/sdk         TypeScript client for sandbox payments, accounts, registry search, escrow, jobs, and passports
 packages/mcp         Stdio MCP server. Tools call the HTTP API with one account's API key
 apps/web             Roster marketing site (Next.js). Waitlist route acknowledges an address and stores nothing.
+scripts/             deploy-roster-web.sh — production deploy of apps/web (PM2 on 127.0.0.1:7000)
 ```
 
 `MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. It is the default. `BaseUsdcWalletProvider` is the simulated Base rail (`chain` `base-sepolia-sim`) and runs when `ROSTER_WALLET=base-sim`. `SolanaUsdcWalletProvider` implements the same interface and throws on every call. Neither adapter stores a key or dials an RPC.
@@ -260,6 +261,8 @@ pnpm --filter web build
 ```
 
 The site is the public face of Roster: landing page, a docs stub, and a developer waitlist. `POST /api/waitlist` checks the payload and discards it. There is no payment and no secret collection.
+
+Production is [https://roster.network](https://roster.network), a Cloudflare tunnel to `127.0.0.1:7000` on the Albesa server. Deploy with `bash scripts/deploy-roster-web.sh`. See [DEPLOY.md](./DEPLOY.md).
 
 ## Scripts
 
@@ -278,6 +281,7 @@ pnpm --filter @albesa/mcp build
 node packages/mcp/dist/stdio.js
 pnpm --filter web dev
 pnpm --filter web build
+bash scripts/deploy-roster-web.sh
 ```
 
 CI on pull requests and pushes to `main` runs lint, typecheck, tests, and `pnpm --filter web build`.
