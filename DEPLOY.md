@@ -19,6 +19,6 @@ On the server, from this repo:
 bash scripts/deploy-roster-web.sh
 ```
 
-The script pulls `main` (fast-forward only), enables pnpm through corepack, runs `pnpm install` and `pnpm --filter web build`, then `pm2 start ecosystem.config.cjs` or `pm2 restart roster-web`, runs `pm2 save`, and checks `http://127.0.0.1:7000/`.
+The script pulls `main` (fast-forward only), enables pnpm through corepack, runs `pnpm install --frozen-lockfile` and `pnpm --filter web build`, then `pm2 start ecosystem.config.cjs` or `pm2 restart roster-web`, runs `pm2 save`, and checks `http://127.0.0.1:7000/`.
 
 Checkout on the server: `/home/ats-server/albesa/albesa-agent-sdk`.
