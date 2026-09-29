@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { parseUsdc } from "@albesa/core";
 import type {
   Agent,
   Escrow,
@@ -56,7 +57,7 @@ interface FileDocument {
 
 /**
  * JSON file for one API process. Writes are atomic (temp file, then rename).
- * Wallet balances are included so a restart can refill the mock wallet provider,
+ * Wallet balances are included so a restart can refill the sandbox wallet provider,
  * including escrow custody holds. Escrows are optional on older version-1 files.
  */
 export class JsonFileStore extends MemoryStore {
@@ -75,20 +76,12 @@ export class JsonFileStore extends MemoryStore {
   }
 
   override commit(wallet: MockWalletSnapshot | null): void {
-    if (wallet) {
-      this.wallet = {
-        sequence: wallet.sequence,
-        balances: wallet.balances.map((entry) => ({ address: entry.address, balanceUsdc: entry.balanceUsdc })),
-      };
-    }
+    if (wallet) this.wallet = cloneWalletSnapshot(wallet);
     this.write();
   }
 
   override readWalletState(): MockWalletSnapshot {
-    return {
-      sequence: this.wallet.sequence,
-      balances: this.wallet.balances.map((entry) => ({ address: entry.address, balanceUsdc: entry.balanceUsdc })),
-    };
+    return cloneWalletSnapshot(this.wallet);
   }
 
   private load(): void {
@@ -181,7 +174,30 @@ function parseWallet(value: unknown): MockWalletSnapshot {
     if (!entry.address) throw new SandboxStoreError("Mock wallet snapshot has an empty address.");
     balances.push({ address: entry.address, balanceUsdc: entry.balanceUsdc });
   }
-  return { balances, sequence: value.sequence };
+  const snapshot: MockWalletSnapshot = { balances, sequence: value.sequence };
+  if (value.networkFeesCollectedUsdc !== undefined) {
+    if (typeof value.networkFeesCollectedUsdc !== "string") {
+      throw new SandboxStoreError("Simulated network fee total must be a USDC string.");
+    }
+    try {
+      parseUsdc(value.networkFeesCollectedUsdc);
+    } catch {
+      throw new SandboxStoreError("Simulated network fee total must be a USDC string.");
+    }
+    snapshot.networkFeesCollectedUsdc = value.networkFeesCollectedUsdc;
+  }
+  return snapshot;
+}
+
+function cloneWalletSnapshot(wallet: MockWalletSnapshot): MockWalletSnapshot {
+  const snapshot: MockWalletSnapshot = {
+    sequence: wallet.sequence,
+    balances: wallet.balances.map((entry) => ({ address: entry.address, balanceUsdc: entry.balanceUsdc })),
+  };
+  if (wallet.networkFeesCollectedUsdc !== undefined) {
+    snapshot.networkFeesCollectedUsdc = wallet.networkFeesCollectedUsdc;
+  }
+  return snapshot;
 }
 
 function asEntities<T>(value: unknown, label: string): T[] {

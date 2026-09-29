@@ -1,6 +1,6 @@
 export type RuntimeMode = "sandbox" | "testnet";
 
-export type ChainId = "mock" | "base-sepolia";
+export type ChainId = "mock" | "base-sepolia" | "base-sepolia-sim" | "solana-devnet-sim";
 
 export type AssetCode = "USDC";
 

@@ -37,8 +37,19 @@ export type {
   WalletOwnerType,
 } from "./types.js";
 export { WalletProviderError } from "./wallet/errors.js";
-export { BaseUsdcWalletProvider } from "./wallet/base.js";
-export type { BaseUsdcWalletOptions } from "./wallet/base.js";
+export {
+  BaseUsdcWalletProvider,
+  SIMULATED_BASE_LATENCY_MS,
+  SIMULATED_BASE_NETWORK_FEE_USDC,
+  simulatedBaseAddress,
+} from "./wallet/base.js";
+export type { BaseSimDiagnostics, BaseUsdcWalletOptions } from "./wallet/base.js";
 export { MockWalletProvider } from "./wallet/mock.js";
 export type { MockWalletProviderOptions, MockWalletSnapshot } from "./wallet/mock.js";
+export { isPersistentSandboxWallet } from "./wallet/persist.js";
+export type { PersistentSandboxWallet } from "./wallet/persist.js";
+export { createWalletProvider, resolveWalletRail } from "./wallet/select.js";
+export type { WalletRail } from "./wallet/select.js";
+export { SolanaUsdcWalletProvider } from "./wallet/solana.js";
+export type { SolanaUsdcWalletOptions } from "./wallet/solana.js";
 export type { TransferRequest, TransferResult, WalletProvider } from "./wallet/types.js";

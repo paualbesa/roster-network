@@ -9,6 +9,7 @@ import {
   evaluateSpend,
   formatUsdc,
   hashSandboxApiKey,
+  isPersistentSandboxWallet,
   MockWalletProvider,
   parseResultSchema,
   parseUsdc,
@@ -616,8 +617,12 @@ export class AgentFinanceService implements ReputationHook {
   }
 
   private async mintSandboxGrant(organization: Organization, wallet: Wallet, createdAt: string): Promise<void> {
-    if (!(this.wallets instanceof MockWalletProvider)) {
-      throw new ServiceError(403, "invalid_request", "Sandbox grants are only available on the mock wallet adapter.");
+    if (!isPersistentSandboxWallet(this.wallets)) {
+      throw new ServiceError(
+        403,
+        "invalid_request",
+        "Sandbox grants are only available on in-process sandbox wallet adapters.",
+      );
     }
     await this.wallets.credit(wallet.address, SANDBOX_TREASURY_GRANT_USDC);
     const transaction: Transaction = {
@@ -1064,7 +1069,7 @@ export class AgentFinanceService implements ReputationHook {
   }
 
   private commit(): void {
-    this.store.commit(this.wallets instanceof MockWalletProvider ? this.wallets.exportState() : null);
+    this.store.commit(isPersistentSandboxWallet(this.wallets) ? this.wallets.exportState() : null);
   }
 
   private enqueue<T>(task: () => Promise<T>): Promise<T> {

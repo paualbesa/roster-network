@@ -1,5 +1,12 @@
 import { Hono } from "hono";
-import { MockWalletProvider, resolveRuntimeMode, type RuntimeMode } from "@albesa/core";
+import {
+  createWalletProvider,
+  isPersistentSandboxWallet,
+  resolveRuntimeMode,
+  resolveWalletRail,
+  type RuntimeMode,
+  type WalletRail,
+} from "@albesa/core";
 import {
   CapabilityRegistry,
   parseSearchQuery,
@@ -44,6 +51,11 @@ export interface AppOptions {
    * reputation ledger. Return null when the seller has no events (neutral).
    */
   passportScores?: ListingPassportScore;
+  /**
+   * Settlement adapter. Omit it to read `ROSTER_WALLET` / `ALBESA_WALLET`.
+   * Unset selects the mock rail.
+   */
+  walletRail?: WalletRail;
 }
 
 /** Score for one listing, or null when reputation should stay neutral. */
@@ -53,11 +65,12 @@ export type ListingPassportScore = (
 
 export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const mode = options.mode ?? resolveRuntimeMode();
-  const service = options.service ?? openService(options, mode);
+  const walletRail = options.walletRail ?? resolveWalletRail();
+  const service = options.service ?? openService(options, mode, walletRail);
   const registry = options.registry ?? new CapabilityRegistry(options.now ? { now: options.now } : {});
   const app = new Hono<AppEnv>();
 
-  app.get("/health", (c) => c.json({ ok: true, product: "Roster", mode, rail: "mock", asset: "USDC" }));
+  app.get("/health", (c) => c.json({ ok: true, product: "Roster", mode, rail: walletRail, asset: "USDC" }));
 
   app.use("/v1/*", async (c, next) => {
     if (c.req.path === "/v1/organizations" && c.req.method === "POST") {
@@ -362,19 +375,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function openService(options: AppOptions, mode: RuntimeMode): AgentFinanceService {
+function openService(options: AppOptions, mode: RuntimeMode, walletRail: WalletRail): AgentFinanceService {
+  const wallets = createWalletProvider(walletRail);
   const reputationPath = options.reputationFile?.trim();
   const reputation =
     options.reputation ?? (reputationPath ? JsonReputationLedger.open(reputationPath) : undefined);
-  const shared = {
+  const dataFile = options.dataFile?.trim();
+  const store = dataFile ? JsonFileStore.open(dataFile) : undefined;
+  if (store && isPersistentSandboxWallet(wallets)) wallets.importState(store.readWalletState());
+  return new AgentFinanceService({
     mode,
+    wallets,
     ...(options.now ? { now: options.now } : {}),
     ...(reputation ? { reputation } : {}),
-  };
-  const dataFile = options.dataFile?.trim();
-  if (!dataFile) return new AgentFinanceService(shared);
-  const store = JsonFileStore.open(dataFile);
-  const wallets = new MockWalletProvider();
-  wallets.importState(store.readWalletState());
-  return new AgentFinanceService({ ...shared, store, wallets });
+    ...(store ? { store } : {}),
+  });
 }

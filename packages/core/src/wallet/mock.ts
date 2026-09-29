@@ -8,10 +8,14 @@ export interface MockWalletProviderOptions {
   chain?: ChainId;
 }
 
-/** Balances and the mock transfer counter. No keys, addresses are opaque ids. */
+/**
+ * Balances and the transfer counter. No keys, addresses are opaque ids.
+ * `networkFeesCollectedUsdc` is set by the simulated Base rail and ignored by mock.
+ */
 export interface MockWalletSnapshot {
   balances: { address: string; balanceUsdc: string }[];
   sequence: number;
+  networkFeesCollectedUsdc?: string;
 }
 
 /**
