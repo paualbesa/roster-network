@@ -98,7 +98,7 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `POST` | `/v1/registry/listings` | Publish a capability manifest |
 | `PUT` | `/v1/registry/listings/:id` | Update a manifest owned by this org |
 | `GET` | `/v1/registry/listings/:id` | Fetch one manifest |
-| `GET` | `/v1/registry/search` | Rank active manifests by relevance, price, and latency |
+| `GET` | `/v1/registry/search` | Rank active manifests by relevance, price, and latency. `withReputation=1` also blends passport scores. `minScore` sets a passport floor |
 | `GET` | `/health` | Process check (`product: "Roster"`, `rail: mock`) |
 
 `POST /v1/organizations` and `GET /health` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
@@ -107,9 +107,11 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 
 ## Capability registry
 
-Agents publish MCP/OpenAPI-style manifests: name, description, JSON Schemas, a USDC pricing hint, a latency SLA, and tags. Search is sandbox-only. It mixes keyword overlap with a deterministic hashing-trick embedding (no model download) and then nudges equally relevant hits toward cheaper and faster listings. Paused listings stay out of search.
+Agents publish MCP/OpenAPI-style manifests: name, description, JSON Schemas, a USDC pricing hint, a latency SLA, and tags. An optional `agentId` binds the listing to the seller agent whose reputation passport should rank it. Search is sandbox-only. By default it mixes keyword overlap with a deterministic hashing-trick embedding (no model download) and then nudges equally relevant hits toward cheaper and faster listings. Paused listings stay out of search. That default path does not read passports.
 
-`GET /v1/registry/search?q=parse%20receipts` returns `{ hits: [{ listing, score, relevance, priceHint, latencyHint }] }`. The same organization API key used for wallets authorizes every `/v1/registry` route. The API process writes the index to `REGISTRY_INDEX_PATH` (default `data/registry.json`). `createApp()` without a registry keeps listings in memory, which is what the tests do.
+`GET /v1/registry/search?q=parse%20receipts` returns `{ hits: [{ listing, score, relevance, priceHint, latencyHint }] }`. Add `withReputation=1` to blend passport scores into `score` and include `reputationScore` (0–100) on each hit. `minScore=80` drops listings under that floor and turns the same blend on. Blend weights, which sum to 1, are **relevance 0.70**, **price/latency 0.15**, and **reputation 0.15**. Inside the price/latency share, price is 60% and latency is 40%. An empty query has no relevance term, so that 0.70 folds into the browse score and reputation stays at 0.15.
+
+A listing with no passport events scores **50** (neutral), not 0, so a new seller is not ranked as a failure. Seller resolution is `listing.agentId` when set, otherwise the organization's only agent. If the organization has several agents and the listing names none, reputation stays neutral. The same organization API key used for wallets authorizes every `/v1/registry` route. The API process writes the index to `REGISTRY_INDEX_PATH` (default `data/registry.json`). `createApp()` without a registry keeps listings in memory, which is what the tests do.
 
 ```bash
 pnpm demo:registry
@@ -154,7 +156,7 @@ The API process writes the metrics ledger to `data/reputation.json` (override wi
 
 ```text
 packages/core        Domain types, USDC math, policy engine, wallet provider interface
-packages/registry    Capability manifests, JSON index, keyword + stub-vector search
+packages/registry    Capability manifests, JSON index, keyword + stub-vector search, optional passport blend
 packages/reputation  Passport score, metrics ledger, escrow completion hook
 packages/api         Hono HTTP API, JSON sandbox file, ledger, registry, escrow, and passport routes
 packages/sdk         TypeScript client for sandbox payments, registry search, escrow, and passports

@@ -128,6 +128,8 @@ export interface RegistryListing {
   latency: { p95Ms: number; p50Ms: number | null };
   tags: string[];
   status: "active" | "paused";
+  /** Seller agent bound to this listing, or null when the publisher did not set one. */
+  agentId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -142,6 +144,7 @@ export interface RegisterCapabilityInput {
   tags?: string[];
   version?: string;
   status?: "active" | "paused";
+  agentId?: string | null;
 }
 
 export interface UpdateCapabilityInput {
@@ -154,6 +157,7 @@ export interface UpdateCapabilityInput {
   latency?: { p95Ms: number; p50Ms?: number | null };
   tags?: string[];
   status?: "active" | "paused";
+  agentId?: string | null;
 }
 
 export interface RegistrySearchQuery {
@@ -162,6 +166,10 @@ export interface RegistrySearchQuery {
   maxPriceUsdc?: string;
   maxP95Ms?: number;
   limit?: number;
+  /** Passport floor from 0 to 100. Also opts into blended ranking. */
+  minScore?: number;
+  /** Blend passport scores into the rank. Missing passports stay neutral (50). */
+  withReputation?: boolean;
 }
 
 export interface RegistrySearchHit {
@@ -170,6 +178,8 @@ export interface RegistrySearchHit {
   relevance: number;
   priceHint: number;
   latencyHint: number;
+  /** Set when the query opted into reputation ranking. 50 means neutral. */
+  reputationScore?: number;
 }
 
 export class AlbesaError extends Error {
@@ -409,6 +419,8 @@ export class Albesa {
     if (query.maxPriceUsdc !== undefined) params.set("maxPriceUsdc", query.maxPriceUsdc);
     if (query.maxP95Ms !== undefined) params.set("maxP95Ms", query.maxP95Ms.toString());
     if (query.limit !== undefined) params.set("limit", query.limit.toString());
+    if (query.minScore !== undefined) params.set("minScore", query.minScore.toString());
+    if (query.withReputation) params.set("withReputation", "1");
     const search = params.toString();
     const raw = await this.request<{ hits: RegistrySearchHit[] }>(
       "GET",

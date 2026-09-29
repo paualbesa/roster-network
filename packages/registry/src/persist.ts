@@ -7,6 +7,9 @@ interface IndexFile {
   listings: CapabilityListing[];
 }
 
+/** Index files written before seller binding omit `agentId`. */
+type StoredListing = Omit<CapabilityListing, "agentId"> & { agentId?: string | null };
+
 export function readIndex(filePath: string): CapabilityListing[] {
   if (!existsSync(filePath)) return [];
   const raw = readFileSync(filePath, "utf8");
@@ -24,7 +27,7 @@ export function readIndex(filePath: string): CapabilityListing[] {
     if (!isStoredListing(entry)) {
       throw new Error(`Capability registry index contains an invalid listing: ${filePath}`);
     }
-    listings.push(entry);
+    listings.push({ ...entry, agentId: entry.agentId ?? null });
   }
   return listings;
 }
@@ -40,7 +43,7 @@ export function writeIndex(filePath: string, listings: readonly CapabilityListin
   renameSync(temporary, filePath);
 }
 
-function isStoredListing(value: unknown): value is CapabilityListing {
+function isStoredListing(value: unknown): value is StoredListing {
   if (!isRecord(value)) return false;
   return (
     typeof value.id === "string" &&
@@ -55,9 +58,14 @@ function isStoredListing(value: unknown): value is CapabilityListing {
     Array.isArray(value.tags) &&
     value.tags.every((tag) => typeof tag === "string") &&
     isStatus(value.status) &&
+    isAgentId(value.agentId) &&
     typeof value.createdAt === "string" &&
     typeof value.updatedAt === "string"
   );
+}
+
+function isAgentId(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === "string";
 }
 
 function isSchema(value: unknown): value is JsonSchema {

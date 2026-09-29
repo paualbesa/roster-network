@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -47,6 +47,7 @@ describe("capability registry", () => {
     expect(listing.latency).toEqual({ p95Ms: 400, p50Ms: 180 });
     expect(listing.tags).toEqual(["extract", "invoice"]);
     expect(listing.version).toBe("1.0.0");
+    expect(listing.agentId).toBeNull();
     expect(listing.createdAt).toBe("2026-09-28T00:00:00.000Z");
     expect(registry.get(listing.id)).toEqual(listing);
     expect(registry.get("cap_missing")).toBeNull();
@@ -176,6 +177,24 @@ describe("capability registry", () => {
     expect(again.get(live.id)?.version).toBe("1.1.0");
   });
 
+  it("reloads an index written before listings had agentId", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roster-registry-"));
+    tempDirs.push(dir);
+    const filePath = join(dir, "index.json");
+    const registry = new CapabilityRegistry({ filePath, now: clock() });
+    const live = registry.register("org_a", body({ agentId: "agt_seller" }));
+    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as {
+      listings: Record<string, unknown>[];
+    };
+    delete parsed.listings[0]?.agentId;
+    writeFileSync(filePath, JSON.stringify(parsed));
+
+    const legacy = new CapabilityRegistry({ filePath });
+    expect(legacy.get(live.id)?.agentId).toBeNull();
+    expect(legacy.search({ q: "extract invoices" }).map((hit) => hit.listing.id)).toEqual([live.id]);
+    expect(legacy.search({ q: "extract invoices" })[0]?.reputationScore).toBeUndefined();
+  });
+
   it("rejects malformed manifests", () => {
     const registry = new CapabilityRegistry({ now: clock() });
     expect(() => registry.register("org_a", body({ inputSchema: ["nope"] }))).toThrow(RegistryError);
@@ -183,7 +202,9 @@ describe("capability registry", () => {
       RegistryError,
     );
     expect(() => registry.register("org_a", body({ latency: { p95Ms: 100, p50Ms: 200 } }))).toThrow(RegistryError);
+    expect(() => registry.register("org_a", body({ agentId: "seller" }))).toThrow(RegistryError);
     expect(() => registry.search({ limit: 0 })).toThrow(RegistryError);
+    expect(() => registry.search({ minScore: 101 })).toThrow(RegistryError);
     expect(registry.get("cap_none")).toBeNull();
   });
 });

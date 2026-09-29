@@ -10,7 +10,16 @@ interface ListingBody {
 }
 
 interface SearchBody {
-  hits: { listing: { id: string; name: string }; score: number; relevance: number }[];
+  hits: {
+    listing: { id: string; name: string; agentId: string | null };
+    score: number;
+    relevance: number;
+    reputationScore?: number;
+  }[];
+}
+
+interface AgentBody {
+  agent: { id: string };
 }
 
 interface ErrorBody {
@@ -103,4 +112,176 @@ describe("capability registry routes", () => {
     const missing = await app.request("/v1/registry/listings/cap_missing", { headers: auth });
     expect(missing.status).toBe(404);
   });
+
+  it("blends mocked passport scores and filters with minScore", async () => {
+    const scores = new Map<string, number>();
+    let lookups = 0;
+    const app = createApp({
+      mode: "sandbox",
+      passportScores: (listing) => {
+        lookups += 1;
+        return scores.has(listing.id) ? (scores.get(listing.id) ?? null) : null;
+      },
+    });
+    const auth = await organization(app, "Acme");
+    const lowId = await publish(app, auth, invoice);
+    const highId = await publish(app, auth, invoice);
+    scores.set(lowId, 0);
+    scores.set(highId, 96);
+
+    const plain = await app.request("/v1/registry/search?q=parse%20receipts", { headers: auth });
+    expect(plain.status).toBe(200);
+    expect(lookups).toBe(0);
+    const plainHits = ((await plain.json()) as SearchBody).hits;
+    expect(plainHits.every((hit) => hit.reputationScore === undefined)).toBe(true);
+    expect(plainHits[0]?.score).toBe(plainHits[1]?.score);
+
+    const blended = await app.request("/v1/registry/search?q=parse%20receipts&withReputation=1", { headers: auth });
+    expect(blended.status).toBe(200);
+    expect(lookups).toBeGreaterThan(0);
+    const blendedHits = ((await blended.json()) as SearchBody).hits;
+    expect(blendedHits.map((hit) => hit.listing.id)).toEqual([highId, lowId]);
+    expect(blendedHits.map((hit) => hit.reputationScore)).toEqual([96, 0]);
+    expect(blendedHits[0]?.score).toBeGreaterThan(blendedHits[1]?.score ?? 0);
+
+    const before = lookups;
+    const again = await app.request("/v1/registry/search?q=parse%20receipts&withReputation=0", { headers: auth });
+    expect(again.status).toBe(200);
+    expect(lookups).toBe(before);
+
+    const strict = await app.request("/v1/registry/search?q=parse%20receipts&minScore=90", { headers: auth });
+    expect(((await strict.json()) as SearchBody).hits.map((hit) => hit.listing.id)).toEqual([highId]);
+
+    const neutralId = await publish(app, auth, invoice);
+    const floor = await app.request("/v1/registry/search?q=parse%20receipts&minScore=60", { headers: auth });
+    const floorIds = ((await floor.json()) as SearchBody).hits.map((hit) => hit.listing.id);
+    expect(floorIds).toEqual([highId]);
+    expect(floorIds).not.toContain(neutralId);
+
+    const open = await app.request("/v1/registry/search?q=parse%20receipts&minScore=50&withReputation=true", {
+      headers: auth,
+    });
+    const openHits = ((await open.json()) as SearchBody).hits;
+    expect(openHits.map((hit) => hit.listing.id)).toEqual([highId, neutralId]);
+    expect(openHits.find((hit) => hit.listing.id === neutralId)?.reputationScore).toBe(50);
+
+    const badFloor = await app.request("/v1/registry/search?minScore=101", { headers: auth });
+    expect(badFloor.status).toBe(400);
+    expect(((await badFloor.json()) as ErrorBody).error.code).toBe("invalid_request");
+    const badFlag = await app.request("/v1/registry/search?withReputation=yes", { headers: auth });
+    expect(badFlag.status).toBe(400);
+  });
+
+  it("reads sandbox passports for the seller and stays neutral without events", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const auth = await organization(app, "Acme");
+    const solo = await organization(app, "Solo");
+    const reliable = await createAgent(app, auth, "reliable");
+    const flaky = await createAgent(app, auth, "flaky");
+    const empty = await createAgent(app, auth, "empty");
+    const soloAgent = await createAgent(app, solo, "solo");
+
+    expect(
+      (
+        await app.request(`/v1/agents/${reliable}/reputation/events`, {
+          method: "POST",
+          headers: auth,
+          body: JSON.stringify({ outcome: "success", latencyMs: 500, volumeUsdc: "100" }),
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await app.request(`/v1/agents/${flaky}/reputation/events`, {
+          method: "POST",
+          headers: auth,
+          body: JSON.stringify({
+            outcome: "failure",
+            latencyMs: 3000,
+            volumeUsdc: "50",
+            error: true,
+            hallucination: true,
+          }),
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await app.request(`/v1/agents/${soloAgent}/reputation/events`, {
+          method: "POST",
+          headers: solo,
+          body: JSON.stringify({ outcome: "success", latencyMs: 500, volumeUsdc: "100" }),
+        })
+      ).status,
+    ).toBe(201);
+
+    const emptyPassport = await app.request(`/v1/agents/${empty}/passport`, { headers: auth });
+    expect(((await emptyPassport.json()) as { passport: { score: string } }).passport.score).toBe("0.0000");
+
+    const reliableId = await publish(app, auth, { ...invoice, agentId: reliable });
+    const flakyId = await publish(app, auth, { ...invoice, agentId: flaky });
+    const emptyId = await publish(app, auth, { ...invoice, agentId: empty });
+    const unboundId = await publish(app, auth, invoice);
+    const soloId = await publish(app, solo, invoice);
+
+    const foreign = await app.request("/v1/registry/listings", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ ...invoice, agentId: soloAgent }),
+    });
+    expect(foreign.status).toBe(400);
+    expect(((await foreign.json()) as ErrorBody).error.code).toBe("invalid_request");
+
+    const plain = await app.request("/v1/registry/search?q=extract%20invoices", { headers: auth });
+    const plainHits = ((await plain.json()) as SearchBody).hits;
+    expect(plainHits.every((hit) => hit.reputationScore === undefined)).toBe(true);
+    expect(plainHits.find((hit) => hit.listing.id === reliableId)?.score).toBe(
+      plainHits.find((hit) => hit.listing.id === flakyId)?.score,
+    );
+
+    const blended = await app.request("/v1/registry/search?q=extract%20invoices&withReputation=1", { headers: auth });
+    const blendedHits = ((await blended.json()) as SearchBody).hits;
+    const scoreOf = (id: string) => blendedHits.find((hit) => hit.listing.id === id);
+    expect(scoreOf(reliableId)?.reputationScore).toBe(84.75);
+    expect(scoreOf(flakyId)?.reputationScore).toBe(0);
+    expect(scoreOf(emptyId)?.reputationScore).toBe(50);
+    expect(scoreOf(unboundId)?.reputationScore).toBe(50);
+    expect(scoreOf(soloId)?.reputationScore).toBe(84.75);
+    expect(scoreOf(reliableId)?.score ?? 0).toBeGreaterThan(scoreOf(emptyId)?.score ?? 1);
+    expect(scoreOf(emptyId)?.score ?? 0).toBeGreaterThan(scoreOf(flakyId)?.score ?? 1);
+    expect(scoreOf(reliableId)?.listing.agentId).toBe(reliable);
+    expect(scoreOf(soloId)?.listing.agentId).toBeNull();
+
+    const floor = await app.request("/v1/registry/search?q=extract%20invoices&minScore=80", { headers: auth });
+    const floorIds = ((await floor.json()) as SearchBody).hits.map((hit) => hit.listing.id);
+    expect(floorIds).toHaveLength(2);
+    expect(floorIds).toEqual(expect.arrayContaining([reliableId, soloId]));
+    expect(floorIds).not.toContain(emptyId);
+    expect(floorIds).not.toContain(flakyId);
+    expect(floorIds).not.toContain(unboundId);
+  });
 });
+
+async function createAgent(app: ReturnType<typeof createApp>, headers: Record<string, string>, name: string) {
+  const created = await app.request("/v1/agents", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      name,
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: ["vendor_data"],
+    }),
+  });
+  expect(created.status).toBe(201);
+  return ((await created.json()) as AgentBody).agent.id;
+}
+
+async function publish(app: ReturnType<typeof createApp>, headers: Record<string, string>, body: unknown) {
+  const created = await app.request("/v1/registry/listings", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  expect(created.status).toBe(201);
+  return ((await created.json()) as ListingBody).listing.id;
+}

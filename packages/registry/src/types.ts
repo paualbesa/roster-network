@@ -34,6 +34,12 @@ export interface CapabilityListing {
   latency: LatencySla;
   tags: string[];
   status: ListingStatus;
+  /**
+   * Seller agent whose reputation passport ranks this listing.
+   * Null when the publisher did not bind one. Search may then use the
+   * organization's only agent. It never guesses among several agents.
+   */
+  agentId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,15 +50,41 @@ export interface CapabilitySearchQuery {
   maxPriceUsdc: string | null;
   maxP95Ms: number | null;
   limit: number;
+  /**
+   * Drop hits whose effective passport score is below this floor (0–100).
+   * Null keeps every hit. Missing passports use the neutral score, not zero.
+   * Honored only together with reputation ranking (see rank.ts).
+   */
+  minScore: number | null;
+  /** Opt into blending passport scores. Ignored when no reputation input is active. */
+  withReputation: boolean;
 }
 
 export interface CapabilitySearchHit {
   listing: CapabilityListing;
-  /** Combined relevance and price/latency hint score. Higher is better. */
+  /**
+   * Higher is better. Without reputation input this is keyword + embedding
+   * relevance nudged by price and latency. With reputation input it is the
+   * blended score from `RANK_BLEND_WEIGHTS`.
+   */
   score: number;
   relevance: number;
   priceHint: number;
   latencyHint: number;
+  /**
+   * Effective passport score from 0 to 100 used in the blend.
+   * Present only when reputation ranking is on. 50 means neutral
+   * (no passport, or no events), not a measured fifty.
+   */
+  reputationScore?: number;
+}
+
+/**
+ * Observed passport scores for an opt-in blend.
+ * Keyed by listing id. A missing key or null is neutral (50), not zero.
+ */
+export interface ReputationRankInput {
+  scoresByListingId: ReadonlyMap<string, number | null>;
 }
 
 export interface RawSearchParams {
@@ -61,4 +93,8 @@ export interface RawSearchParams {
   maxPriceUsdc: string | undefined;
   maxP95Ms: string | undefined;
   limit: string | undefined;
+  /** Minimum passport score, 0–100. Omit to skip the floor. */
+  minScore: string | undefined;
+  /** "1" or "true" opts into the reputation blend. "0" or "false" leaves the default ranker. */
+  withReputation: string | undefined;
 }
