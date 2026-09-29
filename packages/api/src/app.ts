@@ -24,8 +24,10 @@ import {
   parseCreateJobBody,
   parseJobResultBody,
   parseSellerBindingBody,
+  sandboxMarketplaceListings,
   type JobStore,
 } from "./jobs.js";
+import { openApiDocument } from "./openapi.js";
 import {
   AgentFinanceService,
   ServiceError,
@@ -91,6 +93,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.get("/health", (c) => c.json({ ok: true, product: "Roster", mode, rail: walletRail, asset: "USDC" }));
+
+  app.get("/openapi.json", (c) => c.json(openApiDocument));
 
   app.use("/v1/*", async (c, next) => {
     if (c.req.path === "/v1/organizations" && c.req.method === "POST") {
@@ -192,6 +196,35 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     const resultPayload = parseEscrowResult(await readJson(c));
     const result = await service.submitEscrowResult(c.get("orgId"), c.req.param("escrowId"), resultPayload);
     return c.json(result);
+  });
+
+  app.get("/v1/registry/listings", (c) => {
+    const listings = registry
+      .list()
+      .slice()
+      .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+    return c.json({ listings });
+  });
+
+  app.post("/v1/registry/seed", (c) => {
+    const organizationId = c.get("orgId");
+    const samples = sandboxMarketplaceListings();
+    let created = 0;
+    for (const draft of samples) {
+      const exists = registry
+        .list()
+        .some((listing) => listing.organizationId === organizationId && listing.name === draft.name);
+      if (exists) continue;
+      registry.register(organizationId, draft);
+      created += 1;
+    }
+    const listings = samples.flatMap((draft) => {
+      const match = registry
+        .list()
+        .find((listing) => listing.organizationId === organizationId && listing.name === draft.name);
+      return match ? [match] : [];
+    });
+    return c.json({ listings }, created > 0 ? 201 : 200);
   });
 
   app.post("/v1/registry/listings", async (c) => {

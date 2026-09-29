@@ -300,7 +300,16 @@ export class AgentFinanceService implements ReputationHook {
   }
 
   createEscrow(organizationId: string, input: CreateEscrowInput): Promise<CreateEscrowResult> {
-    return this.enqueue(() => this.createEscrowUnlocked(organizationId, input));
+    return this.enqueue(() => this.createEscrowUnlocked(organizationId, input, "organization"));
+  }
+
+  /**
+   * Lock escrow from a buyer in this organization to a seller in any organization.
+   * `POST /v1/escrows` stays inside one organization. Marketplace jobs use this
+   * path so a buyer can pay a listed seller.
+   */
+  createMarketplaceEscrow(buyerOrganizationId: string, input: CreateEscrowInput): Promise<CreateEscrowResult> {
+    return this.enqueue(() => this.createEscrowUnlocked(buyerOrganizationId, input, "marketplace"));
   }
 
   submitEscrowResult(organizationId: string, escrowId: string, result: unknown): Promise<EscrowResult> {
@@ -738,7 +747,11 @@ export class AgentFinanceService implements ReputationHook {
     return { event, passport: projectPassport(next) };
   }
 
-  private async createEscrowUnlocked(organizationId: string, input: CreateEscrowInput): Promise<CreateEscrowResult> {
+  private async createEscrowUnlocked(
+    organizationId: string,
+    input: CreateEscrowInput,
+    counterparty: "organization" | "marketplace",
+  ): Promise<CreateEscrowResult> {
     const organization = this.requireOrganization(organizationId);
     const canonical = this.parsePositiveAmount(input.amountUsdc);
     const schema = this.parseEscrowSchema(input.schema);
@@ -747,7 +760,10 @@ export class AgentFinanceService implements ReputationHook {
       throw new ServiceError(400, "invalid_request", "Buyer and seller must be different agents.");
     }
     const buyer = this.requireActiveAgent(organization.id, input.buyerAgentId);
-    const seller = this.requireActiveAgent(organization.id, input.sellerAgentId);
+    const seller =
+      counterparty === "marketplace"
+        ? this.requireActiveAgentAnywhere(input.sellerAgentId)
+        : this.requireActiveAgent(organization.id, input.sellerAgentId);
     const quote = quoteEscrowSettlement(canonical);
     const buyerWallet = this.requireWallet(buyer.walletId);
     const sellerWallet = this.requireWallet(seller.walletId);
@@ -896,7 +912,7 @@ export class AgentFinanceService implements ReputationHook {
       });
       settlementProviderRef = payout.providerRef;
       await this.appendLedger({
-        organizationId: escrow.organizationId,
+        organizationId: sellerWallet.organizationId,
         wallet: sellerWallet,
         transactionId,
         direction: "credit",
@@ -920,7 +936,7 @@ export class AgentFinanceService implements ReputationHook {
     }
     this.store.transactions.push({
       id: transactionId,
-      organizationId: escrow.organizationId,
+      organizationId: sellerWallet.organizationId,
       agentId: escrow.sellerAgentId,
       type: "escrow_release",
       status: "settled",
@@ -1024,6 +1040,16 @@ export class AgentFinanceService implements ReputationHook {
 
   private requireActiveAgent(organizationId: string, agentId: string): Agent {
     const agent = this.requireAgent(organizationId, agentId);
+    return this.requireActive(agent);
+  }
+
+  private requireActiveAgentAnywhere(agentId: string): Agent {
+    const agent = this.store.agents.get(agentId);
+    if (!agent) throw this.notFound("Seller agent not found.");
+    return this.requireActive(agent);
+  }
+
+  private requireActive(agent: Agent): Agent {
     if (agent.status !== "active") {
       throw new ServiceError(403, "agent_suspended", "Escrow requires an active agent.");
     }

@@ -16,9 +16,8 @@ const MAX_LATENCY_MS = 86_400_000;
 /**
  * Sandbox mapping from a capability listing to the agent that receives escrow.
  * Listings belong to an organization and do not carry a wallet. The listing
- * owner binds one active agent in that same organization. v0 escrow is
- * organization-scoped, so a job locks funds only when the buyer, the listing,
- * and the bound seller agent share one organization.
+ * owner binds one active agent in that same organization. A buyer in another
+ * organization can still lock a job against that binding.
  */
 export interface ListingSellerBinding {
   listingId: string;
@@ -35,7 +34,10 @@ export interface JobPassportChange {
 
 export interface StoredJob {
   id: string;
+  /** Buyer organization. This organization opened the job and funded escrow. */
   organizationId: string;
+  /** Organization that published the listing and owns the seller agent. */
+  sellerOrganizationId: string;
   buyerAgentId: string;
   sellerAgentId: string;
   listingId: string;
@@ -59,6 +61,7 @@ export interface JobView {
   id: string;
   status: "held" | "released" | "refunded";
   organizationId: string;
+  sellerOrganizationId: string;
   buyerAgentId: string;
   sellerAgentId: string;
   listingId: string;
@@ -121,8 +124,8 @@ export class JobStoreError extends Error {
   }
 }
 
-/** First-party receipt parser used by `pnpm demo:job`. Register it, then bind a seller agent. */
-export function sandboxReceiptListing(): {
+/** Manifest draft accepted by `POST /v1/registry/listings`. */
+export interface SandboxCapabilityDraft {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
@@ -130,7 +133,10 @@ export function sandboxReceiptListing(): {
   pricing: { model: "per_call"; amountUsdc: string };
   latency: { p95Ms: number };
   tags: string[];
-} {
+}
+
+/** First-party receipt parser used by the sandbox demos. Register it, then bind a seller agent. */
+export function sandboxReceiptListing(): SandboxCapabilityDraft {
   return {
     name: "Receipt parser",
     description: "Parse receipts and invoices into a structured total.",
@@ -150,6 +156,50 @@ export function sandboxReceiptListing(): {
   };
 }
 
+/**
+ * Sample catalog published by `POST /v1/registry/seed`.
+ * Names are stable so a second call does not create duplicates.
+ */
+export function sandboxMarketplaceListings(): SandboxCapabilityDraft[] {
+  return [
+    sandboxReceiptListing(),
+    {
+      name: "Doc summarizer",
+      description: "Summarize a document into a short brief.",
+      inputSchema: {
+        type: "object",
+        properties: { documentUrl: { type: "string" } },
+        required: ["documentUrl"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: { summary: { type: "string" } },
+        required: ["summary"],
+      },
+      pricing: { model: "per_call", amountUsdc: "0.03" },
+      latency: { p95Ms: 700 },
+      tags: ["docs", "summarize"],
+    },
+    {
+      name: "Unit converter",
+      description: "Convert an amount from one unit to another.",
+      inputSchema: {
+        type: "object",
+        properties: { value: { type: "string" }, unit: { type: "string" } },
+        required: ["value", "unit"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+      },
+      pricing: { model: "per_call", amountUsdc: "0.01" },
+      latency: { p95Ms: 120 },
+      tags: ["compute", "convert"],
+    },
+  ];
+}
+
 export class MemoryJobStore implements JobStore {
   protected readonly jobs = new Map<string, StoredJob>();
   protected readonly sellers = new Map<string, ListingSellerBinding>();
@@ -161,7 +211,7 @@ export class MemoryJobStore implements JobStore {
 
   listJobs(organizationId: string): StoredJob[] {
     return [...this.jobs.values()]
-      .filter((job) => job.organizationId === organizationId)
+      .filter((job) => job.organizationId === organizationId || job.sellerOrganizationId === organizationId)
       .map((job) => cloneJob(job));
   }
 
@@ -256,9 +306,10 @@ export interface JobOrchestratorOptions {
 }
 
 /**
- * Discover → rank → lock escrow → deliver → schema check → release or refund → passport.
- * Registry search order is the ranking. Escrow owns validation and the take-rate.
- * Reputation is recorded through `AgentFinanceService.recordEscrowCompletion`.
+ * Discover → rank (reputation blend) → lock escrow → deliver → schema check →
+ * release or refund → passport.
+ * The buyer may belong to a different organization than the seller. Escrow owns
+ * validation and the 1% take-rate. Reputation is recorded on the seller agent.
  */
 export class JobOrchestrator {
   private readonly service: AgentFinanceService;
@@ -308,6 +359,7 @@ export class JobOrchestrator {
   ): Promise<ListingSellerBinding> {
     const listing = this.requireOwnedListing(organizationId, listingId);
     await this.service.getAgentBalance(organizationId, sellerAgentId);
+    this.registry.update(organizationId, listing.id, { agentId: sellerAgentId });
     const binding: ListingSellerBinding = {
       listingId: listing.id,
       organizationId,
@@ -320,37 +372,23 @@ export class JobOrchestrator {
 
   private async createJobUnlocked(organizationId: string, input: CreateJobInput): Promise<CreateJobResult> {
     this.assertLockInput(input);
-    const hits = this.registry.search({
-      q: input.query,
-      tags: input.tags,
-      maxPriceUsdc: null,
-      maxP95Ms: input.maxP95Ms,
-      limit: 1,
-    });
-    const top = hits[0];
+    const top = await this.rankTop(input);
     if (!top) {
       throw new ServiceError(404, "no_candidates", "No capability listing matched the query.");
     }
-    if (top.listing.organizationId !== organizationId) {
-      throw new ServiceError(
-        409,
-        "cross_org",
-        "Sandbox jobs settle inside the listing organization. The top candidate belongs to another organization, so no escrow was locked.",
-      );
-    }
     const binding = this.jobs.readSeller(top.listing.id);
-    if (!binding || binding.organizationId !== organizationId) {
+    if (!binding || binding.organizationId !== top.listing.organizationId) {
       throw new ServiceError(
         409,
         "seller_unbound",
-        "The top candidate has no sandbox seller agent. Bind one with PUT /v1/jobs/listings/:id/seller before opening a job.",
+        "The top candidate has no sandbox seller agent. The listing owner binds one with PUT /v1/jobs/listings/:id/seller before a buyer can open a job.",
       );
     }
     if (binding.sellerAgentId === input.buyerAgentId) {
       throw new ServiceError(400, "invalid_request", "Buyer and seller must be different agents.");
     }
 
-    const locked = await this.service.createEscrow(organizationId, {
+    const locked = await this.service.createMarketplaceEscrow(organizationId, {
       buyerAgentId: input.buyerAgentId,
       sellerAgentId: binding.sellerAgentId,
       amountUsdc: input.amountUsdc,
@@ -361,6 +399,7 @@ export class JobOrchestrator {
     const job: StoredJob = {
       id: createId("job"),
       organizationId,
+      sellerOrganizationId: binding.organizationId,
       buyerAgentId: locked.escrow.buyerAgentId,
       sellerAgentId: locked.escrow.sellerAgentId,
       listingId: top.listing.id,
@@ -389,15 +428,18 @@ export class JobOrchestrator {
     input: SubmitJobInput,
   ): Promise<JobResult> {
     const job = this.requireJob(organizationId, jobId);
+    if (organizationId !== job.sellerOrganizationId) {
+      throw new ServiceError(403, "forbidden", "Only the seller organization can deliver a job result.");
+    }
     if (job.status !== "held") {
       throw new ServiceError(409, "invalid_state", `Job is already ${job.status}.`);
     }
     const latencyMs = this.resolveLatency(job.listingId, input.latencyMs);
-    const settled = await this.service.submitEscrowResult(organizationId, job.escrowId, input.result);
+    const settled = await this.service.submitEscrowResult(job.organizationId, job.escrowId, input.result);
     const before = await this.service.getPassport(job.sellerAgentId);
     const released = settled.escrow.status === "released";
     const after = await this.service.recordEscrowCompletion({
-      organizationId,
+      organizationId: job.sellerOrganizationId,
       agentId: job.sellerAgentId,
       outcome: released ? "success" : "failure",
       latencyMs,
@@ -461,9 +503,25 @@ export class JobOrchestrator {
     return listing;
   }
 
+  private async rankTop(input: CreateJobInput) {
+    const scores = await this.service.observedPassportScores(this.registry.list());
+    const hits = this.registry.search(
+      {
+        q: input.query,
+        tags: input.tags,
+        maxPriceUsdc: null,
+        maxP95Ms: input.maxP95Ms,
+        limit: 1,
+        withReputation: true,
+      },
+      { scoresByListingId: scores },
+    );
+    return hits[0] ?? null;
+  }
+
   private requireJob(organizationId: string, jobId: string): StoredJob {
     const job = this.jobs.readJob(jobId);
-    if (!job || job.organizationId !== organizationId) {
+    if (!job || (job.organizationId !== organizationId && job.sellerOrganizationId !== organizationId)) {
       throw new ServiceError(404, "not_found", "Job not found.");
     }
     return job;
@@ -475,6 +533,7 @@ export class JobOrchestrator {
       id: job.id,
       status: job.status,
       organizationId: job.organizationId,
+      sellerOrganizationId: job.sellerOrganizationId,
       buyerAgentId: job.buyerAgentId,
       sellerAgentId: job.sellerAgentId,
       listingId: job.listingId,
@@ -614,6 +673,7 @@ function parseStoredJob(value: unknown, index: number): StoredJob {
   return {
     id: readText(value.id, `jobs[${index.toString()}].id`),
     organizationId: readText(value.organizationId, `jobs[${index.toString()}].organizationId`),
+    sellerOrganizationId: readSellerOrganizationId(value, index),
     buyerAgentId: readText(value.buyerAgentId, `jobs[${index.toString()}].buyerAgentId`),
     sellerAgentId: readText(value.sellerAgentId, `jobs[${index.toString()}].sellerAgentId`),
     listingId: readText(value.listingId, `jobs[${index.toString()}].listingId`),
@@ -632,6 +692,13 @@ function parseStoredJob(value: unknown, index: number): StoredJob {
     createdAt: readText(value.createdAt, `jobs[${index.toString()}].createdAt`),
     settledAt: readNullableText(value.settledAt, `jobs[${index.toString()}].settledAt`),
   };
+}
+
+function readSellerOrganizationId(value: Record<string, unknown>, index: number): string {
+  if (value.sellerOrganizationId === undefined) {
+    return readText(value.organizationId, `jobs[${index.toString()}].organizationId`);
+  }
+  return readText(value.sellerOrganizationId, `jobs[${index.toString()}].sellerOrganizationId`);
 }
 
 function parseBinding(value: unknown, index: number): ListingSellerBinding {

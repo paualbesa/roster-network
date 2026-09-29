@@ -223,4 +223,93 @@ describe("Albesa SDK", () => {
     expect(refunded.validationErrors).toEqual(["result.rows: expected >= 1."]);
     expect(refunded.buyerBalanceUsdc).toBe("4.000000");
   });
+
+  it("pays a seller organization through escrow and refunds a failed delivery", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));
+    const base = { baseUrl: "http://albesa.test", fetch: fetchImpl };
+    const buyerOrg = await createSandboxOrganization({ name: "Northwind", ...base });
+    const sellerOrg = await createSandboxOrganization({ name: "Harbor", ...base });
+
+    const buyer = await buyerOrg.client.agents.create({
+      name: "buyer",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: [],
+    });
+    const seller = await sellerOrg.client.agents.create({
+      name: "seller",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: [],
+    });
+    const funded = await buyerOrg.client.agents.fund(buyer.id, "5.00");
+    expect(funded.balanceUsdc).toBe("5.000000");
+
+    const catalog = await sellerOrg.client.registry.seed();
+    expect(catalog.map((listing) => listing.name)).toEqual(["Receipt parser", "Doc summarizer", "Unit converter"]);
+    const receipt = catalog[0];
+    expect(receipt?.name).toBe("Receipt parser");
+    if (!receipt) throw new Error("missing receipt listing");
+    await sellerOrg.client.jobs.bindSeller(receipt.id, seller.id);
+    const listed = await buyerOrg.client.registry.list();
+    expect(listed.some((listing) => listing.id === receipt.id)).toBe(true);
+
+    const hits = await buyerOrg.client.registry.search({ q: "parse receipts", tags: ["receipt"], withReputation: true });
+    expect(hits[0]?.listing.id).toBe(receipt.id);
+    expect(hits[0]?.reputationScore).toBe(50);
+
+    const before = await buyerOrg.client.reputation.passport(seller.id);
+    expect(before.score).toBe("0.0000");
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["total"],
+      properties: { total: { type: "string", minLength: 1 } },
+    };
+    const held = await buyerOrg.client.jobs.create({
+      buyerAgentId: buyer.id,
+      query: "parse receipts",
+      amountUsdc: "1.00",
+      schema,
+      tags: ["receipt"],
+    });
+    expect(held.sellerOrganizationId).toBe(sellerOrg.organizationId);
+    expect(held.takeRateUsdc).toBe("0.010000");
+    expect((await sellerOrg.client.jobs.list()).map((job) => job.id)).toEqual([held.id]);
+
+    await expect(buyerOrg.client.jobs.submit(held.id, { total: "12.50" })).rejects.toMatchObject({
+      status: 403,
+      code: "forbidden",
+    });
+
+    const released = await sellerOrg.client.jobs.submit(held.id, { total: "12.50" });
+    expect(released.status).toBe("released");
+    expect(released.sellerNetUsdc).toBe("0.990000");
+    expect(released.sellerBalanceUsdc).toBe("0.990000");
+    expect(released.buyerBalanceUsdc).toBe("4.000000");
+    expect(released.passport).toEqual({
+      agentId: seller.id,
+      scoreBefore: "0.0000",
+      scoreAfter: "85.0100",
+    });
+
+    const refundHold = await buyerOrg.client.jobs.create({
+      buyerAgentId: buyer.id,
+      query: "parse receipts",
+      amountUsdc: "1.00",
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["rows"],
+        properties: { rows: { type: "integer", minimum: 1 } },
+      },
+      tags: ["receipt"],
+    });
+    const refunded = await sellerOrg.client.jobs.submit(refundHold.id, { rows: 0 });
+    expect(refunded.status).toBe("refunded");
+    expect(refunded.validationErrors).toEqual(["result.rows: expected >= 1."]);
+    expect(refunded.buyerBalanceUsdc).toBe("4.000000");
+    expect(refunded.sellerBalanceUsdc).toBe("0.990000");
+    expect(refunded.passport?.scoreBefore).toBe("85.0100");
+    expect(refunded.passport?.scoreAfter).toBe("52.5100");
+  });
 });
