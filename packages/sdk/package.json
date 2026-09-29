@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "test": "vitest run --environment node",
     "demo": "tsx examples/hello.ts",
-    "demo:registry": "tsx examples/registry.ts"
+    "demo:registry": "tsx examples/registry.ts",
+    "demo:job": "tsx examples/job.ts"
   },
   "devDependencies": {
     "@albesa/api": "workspace:*",

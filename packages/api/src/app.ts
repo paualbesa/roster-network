@@ -18,6 +18,15 @@ import {
 } from "@albesa/registry";
 import { JsonReputationLedger, type ReputationEventInput, type ReputationLedger } from "@albesa/reputation";
 import {
+  JobOrchestrator,
+  JsonJobStore,
+  MemoryJobStore,
+  parseCreateJobBody,
+  parseJobResultBody,
+  parseSellerBindingBody,
+  type JobStore,
+} from "./jobs.js";
+import {
   AgentFinanceService,
   ServiceError,
   type CreateAgentInput,
@@ -56,6 +65,10 @@ export interface AppOptions {
    * Unset selects the mock rail.
    */
   walletRail?: WalletRail;
+  /** Jobs and listing→seller bindings. Omit both this and `jobsFile` to keep them in memory. */
+  jobs?: JobStore;
+  /** Versioned JSON file for jobs. Ignored when `jobs` is passed. */
+  jobsFile?: string;
 }
 
 /** Score for one listing, or null when reputation should stay neutral. */
@@ -68,6 +81,13 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const walletRail = options.walletRail ?? resolveWalletRail();
   const service = options.service ?? openService(options, mode, walletRail);
   const registry = options.registry ?? new CapabilityRegistry(options.now ? { now: options.now } : {});
+  const jobs = openJobStore(options);
+  const orchestrator = new JobOrchestrator({
+    service,
+    registry,
+    jobs,
+    ...(options.now ? { now: options.now } : {}),
+  });
   const app = new Hono<AppEnv>();
 
   app.get("/health", (c) => c.json({ ok: true, product: "Roster", mode, rail: walletRail, asset: "USDC" }));
@@ -207,6 +227,34 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     const reputation = await reputationForSearch(registry, service, options.passportScores, query);
     const hits = registry.search(query, reputation);
     return c.json({ hits });
+  });
+
+  app.put("/v1/jobs/listings/:listingId/seller", async (c) => {
+    const sellerAgentId = parseSellerBindingBody(await readJson(c));
+    const binding = await orchestrator.bindSeller(c.get("orgId"), c.req.param("listingId"), sellerAgentId);
+    return c.json({ binding });
+  });
+
+  app.post("/v1/jobs", async (c) => {
+    const input = parseCreateJobBody(await readJson(c));
+    const result = await orchestrator.createJob(c.get("orgId"), input);
+    return c.json(result, 201);
+  });
+
+  app.get("/v1/jobs", async (c) => {
+    const result = await orchestrator.listJobs(c.get("orgId"));
+    return c.json(result);
+  });
+
+  app.get("/v1/jobs/:jobId", async (c) => {
+    const result = await orchestrator.getJob(c.get("orgId"), c.req.param("jobId"));
+    return c.json(result);
+  });
+
+  app.post("/v1/jobs/:jobId/result", async (c) => {
+    const input = parseJobResultBody(await readJson(c));
+    const result = await orchestrator.submitResult(c.get("orgId"), c.req.param("jobId"), input);
+    return c.json(result);
   });
 
   app.onError((error, c) => {
@@ -373,6 +421,13 @@ function parseEscrowResult(body: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function openJobStore(options: AppOptions): JobStore {
+  if (options.jobs) return options.jobs;
+  const jobsFile = options.jobsFile?.trim();
+  if (jobsFile) return JsonJobStore.open(jobsFile);
+  return new MemoryJobStore();
 }
 
 function openService(options: AppOptions, mode: RuntimeMode, walletRail: WalletRail): AgentFinanceService {
