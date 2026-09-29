@@ -9,6 +9,7 @@ import type {
   Organization,
   Policy,
   Transaction,
+  UserAccount,
   Wallet,
 } from "@albesa/core";
 
@@ -23,11 +24,15 @@ export class SandboxStoreError extends Error {
 
 /**
  * Process-local sandbox state. `apiKeys` maps a SHA-256 hex digest to an organization id.
- * The secret itself is never stored.
+ * `passwordHashes` maps a user id to the SHA-256 hex digest of the sandbox password.
+ * The secrets themselves are never stored. `usersByEmail` is a lowercase email index.
  */
 export class MemoryStore {
   readonly organizations = new Map<string, Organization>();
   readonly apiKeys = new Map<string, string>();
+  readonly users = new Map<string, UserAccount>();
+  readonly usersByEmail = new Map<string, string>();
+  readonly passwordHashes = new Map<string, string>();
   readonly agents = new Map<string, Agent>();
   readonly wallets = new Map<string, Wallet>();
   readonly policies = new Map<string, Policy>();
@@ -46,6 +51,8 @@ interface FileDocument {
   version: typeof FILE_VERSION;
   organizations: Organization[];
   apiKeyHashes: { hash: string; organizationId: string }[];
+  users: UserAccount[];
+  passwordHashes: { userId: string; hash: string }[];
   agents: Agent[];
   wallets: Wallet[];
   policies: Policy[];
@@ -58,7 +65,8 @@ interface FileDocument {
 /**
  * JSON file for one API process. Writes are atomic (temp file, then rename).
  * Wallet balances are included so a restart can refill the sandbox wallet provider,
- * including escrow custody holds. Escrows are optional on older version-1 files.
+ * including escrow custody holds. Escrows, users, and password hashes are optional
+ * on older version-1 files.
  */
 export class JsonFileStore extends MemoryStore {
   private wallet: MockWalletSnapshot = { balances: [], sequence: 0 };
@@ -96,6 +104,25 @@ export class JsonFileStore extends MemoryStore {
     const document = parseDocument(parsed);
     for (const organization of document.organizations) this.organizations.set(organization.id, organization);
     for (const entry of document.apiKeyHashes) this.apiKeys.set(entry.hash, entry.organizationId);
+    for (const user of document.users) {
+      const email = user.email.toLowerCase();
+      if (this.usersByEmail.has(email)) {
+        throw new SandboxStoreError("Duplicate account email in sandbox data file.");
+      }
+      this.users.set(user.id, user);
+      this.usersByEmail.set(email, user.id);
+    }
+    for (const entry of document.passwordHashes) {
+      if (!this.users.has(entry.userId)) {
+        throw new SandboxStoreError("passwordHashes entry does not match a user.");
+      }
+      this.passwordHashes.set(entry.userId, entry.hash);
+    }
+    for (const user of this.users.values()) {
+      if (!this.passwordHashes.has(user.id)) {
+        throw new SandboxStoreError(`Account ${user.id} is missing a password hash.`);
+      }
+    }
     for (const agent of document.agents) this.agents.set(agent.id, agent);
     for (const wallet of document.wallets) this.wallets.set(wallet.id, wallet);
     for (const policy of document.policies) this.policies.set(policy.id, policy);
@@ -110,6 +137,8 @@ export class JsonFileStore extends MemoryStore {
       version: FILE_VERSION,
       organizations: [...this.organizations.values()],
       apiKeyHashes: [...this.apiKeys.entries()].map(([hash, organizationId]) => ({ hash, organizationId })),
+      users: [...this.users.values()],
+      passwordHashes: [...this.passwordHashes.entries()].map(([userId, hash]) => ({ userId, hash })),
       agents: [...this.agents.values()],
       wallets: [...this.wallets.values()],
       policies: [...this.policies.values()],
@@ -134,6 +163,8 @@ function parseDocument(value: unknown): FileDocument {
     version: FILE_VERSION,
     organizations: asEntities<Organization>(value.organizations, "organizations"),
     apiKeyHashes: parseKeyHashes(value.apiKeyHashes),
+    users: value.users === undefined ? [] : parseUsers(value.users),
+    passwordHashes: value.passwordHashes === undefined ? [] : parsePasswordHashes(value.passwordHashes),
     agents: asEntities<Agent>(value.agents, "agents"),
     wallets: asEntities<Wallet>(value.wallets, "wallets"),
     policies: asEntities<Policy>(value.policies, "policies"),
@@ -142,6 +173,50 @@ function parseDocument(value: unknown): FileDocument {
     ledger: asEntities<LedgerEntry>(value.ledger, "ledger"),
     wallet: parseWallet(value.wallet),
   };
+}
+
+function parseUsers(value: unknown): UserAccount[] {
+  if (!Array.isArray(value)) throw new SandboxStoreError("users must be an array.");
+  const users: UserAccount[] = [];
+  for (const [index, item] of value.entries()) {
+    if (
+      !isRecord(item) ||
+      typeof item.id !== "string" ||
+      item.id.length === 0 ||
+      typeof item.email !== "string" ||
+      item.email.length === 0 ||
+      typeof item.displayName !== "string" ||
+      item.displayName.length === 0 ||
+      typeof item.organizationId !== "string" ||
+      item.organizationId.length === 0 ||
+      typeof item.createdAt !== "string"
+    ) {
+      throw new SandboxStoreError(`users[${index.toString()}] is missing account fields.`);
+    }
+    users.push({
+      id: item.id,
+      email: item.email,
+      displayName: item.displayName,
+      organizationId: item.organizationId,
+      createdAt: item.createdAt,
+    });
+  }
+  return users;
+}
+
+function parsePasswordHashes(value: unknown): { userId: string; hash: string }[] {
+  if (!Array.isArray(value)) throw new SandboxStoreError("passwordHashes must be an array.");
+  const hashes: { userId: string; hash: string }[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.userId !== "string" || typeof item.hash !== "string") {
+      throw new SandboxStoreError("passwordHashes entries must include userId and hash.");
+    }
+    if (!/^[0-9a-f]{64}$/.test(item.hash)) {
+      throw new SandboxStoreError("passwordHashes entries must be SHA-256 hex digests.");
+    }
+    hashes.push({ userId: item.userId, hash: item.hash });
+  }
+  return hashes;
 }
 
 function parseKeyHashes(value: unknown): { hash: string; organizationId: string }[] {

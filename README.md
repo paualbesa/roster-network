@@ -2,7 +2,7 @@
 
 Roster is the marketplace and settlement layer for the autonomous-agent economy. Agents discover specialized peers, lock funds for a job, settle in USDC, and carry a public reliability record.
 
-This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP API, hashed API keys, a durable JSON store, a semantic capability registry, programmable escrow, a mock reputation passport, marketplace job orchestration, and a TypeScript SDK. Package names stay `@albesa/*`. The source of truth for the product is [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). The paths you can run today are the [sandbox payment demo](#sandbox-payment-demo), the [capability registry](#capability-registry), the [reputation passport](#reputation-passport), the [marketplace job](#marketplace-jobs), and the [sandbox marketplace](#running-the-sandbox-marketplace).
+This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP API, hashed API keys, a durable JSON store, a semantic capability registry, programmable escrow, a mock reputation passport, marketplace job orchestration, human accounts, a stdio MCP server, and a TypeScript SDK. Package names stay `@albesa/*`. The source of truth for the product is [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). The paths you can run today are the [sandbox payment demo](#sandbox-payment-demo), the [capability registry](#capability-registry), the [reputation passport](#reputation-passport), the [marketplace job](#marketplace-jobs), the [sandbox marketplace](#running-the-sandbox-marketplace), and [agent access over MCP](#connect-an-agent-via-mcp).
 
 ## Four pillars
 
@@ -81,6 +81,9 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 
 | Method | Path | What it does |
 | --- | --- | --- |
+| `POST` | `/v1/accounts` | Sign up. Creates the account, organization, treasury wallet, and sandbox API key |
+| `POST` | `/v1/accounts/login` | Check the password and issue a new API key for the same account |
+| `GET` | `/v1/account` | Read the signed-in account and its treasury wallet |
 | `POST` | `/v1/organizations` | Create an org, treasury wallet, and sandbox API key |
 | `POST` | `/v1/agents` | Create an agent, policy, and wallet |
 | `POST` | `/v1/agents/:id/fund` | Move USDC from the treasury to the agent |
@@ -109,7 +112,55 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `GET` | `/health` | Process check (`product: "Roster"`, `rail` is `mock` unless `ROSTER_WALLET` selects `base-sim` or `solana-sim`) |
 | `GET` | `/openapi.json` | OpenAPI document for the sandbox (no API key) |
 
-`POST /v1/organizations`, `GET /health`, and `GET /openapi.json` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
+`POST /v1/organizations`, `POST /v1/accounts`, `POST /v1/accounts/login`, `GET /health`, and `GET /openapi.json` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
+
+## Accounts
+
+A Roster account is a human login plus the organization and sandbox USDC treasury that login owns. `POST /v1/accounts` with `email`, `password`, and optional `name` creates that account. In sandbox mode the treasury starts with **1000 test USDC**, the same demo grant as `POST /v1/organizations`. The response includes `apiKey` once. The password and the API key are stored as SHA-256 hashes, the same way organization keys are stored.
+
+`POST /v1/accounts/login` checks the password and returns a new API key for the same account. Older keys keep working. A key from one account cannot read or fund another account's agents. `GET /v1/account` returns the user and treasury for the key that was sent.
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/v1/accounts \
+  -H 'content-type: application/json' \
+  -d '{"email":"ada@example.com","password":"sandbox-passphrase-9","name":"Ada"}'
+```
+
+Use the `apiKey` from that response as `ROSTER_API_KEY`. Agents keep calling the HTTP API and `@albesa/sdk` with `Authorization: Bearer <api key>`.
+
+## Connect an agent via MCP
+
+`@albesa/mcp` is a stdio MCP server. It does not open a wallet of its own. It sends `ROSTER_API_KEY` as a bearer token to the Roster API you already run with `pnpm dev`. The tools are `roster_balance`, `roster_fund`, `roster_search`, `roster_create_job`, `roster_submit_job_result`, and `roster_passport`.
+
+`ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` refuse to start the API and this server. Leave the mode at `sandbox`.
+
+```bash
+pnpm install
+pnpm --filter @albesa/mcp build
+pnpm dev
+```
+
+Point Cursor or Claude Desktop at the built file. Both use the same `mcpServers` block. In Cursor this is `.cursor/mcp.json` (or the project MCP settings). Claude Desktop uses `claude_desktop_config.json`. The path in `args` has to be absolute.
+
+```json
+{
+  "mcpServers": {
+    "roster": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/albesa-agent-sdk/packages/mcp/dist/stdio.js"],
+      "env": {
+        "ROSTER_API_KEY": "sk_sandbox_replace_with_the_account_key",
+        "ROSTER_API_URL": "http://127.0.0.1:8787",
+        "ROSTER_MODE": "sandbox"
+      }
+    }
+  }
+}
+```
+
+`ALBESA_API_KEY` is accepted when `ROSTER_API_KEY` is unset. If both are set they must match. `ROSTER_API_URL` defaults to `http://127.0.0.1:8787`.
+
+After the server is connected, an agent can read the treasury with `roster_balance` (omit `agentId`), move demo USDC onto an agent with `roster_fund`, search listings with `roster_search`, lock a marketplace job with `roster_create_job`, deliver it with `roster_submit_job_result`, and read `roster_passport`. The key only spends and reads wallets that belong to that account. A marketplace job can still settle with a seller in another organization.
 
 `ROSTER_MODE` selects the runtime. `ALBESA_MODE` is the same switch. Set either to `testnet` to label the org as testnet. Testnet orgs do not receive the 1000 USDC grant. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` exit on startup. If both variables are set, they must be the same value.
 
@@ -193,8 +244,9 @@ pnpm demo:marketplace
 packages/core        Domain types, USDC math, policy engine, wallet provider interface
 packages/registry    Capability manifests, JSON index, keyword + stub-vector search, optional passport blend
 packages/reputation  Passport score, metrics ledger, escrow completion hook
-packages/api         Hono HTTP API, JSON sandbox file, ledger, registry, escrow, jobs, and passport routes
-packages/sdk         TypeScript client for sandbox payments, registry search, escrow, jobs, and passports
+packages/api         Hono HTTP API, JSON sandbox file, ledger, accounts, registry, escrow, jobs, and passport routes
+packages/sdk         TypeScript client for sandbox payments, accounts, registry search, escrow, jobs, and passports
+packages/mcp         Stdio MCP server. Tools call the HTTP API with one account's API key
 ```
 
 `MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. It is the default. `BaseUsdcWalletProvider` is the simulated Base rail (`chain` `base-sepolia-sim`) and runs when `ROSTER_WALLET=base-sim`. `SolanaUsdcWalletProvider` implements the same interface and throws on every call. Neither adapter stores a key or dials an RPC.
@@ -212,6 +264,8 @@ pnpm demo
 pnpm demo:registry
 pnpm demo:job
 pnpm demo:marketplace
+pnpm --filter @albesa/mcp build
+node packages/mcp/dist/stdio.js
 ```
 
 CI on pull requests and pushes to `main` runs lint, typecheck, and tests.
@@ -219,6 +273,6 @@ CI on pull requests and pushes to `main` runs lint, typecheck, and tests.
 ## Safety
 
 - Sandbox and testnet paths only. No chain RPC client is installed. `MockWalletProvider` is the default settlement path. `ROSTER_WALLET=base-sim` stays in-process: a recorded L2 fee and latency, and no network call.
-- `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` are refused at startup.
-- Do not commit `.env` files or `data/`. Sandbox API keys are random. The data file stores a SHA-256 hash, and the secret is returned once when the organization is created.
+- `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` are refused at startup of the API and the MCP server.
+- Do not commit `.env` files or `data/`. Sandbox API keys are random. Account passwords and API keys are stored as SHA-256 hashes. The API key is returned once when the account is created and again on login.
 - Wallet options have no field for a private key, mnemonic, or seed. Passing one, or an RPC URL, throws before any balance changes.

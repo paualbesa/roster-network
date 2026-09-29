@@ -31,6 +31,7 @@ import { openApiDocument } from "./openapi.js";
 import {
   AgentFinanceService,
   ServiceError,
+  type CreateAccountInput,
   type CreateAgentInput,
   type CreateEscrowInput,
   type PaymentInput,
@@ -97,7 +98,7 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   app.get("/openapi.json", (c) => c.json(openApiDocument));
 
   app.use("/v1/*", async (c, next) => {
-    if (c.req.path === "/v1/organizations" && c.req.method === "POST") {
+    if (isPublicRoute(c.req.method, c.req.path)) {
       await next();
       return;
     }
@@ -122,6 +123,23 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     if (!name) throw new ServiceError(400, "invalid_request", "name is required.");
     const result = await service.createOrganization(name);
     return c.json(result, 201);
+  });
+
+  app.post("/v1/accounts", async (c) => {
+    const input = parseCreateAccount(await readJson(c));
+    const result = await service.createAccount(input);
+    return c.json(result, 201);
+  });
+
+  app.post("/v1/accounts/login", async (c) => {
+    const input = parseLogin(await readJson(c));
+    const result = await service.loginAccount(input.email, input.password);
+    return c.json(result);
+  });
+
+  app.get("/v1/account", async (c) => {
+    const result = await service.getAccount(c.get("orgId"));
+    return c.json(result);
   });
 
   app.post("/v1/agents", async (c) => {
@@ -450,6 +468,40 @@ function parseEscrowResult(body: unknown): unknown {
     throw new ServiceError(400, "invalid_request", "result is required.");
   }
   return body.result;
+}
+
+function isPublicRoute(method: string, path: string): boolean {
+  return (
+    method === "POST" &&
+    (path === "/v1/organizations" || path === "/v1/accounts" || path === "/v1/accounts/login")
+  );
+}
+
+function parseCreateAccount(body: unknown): CreateAccountInput {
+  if (!isRecord(body)) throw new ServiceError(400, "invalid_request", "Expected a JSON object.");
+  const email = body.email;
+  const password = body.password;
+  if (typeof email !== "string" || typeof password !== "string") {
+    throw new ServiceError(400, "invalid_request", "email and password are required.");
+  }
+  if (body.name !== undefined && body.name !== null && typeof body.name !== "string") {
+    throw new ServiceError(400, "invalid_request", "name must be a string.");
+  }
+  return {
+    email,
+    password,
+    displayName: typeof body.name === "string" ? body.name : null,
+  };
+}
+
+function parseLogin(body: unknown): { email: string; password: string } {
+  if (!isRecord(body)) throw new ServiceError(400, "invalid_request", "Expected a JSON object.");
+  const email = body.email;
+  const password = body.password;
+  if (typeof email !== "string" || typeof password !== "string") {
+    throw new ServiceError(400, "invalid_request", "email and password are required.");
+  }
+  return { email, password };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

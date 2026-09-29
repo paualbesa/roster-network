@@ -1,8 +1,32 @@
 import { createApp } from "@albesa/api";
 import { describe, expect, it } from "vitest";
-import { Albesa, AlbesaError, createSandboxOrganization } from "./index.js";
+import { Albesa, AlbesaError, createSandboxAccount, createSandboxOrganization, loginSandboxAccount } from "./index.js";
 
 describe("Albesa SDK", () => {
+  it("signs up a sandbox account and reads the treasury through the client", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));
+    const { client, organizationId } = await createSandboxAccount({
+      email: "ada@example.com",
+      password: "sandbox-passphrase-9",
+      name: "Ada",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+    const treasury = await client.treasury.get();
+    expect(organizationId.startsWith("org_")).toBe(true);
+    expect(treasury.balanceUsdc).toBe("1000.000000");
+    expect(treasury.asset).toBe("USDC");
+
+    const again = await loginSandboxAccount({
+      email: "ada@example.com",
+      password: "sandbox-passphrase-9",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+    expect((await again.client.treasury.get()).balanceUsdc).toBe("1000.000000");
+  });
+
   it("runs the hello payment against the in-process API", async () => {
     const app = createApp({ mode: "sandbox" });
     const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));

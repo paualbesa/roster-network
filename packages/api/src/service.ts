@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import {
   addUsdc,
   compareUsdc,
@@ -28,6 +29,7 @@ import {
   type RuntimeMode,
   type SchemaValidationHook,
   type Transaction,
+  type UserAccount,
   type Wallet,
   type WalletProvider,
 } from "@albesa/core";
@@ -48,7 +50,7 @@ import {
 } from "@albesa/reputation";
 import { MemoryStore } from "./store.js";
 
-export type ErrorStatus = 400 | 403 | 404 | 409;
+export type ErrorStatus = 400 | 401 | 403 | 404 | 409;
 
 export class ServiceError extends Error {
   readonly status: ErrorStatus;
@@ -71,6 +73,31 @@ export interface CreateOrganizationResult {
     wallet: Wallet;
     balanceUsdc: string;
   };
+}
+
+export interface CreateAccountInput {
+  email: string;
+  password: string;
+  /** Used as the organization name. Omit to derive it from the email. */
+  displayName: string | null;
+}
+
+export interface CreateAccountResult {
+  user: UserAccount;
+  organization: Organization;
+  apiKey: string;
+  treasury: TreasuryResult;
+}
+
+export interface LoginAccountResult {
+  user: UserAccount;
+  apiKey: string;
+  treasury: TreasuryResult;
+}
+
+export interface AccountView {
+  user: UserAccount;
+  treasury: TreasuryResult;
 }
 
 export interface CreateAgentInput {
@@ -144,6 +171,9 @@ export interface CreateEscrowResult extends EscrowResult {
 }
 
 const NAME_MAX = 80;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 128;
+const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 const VENDOR_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 export interface RecordReputationResult {
@@ -193,6 +223,24 @@ export class AgentFinanceService implements ReputationHook {
     return this.enqueue(() => this.createOrganizationUnlocked(name));
   }
 
+  createAccount(input: CreateAccountInput): Promise<CreateAccountResult> {
+    return this.enqueue(() => this.createAccountUnlocked(input));
+  }
+
+  loginAccount(email: string, password: string): Promise<LoginAccountResult> {
+    return this.enqueue(() => this.loginAccountUnlocked(email, password));
+  }
+
+  getAccount(organizationId: string): Promise<AccountView> {
+    return this.enqueue(async () => {
+      const user = this.userForOrganization(organizationId);
+      if (!user) {
+        throw new ServiceError(404, "not_found", "No Roster account is linked to this API key.");
+      }
+      return { user, treasury: await this.readTreasury(organizationId) };
+    });
+  }
+
   createAgent(organizationId: string, input: CreateAgentInput): Promise<CreateAgentResult> {
     return this.enqueue(() => this.createAgentUnlocked(organizationId, input));
   }
@@ -221,11 +269,7 @@ export class AgentFinanceService implements ReputationHook {
   }
 
   getTreasury(organizationId: string): Promise<TreasuryResult> {
-    return this.enqueue(async () => {
-      const organization = this.requireOrganization(organizationId);
-      const wallet = this.requireWallet(organization.treasuryWalletId);
-      return { wallet, balanceUsdc: await this.wallets.getBalance(wallet.address) };
-    });
+    return this.enqueue(() => this.readTreasury(organizationId));
   }
 
   listAgentTransactions(organizationId: string, agentId: string): Promise<Transaction[]> {
@@ -335,6 +379,61 @@ export class AgentFinanceService implements ReputationHook {
       if (wallet.organizationId !== organizationId) throw this.notFound("Wallet not found.");
       return this.store.ledger.filter((entry) => entry.walletId === walletId).slice();
     });
+  }
+
+  private async createAccountUnlocked(input: CreateAccountInput): Promise<CreateAccountResult> {
+    const email = canonicalEmail(input.email);
+    if (!email) {
+      throw new ServiceError(400, "invalid_request", "email must be an address like ada@example.com.");
+    }
+    if (input.password.length < PASSWORD_MIN || input.password.length > PASSWORD_MAX) {
+      throw new ServiceError(
+        400,
+        "invalid_request",
+        `password must be ${PASSWORD_MIN.toString()}-${PASSWORD_MAX.toString()} characters.`,
+      );
+    }
+    if (this.store.usersByEmail.has(email)) {
+      throw new ServiceError(409, "account_exists", "An account with this email already exists.");
+    }
+    const displayName = accountDisplayName(email, input.displayName);
+    const created = await this.createOrganizationUnlocked(displayName);
+    const user: UserAccount = {
+      id: createId("usr"),
+      email,
+      displayName,
+      organizationId: created.organization.id,
+      createdAt: created.organization.createdAt,
+    };
+    this.store.users.set(user.id, user);
+    this.store.usersByEmail.set(email, user.id);
+    this.store.passwordHashes.set(user.id, hashSandboxApiKey(input.password));
+    this.commit();
+    return {
+      user,
+      organization: created.organization,
+      apiKey: created.apiKey,
+      treasury: created.treasury,
+    };
+  }
+
+  private async loginAccountUnlocked(emailRaw: string, password: string): Promise<LoginAccountResult> {
+    const presented = hashSandboxApiKey(password);
+    const email = canonicalEmail(emailRaw);
+    const userId = email ? this.store.usersByEmail.get(email) : undefined;
+    const user = userId ? this.store.users.get(userId) : undefined;
+    const stored = user ? this.store.passwordHashes.get(user.id) : undefined;
+    if (!user || !stored || !hashesEqual(stored, presented)) {
+      throw new ServiceError(401, "unauthorized", "Email or password is incorrect.");
+    }
+    const apiKey = createSandboxApiKey();
+    this.store.apiKeys.set(hashSandboxApiKey(apiKey), user.organizationId);
+    this.commit();
+    return {
+      user,
+      apiKey,
+      treasury: await this.readTreasury(user.organizationId),
+    };
   }
 
   private async createOrganizationUnlocked(name: string): Promise<CreateOrganizationResult> {
@@ -1062,6 +1161,19 @@ export class AgentFinanceService implements ReputationHook {
     return escrow;
   }
 
+  private async readTreasury(organizationId: string): Promise<TreasuryResult> {
+    const organization = this.requireOrganization(organizationId);
+    const wallet = this.requireWallet(organization.treasuryWalletId);
+    return { wallet, balanceUsdc: await this.wallets.getBalance(wallet.address) };
+  }
+
+  private userForOrganization(organizationId: string): UserAccount | undefined {
+    for (const user of this.store.users.values()) {
+      if (user.organizationId === organizationId) return user;
+    }
+    return undefined;
+  }
+
   private requireOrganization(organizationId: string): Organization {
     const organization = this.store.organizations.get(organizationId);
     if (!organization) throw this.notFound("Organization not found.");
@@ -1144,6 +1256,31 @@ function canonicalOrRaw(amountUsdc: string): string {
   } catch {
     return amountUsdc;
   }
+}
+
+function canonicalEmail(value: string): string | null {
+  const email = value.trim().toLowerCase();
+  if (email.length === 0 || email.length > 254 || !EMAIL_RE.test(email)) return null;
+  return email;
+}
+
+function accountDisplayName(email: string, displayName: string | null): string {
+  const provided = displayName?.trim() ?? "";
+  if (displayName !== null && provided.length === 0) {
+    throw new ServiceError(400, "invalid_request", `name must be 1-${NAME_MAX.toString()} characters.`);
+  }
+  const name = provided.length > 0 ? provided : (email.split("@")[0] ?? "account");
+  if (name.length === 0 || name.length > NAME_MAX) {
+    throw new ServiceError(400, "invalid_request", `name must be 1-${NAME_MAX.toString()} characters.`);
+  }
+  return name;
+}
+
+function hashesEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 function normalizeMemo(memo: string | null): string | null {

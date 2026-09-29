@@ -13,7 +13,12 @@ export const openApiDocument = {
   servers: [{ url: "http://127.0.0.1:8787" }],
   components: {
     securitySchemes: {
-      bearerAuth: { type: "http", scheme: "bearer", description: "Sandbox API key returned once by POST /v1/organizations." },
+      bearerAuth: {
+        type: "http",
+        scheme: "bearer",
+        description:
+          "Sandbox API key returned once by POST /v1/organizations or POST /v1/accounts. POST /v1/accounts/login issues another key for the same account.",
+      },
     },
     schemas: {
       Error: {
@@ -57,6 +62,32 @@ export const openApiDocument = {
         security: [],
         summary: "Create an organization, treasury wallet, and sandbox API key",
         responses: { "201": { description: "Organization created. `apiKey` is shown once." } },
+      },
+    },
+    "/v1/accounts": {
+      post: {
+        security: [],
+        summary: "Sign up. Creates the account, organization, treasury wallet, and sandbox API key",
+        responses: {
+          "201": { description: "Account created. `apiKey` is shown once. Sandbox mode grants 1000 test USDC." },
+          "409": { description: "account_exists" },
+        },
+      },
+    },
+    "/v1/accounts/login": {
+      post: {
+        security: [],
+        summary: "Check the password and issue a new API key for the same account",
+        responses: {
+          "200": { description: "New apiKey for the existing account." },
+          "401": { description: "Email or password is incorrect." },
+        },
+      },
+    },
+    "/v1/account": {
+      get: {
+        summary: "Read the signed-in account and its treasury wallet",
+        responses: { "200": { description: "User and treasury" } },
       },
     },
     "/v1/agents": {
