@@ -247,9 +247,19 @@ packages/reputation  Passport score, metrics ledger, escrow completion hook
 packages/api         Hono HTTP API, JSON sandbox file, ledger, accounts, registry, escrow, jobs, and passport routes
 packages/sdk         TypeScript client for sandbox payments, accounts, registry search, escrow, jobs, and passports
 packages/mcp         Stdio MCP server. Tools call the HTTP API with one account's API key
+apps/web             Roster marketing site (Next.js). Waitlist route acknowledges an address and stores nothing.
 ```
 
 `MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. It is the default. `BaseUsdcWalletProvider` is the simulated Base rail (`chain` `base-sepolia-sim`) and runs when `ROSTER_WALLET=base-sim`. `SolanaUsdcWalletProvider` implements the same interface and throws on every call. Neither adapter stores a key or dials an RPC.
+
+## Marketing site
+
+```bash
+pnpm --filter web dev
+pnpm --filter web build
+```
+
+The site is the public face of Roster: landing page, a docs stub, and a developer waitlist. `POST /api/waitlist` checks the payload and discards it. There is no payment and no secret collection.
 
 ## Scripts
 
@@ -266,9 +276,11 @@ pnpm demo:job
 pnpm demo:marketplace
 pnpm --filter @albesa/mcp build
 node packages/mcp/dist/stdio.js
+pnpm --filter web dev
+pnpm --filter web build
 ```
 
-CI on pull requests and pushes to `main` runs lint, typecheck, and tests.
+CI on pull requests and pushes to `main` runs lint, typecheck, tests, and `pnpm --filter web build`.
 
 ## Safety
 

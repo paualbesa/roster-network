@@ -1,6 +1,8 @@
 node_modules/
 dist/
+.next/
 .turbo/
+*.tsbuildinfo
 coverage/
 data/
 .env
