@@ -1,9 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MockWalletProvider } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
+import { AgentFinanceService } from "./service.js";
 import { sandboxReceiptListing } from "./jobs.js";
 
 const directories: string[] = [];
@@ -49,6 +51,7 @@ interface JobBody {
     listingName: string;
     sellerAgentId: string;
     buyerAgentId: string;
+    sellerOrganizationId: string;
     escrowId: string;
     amountUsdc: string;
     takeRateUsdc: string;
@@ -265,7 +268,7 @@ describe("marketplace jobs", () => {
     expect(body.passport.metrics.volumeSettledUsdc).toBe("0.000000");
   });
 
-  it("picks the top ranked listing and refuses an unbound or cross-organization candidate", async () => {
+  it("picks the top ranked listing and refuses an unbound candidate without locking funds", async () => {
     const app = createApp({ mode: "sandbox" });
     const acme = await organization(app, "Acme");
     const other = await organization(app, "Other");
@@ -299,7 +302,9 @@ describe("marketplace jobs", () => {
       }),
     });
     expect(blocked.status).toBe(409);
-    expect(((await blocked.json()) as ErrorBody).error.code).toBe("cross_org");
+    expect(((await blocked.json()) as ErrorBody).error.code).toBe("seller_unbound");
+    const untouched = await app.request(`/v1/agents/${buyerId}/balance`, { headers: acme.auth });
+    expect(((await untouched.json()) as { balanceUsdc: string }).balanceUsdc).toBe("3.000000");
     expect(foreign).toBeTruthy();
 
     const paused = await app.request(`/v1/registry/listings/${foreign}`, {
@@ -405,6 +410,11 @@ describe("marketplace jobs", () => {
     });
     const held = (await created.json()) as JobBody;
     expect(held.job.status).toBe("held");
+    expect(held.job.sellerOrganizationId).toBeTruthy();
+
+    const onDisk = JSON.parse(readFileSync(jobsFile, "utf8")) as { jobs: Record<string, unknown>[] };
+    delete onDisk.jobs[0]?.sellerOrganizationId;
+    writeFileSync(jobsFile, `${JSON.stringify(onDisk, null, 2)}\n`);
 
     const second = boot();
     const read = await second.request(`/v1/jobs/${held.job.id}`, { headers: auth });
@@ -427,5 +437,194 @@ describe("marketplace jobs", () => {
     expect(job.passport?.scoreAfter).toBe("85.0100");
     const passport = await third.request(`/v1/agents/${sellerId}/passport`, { headers: auth });
     expect(((await passport.json()) as PassportBody).passport.score).toBe("85.0100");
+  });
+
+  it("settles a paid job from a buyer organization to a seller organization", async () => {
+    const wallets = new MockWalletProvider();
+    const app = createApp({ mode: "sandbox", service: new AgentFinanceService({ mode: "sandbox", wallets }) });
+    const buyerOrg = await organization(app, "Northwind");
+    const sellerOrg = await organization(app, "Harbor");
+    const rivalOrg = await organization(app, "Drift");
+    const buyerId = await createAgent(app, buyerOrg.auth, "buyer");
+    const sellerId = await createAgent(app, sellerOrg.auth, "harbor-seller");
+    const rivalId = await createAgent(app, rivalOrg.auth, "drift-seller");
+    await fund(app, buyerOrg.auth, buyerId, "5.00");
+
+    const seeded = await app.request("/v1/registry/seed", { method: "POST", headers: sellerOrg.auth });
+    expect(seeded.status).toBe(201);
+    const catalog = ((await seeded.json()) as { listings: { id: string; name: string; agentId: string | null }[] }).listings;
+    expect(catalog.map((listing) => listing.name)).toEqual(["Receipt parser", "Doc summarizer", "Unit converter"]);
+    const receipt = catalog.find((listing) => listing.name === "Receipt parser");
+    expect(receipt).toBeTruthy();
+    await bind(app, sellerOrg.auth, receipt!.id, sellerId);
+
+    const again = await app.request("/v1/registry/seed", { method: "POST", headers: sellerOrg.auth });
+    expect(again.status).toBe(200);
+    const seededAgain = ((await again.json()) as { listings: { id: string }[] }).listings;
+    expect(seededAgain.map((listing) => listing.id)).toEqual(catalog.map((listing) => listing.id));
+
+    const rivalListingId = await register(app, rivalOrg.auth, {
+      ...sandboxReceiptListing(),
+      pricing: { model: "per_call", amountUsdc: "0.01" },
+      latency: { p95Ms: 80 },
+    });
+    await bind(app, rivalOrg.auth, rivalListingId, rivalId);
+    const failed = await app.request(`/v1/agents/${rivalId}/reputation/events`, {
+      method: "POST",
+      headers: rivalOrg.auth,
+      body: JSON.stringify({ outcome: "failure", latencyMs: 400, volumeUsdc: "1.00", error: true }),
+    });
+    expect(failed.status).toBe(201);
+
+    const search = await app.request("/v1/registry/search?q=parse%20receipts&tags=receipt&withReputation=1", {
+      headers: buyerOrg.auth,
+    });
+    expect(search.status).toBe(200);
+    const hits = ((await search.json()) as { hits: { listing: { id: string }; reputationScore: number }[] }).hits;
+    expect(hits.map((hit) => hit.listing.id)).toEqual([receipt!.id, rivalListingId]);
+    expect(hits[0]?.reputationScore).toBe(50);
+    expect(hits[1]?.reputationScore).toBe(20);
+
+    const spec = await app.request("/openapi.json");
+    expect(spec.status).toBe(200);
+    const document = (await spec.json()) as { paths: Record<string, unknown> };
+    expect(document.paths["/v1/jobs"]).toBeTruthy();
+    expect(document.paths["/v1/registry/seed"]).toBeTruthy();
+
+    const direct = await app.request("/v1/escrows", {
+      method: "POST",
+      headers: buyerOrg.auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        sellerAgentId: sellerId,
+        amountUsdc: "1.00",
+        schema: totalSchema,
+      }),
+    });
+    expect(direct.status).toBe(404);
+
+    const created = await app.request("/v1/jobs", {
+      method: "POST",
+      headers: buyerOrg.auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "parse receipts",
+        amountUsdc: "1.00",
+        schema: totalSchema,
+        tags: ["receipt"],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const held = (await created.json()) as JobBody;
+    expect(held.job.status).toBe("held");
+    expect(held.job.listingId).toBe(receipt!.id);
+    expect(held.job.sellerAgentId).toBe(sellerId);
+    expect(held.job.sellerOrganizationId).toBe(sellerOrg.organizationId);
+    expect(held.job.buyerBalanceUsdc).toBe("4.000000");
+    expect(held.job.takeRateUsdc).toBe("0.010000");
+    expect(held.job.sellerNetUsdc).toBe("0.990000");
+
+    const buyerList = await app.request("/v1/jobs", { headers: buyerOrg.auth });
+    const sellerList = await app.request("/v1/jobs", { headers: sellerOrg.auth });
+    const strangerList = await app.request("/v1/jobs", { headers: rivalOrg.auth });
+    expect(((await buyerList.json()) as { jobs: { id: string }[] }).jobs.map((job) => job.id)).toEqual([held.job.id]);
+    expect(((await sellerList.json()) as { jobs: { id: string }[] }).jobs.map((job) => job.id)).toEqual([held.job.id]);
+    expect(((await strangerList.json()) as { jobs: { id: string }[] }).jobs).toEqual([]);
+
+    const stranger = await app.request(`/v1/jobs/${held.job.id}`, { headers: rivalOrg.auth });
+    expect(stranger.status).toBe(404);
+
+    const buyerDelivery = await app.request(`/v1/jobs/${held.job.id}/result`, {
+      method: "POST",
+      headers: buyerOrg.auth,
+      body: JSON.stringify({ result: { total: "12.50" } }),
+    });
+    expect(buyerDelivery.status).toBe(403);
+    expect(((await buyerDelivery.json()) as ErrorBody).error.code).toBe("forbidden");
+
+    const delivered = await app.request(`/v1/jobs/${held.job.id}/result`, {
+      method: "POST",
+      headers: sellerOrg.auth,
+      body: JSON.stringify({ result: { total: "12.50" } }),
+    });
+    expect(delivered.status).toBe(200);
+    const released = (await delivered.json()) as JobBody;
+    expect(released.job.status).toBe("released");
+    expect(released.job.takeRateUsdc).toBe("0.010000");
+    expect(released.job.sellerNetUsdc).toBe("0.990000");
+    expect(released.job.buyerBalanceUsdc).toBe("4.000000");
+    expect(released.job.sellerBalanceUsdc).toBe("0.990000");
+    expect(released.job.validationErrors).toBeNull();
+    expect(released.job.passport).toEqual({
+      agentId: sellerId,
+      scoreBefore: "0.0000",
+      scoreAfter: "85.0100",
+    });
+    expect(await wallets.getBalance(`mock:fees:${buyerOrg.organizationId}`)).toBe("0.010000");
+
+    const sellerLedger = await app.request(`/v1/agents/${sellerId}/ledger`, { headers: sellerOrg.auth });
+    const credits = ((await sellerLedger.json()) as { entries: { direction: string; amountUsdc: string }[] }).entries;
+    expect(credits.map((entry) => `${entry.direction}:${entry.amountUsdc}`)).toEqual(["credit:0.990000"]);
+
+    const sellerHistory = await app.request(`/v1/agents/${sellerId}/transactions`, { headers: sellerOrg.auth });
+    const transactions = ((await sellerHistory.json()) as { transactions: { type: string; amountUsdc: string }[] }).transactions;
+    expect(transactions.map((tx) => tx.type)).toContain("escrow_release");
+  });
+
+  it("refunds the buyer when a cross-organization delivery fails validation", async () => {
+    const wallets = new MockWalletProvider();
+    const app = createApp({ mode: "sandbox", service: new AgentFinanceService({ mode: "sandbox", wallets }) });
+    const buyerOrg = await organization(app, "Northwind");
+    const sellerOrg = await organization(app, "Harbor");
+    const buyerId = await createAgent(app, buyerOrg.auth, "buyer");
+    const sellerId = await createAgent(app, sellerOrg.auth, "seller");
+    await fund(app, buyerOrg.auth, buyerId, "1.00");
+    const listingId = await register(app, sellerOrg.auth, sandboxReceiptListing());
+    await bind(app, sellerOrg.auth, listingId, sellerId);
+
+    const created = await app.request("/v1/jobs", {
+      method: "POST",
+      headers: buyerOrg.auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "parse receipts",
+        amountUsdc: "1.00",
+        schema: rowsSchema,
+        tags: ["receipt"],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const held = (await created.json()) as JobBody;
+    expect(held.job.buyerBalanceUsdc).toBe("0.000000");
+    expect(held.job.sellerAgentId).toBe(sellerId);
+
+    const failed = await app.request(`/v1/jobs/${held.job.id}/result`, {
+      method: "POST",
+      headers: sellerOrg.auth,
+      body: JSON.stringify({ result: { rows: 0 } }),
+    });
+    expect(failed.status).toBe(200);
+    const refunded = (await failed.json()) as JobBody;
+    expect(refunded.job.status).toBe("refunded");
+    expect(refunded.job.validationErrors).toEqual(["result.rows: expected >= 1."]);
+    expect(refunded.job.buyerBalanceUsdc).toBe("1.000000");
+    expect(refunded.job.sellerBalanceUsdc).toBe("0.000000");
+    expect(refunded.job.takeRateUsdc).toBe("0.010000");
+    expect(refunded.job.passport).toEqual({
+      agentId: sellerId,
+      scoreBefore: "0.0000",
+      scoreAfter: "20.0000",
+    });
+    expect(await wallets.getBalance(`mock:fees:${buyerOrg.organizationId}`)).toBe("0.000000");
+
+    const passport = await app.request(`/v1/agents/${sellerId}/passport`, { headers: buyerOrg.auth });
+    const body = (await passport.json()) as PassportBody;
+    expect(body.passport.score).toBe("20.0000");
+    expect(body.passport.metrics.failureCount).toBe(1);
+    expect(body.passport.metrics.volumeSettledUsdc).toBe("0.000000");
+
+    const history = await app.request(`/v1/agents/${buyerId}/transactions`, { headers: buyerOrg.auth });
+    const types = ((await history.json()) as { transactions: { type: string }[] }).transactions.map((tx) => tx.type);
+    expect(types).toContain("escrow_refund");
   });
 });

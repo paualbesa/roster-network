@@ -201,6 +201,8 @@ export interface JobPassportChange {
 export interface JobHandle {
   id: string;
   status: "held" | "released" | "refunded";
+  organizationId: string;
+  sellerOrganizationId: string;
   buyerAgentId: string;
   sellerAgentId: string;
   listingId: string;
@@ -317,12 +319,15 @@ export class Albesa {
     register: (input: RegisterCapabilityInput) => Promise<RegistryListing>;
     update: (id: string, input: UpdateCapabilityInput) => Promise<RegistryListing>;
     get: (id: string) => Promise<RegistryListing>;
+    list: () => Promise<RegistryListing[]>;
+    seed: () => Promise<RegistryListing[]>;
     search: (query?: RegistrySearchQuery) => Promise<RegistrySearchHit[]>;
   };
 
   readonly jobs: {
     bindSeller: (listingId: string, sellerAgentId: string) => Promise<ListingSellerBinding>;
     create: (input: CreateJobInput) => Promise<JobHandle>;
+    list: () => Promise<JobHandle[]>;
     get: (jobId: string) => Promise<JobHandle>;
     submit: (jobId: string, result: unknown, options?: { latencyMs?: number }) => Promise<JobHandle>;
   };
@@ -356,11 +361,14 @@ export class Albesa {
       register: (input) => this.registerCapability(input),
       update: (id, input) => this.updateCapability(id, input),
       get: (id) => this.getCapability(id),
+      list: () => this.listCapabilities(),
+      seed: () => this.seedCapabilities(),
       search: (query) => this.searchCapabilities(query),
     };
     this.jobs = {
       bindSeller: (listingId, sellerAgentId) => this.bindJobSeller(listingId, sellerAgentId),
       create: (input) => this.createJob(input),
+      list: () => this.listJobs(),
       get: (jobId) => this.getJob(jobId),
       submit: (jobId, result, options) => this.submitJob(jobId, result, options),
     };
@@ -472,6 +480,16 @@ export class Albesa {
     return raw.listing;
   }
 
+  private async listCapabilities(): Promise<RegistryListing[]> {
+    const raw = await this.request<{ listings: RegistryListing[] }>("GET", "/v1/registry/listings");
+    return raw.listings;
+  }
+
+  private async seedCapabilities(): Promise<RegistryListing[]> {
+    const raw = await this.request<{ listings: RegistryListing[] }>("POST", "/v1/registry/seed");
+    return raw.listings;
+  }
+
   private async bindJobSeller(listingId: string, sellerAgentId: string): Promise<ListingSellerBinding> {
     const raw = await this.request<{ binding: ListingSellerBinding }>(
       "PUT",
@@ -497,6 +515,11 @@ export class Albesa {
 
   private getJob(jobId: string): Promise<JobHandle> {
     return this.request<{ job: JobHandle }>("GET", `/v1/jobs/${jobId}`).then((raw) => raw.job);
+  }
+
+  private async listJobs(): Promise<JobHandle[]> {
+    const raw = await this.request<{ jobs: JobHandle[] }>("GET", "/v1/jobs");
+    return raw.jobs;
   }
 
   private async submitJob(

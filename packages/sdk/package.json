@@ -17,7 +17,8 @@
     "test": "vitest run --environment node",
     "demo": "tsx examples/hello.ts",
     "demo:registry": "tsx examples/registry.ts",
-    "demo:job": "tsx examples/job.ts"
+    "demo:job": "tsx examples/job.ts",
+    "demo:marketplace": "tsx examples/marketplace.ts"
   },
   "devDependencies": {
     "@albesa/api": "workspace:*",
