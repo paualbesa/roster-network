@@ -1,6 +1,14 @@
 import { Hono } from "hono";
 import { MockWalletProvider, resolveRuntimeMode, type RuntimeMode } from "@albesa/core";
-import { CapabilityRegistry, parseSearchQuery, RegistryError } from "@albesa/registry";
+import {
+  CapabilityRegistry,
+  parseSearchQuery,
+  readListingAgentId,
+  RegistryError,
+  type CapabilityListing,
+  type CapabilitySearchQuery,
+  type ReputationRankInput,
+} from "@albesa/registry";
 import { JsonReputationLedger, type ReputationEventInput, type ReputationLedger } from "@albesa/reputation";
 import {
   AgentFinanceService,
@@ -31,7 +39,17 @@ export interface AppOptions {
   reputationFile?: string;
   /** Capability index. Omit it to keep listings in memory. */
   registry?: CapabilityRegistry;
+  /**
+   * Test double for passport lookup. When set, search uses it instead of the
+   * reputation ledger. Return null when the seller has no events (neutral).
+   */
+  passportScores?: ListingPassportScore;
 }
+
+/** Score for one listing, or null when reputation should stay neutral. */
+export type ListingPassportScore = (
+  listing: Pick<CapabilityListing, "id" | "organizationId" | "agentId">,
+) => number | null | Promise<number | null>;
 
 export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const mode = options.mode ?? resolveRuntimeMode();
@@ -144,12 +162,16 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   });
 
   app.post("/v1/registry/listings", async (c) => {
-    const listing = registry.register(c.get("orgId"), await readJson(c));
+    const body = await readJson(c);
+    await bindSellerAgent(service, c.get("orgId"), body);
+    const listing = registry.register(c.get("orgId"), body);
     return c.json({ listing }, 201);
   });
 
   app.put("/v1/registry/listings/:id", async (c) => {
-    const listing = registry.update(c.get("orgId"), c.req.param("id"), await readJson(c));
+    const body = await readJson(c);
+    await bindSellerAgent(service, c.get("orgId"), body);
+    const listing = registry.update(c.get("orgId"), c.req.param("id"), body);
     return c.json({ listing });
   });
 
@@ -159,16 +181,18 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return c.json({ listing });
   });
 
-  app.get("/v1/registry/search", (c) => {
-    const hits = registry.search(
-      parseSearchQuery({
-        q: c.req.query("q"),
-        tags: c.req.query("tags"),
-        maxPriceUsdc: c.req.query("maxPriceUsdc"),
-        maxP95Ms: c.req.query("maxP95Ms"),
-        limit: c.req.query("limit"),
-      }),
-    );
+  app.get("/v1/registry/search", async (c) => {
+    const query = parseSearchQuery({
+      q: c.req.query("q"),
+      tags: c.req.query("tags"),
+      maxPriceUsdc: c.req.query("maxPriceUsdc"),
+      maxP95Ms: c.req.query("maxP95Ms"),
+      limit: c.req.query("limit"),
+      minScore: c.req.query("minScore"),
+      withReputation: c.req.query("withReputation"),
+    });
+    const reputation = await reputationForSearch(registry, service, options.passportScores, query);
+    const hits = registry.search(query, reputation);
     return c.json({ hits });
   });
 
@@ -187,6 +211,32 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   });
 
   return app;
+}
+
+async function bindSellerAgent(service: AgentFinanceService, organizationId: string, body: unknown): Promise<void> {
+  const agentId = readListingAgentId(body);
+  if (typeof agentId === "string") await service.assertOwnedAgent(organizationId, agentId);
+}
+
+async function reputationForSearch(
+  registry: CapabilityRegistry,
+  service: AgentFinanceService,
+  lookup: ListingPassportScore | undefined,
+  query: CapabilitySearchQuery,
+): Promise<ReputationRankInput | null> {
+  if (!query.withReputation && query.minScore === null) return null;
+  const listings = registry.list();
+  const scoresByListingId = new Map<string, number | null>();
+  if (lookup) {
+    for (const listing of listings) {
+      const score = await lookup(listing);
+      if (typeof score === "number") scoresByListingId.set(listing.id, score);
+    }
+  } else {
+    const observed = await service.observedPassportScores(listings);
+    for (const [id, score] of observed) scoresByListingId.set(id, score);
+  }
+  return { scoresByListingId };
 }
 
 async function readJson(c: { req: { json: () => Promise<unknown> } }): Promise<unknown> {

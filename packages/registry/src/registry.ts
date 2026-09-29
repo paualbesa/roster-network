@@ -12,6 +12,7 @@ import type {
   PricingHint,
   PricingModel,
   RawSearchParams,
+  ReputationRankInput,
 } from "./types.js";
 
 const NAME_MAX = 80;
@@ -28,6 +29,7 @@ const MAX_P95_MS = 120_000;
 const MAX_USDC_MICROS = 1_000_000n * 1_000_000n;
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const TAG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const AGENT_ID_RE = /^agt_[a-z0-9]{1,64}$/;
 
 export interface CapabilityRegistryOptions {
   filePath?: string;
@@ -44,6 +46,7 @@ interface ListingDraft {
   latency: LatencySla;
   tags: string[];
   status: ListingStatus;
+  agentId: string | null;
 }
 
 export class CapabilityRegistry {
@@ -82,6 +85,7 @@ export class CapabilityRegistry {
       latency: draft.latency,
       tags: draft.tags,
       status: draft.status,
+      agentId: draft.agentId,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -114,6 +118,7 @@ export class CapabilityRegistry {
       latency: draft.latency,
       tags: draft.tags,
       status: draft.status,
+      agentId: draft.agentId,
       createdAt: previous.createdAt,
       updatedAt: this.now().toISOString(),
     };
@@ -132,14 +137,26 @@ export class CapabilityRegistry {
     return listing ? structuredClone(listing) : null;
   }
 
-  search(query: Partial<CapabilitySearchQuery> = {}): CapabilitySearchHit[] {
+  list(): CapabilityListing[] {
+    return [...this.entries.values()].map((listing) => structuredClone(listing));
+  }
+
+  /**
+   * `reputation` opts into the passport blend. Omit it, and leave
+   * `withReputation` / `minScore` unset, to keep keyword + embedding ranking.
+   */
+  search(
+    query: Partial<CapabilitySearchQuery> = {},
+    reputation: ReputationRankInput | null = null,
+  ): CapabilitySearchHit[] {
     const normalized = normalizeSearchQuery(query);
-    return rankListings([...this.entries.values()], normalized).map((hit) => ({
+    return rankListings([...this.entries.values()], normalized, reputation).map((hit) => ({
       listing: structuredClone(hit.listing),
       score: hit.score,
       relevance: hit.relevance,
       priceHint: hit.priceHint,
       latencyHint: hit.latencyHint,
+      ...(hit.reputationScore === undefined ? {} : { reputationScore: hit.reputationScore }),
     }));
   }
 
@@ -176,7 +193,18 @@ export function parseSearchQuery(raw: RawSearchParams): CapabilitySearchQuery {
     maxPriceUsdc,
     maxP95Ms,
     limit,
+    minScore: parseMinScoreParam(raw.minScore),
+    withReputation: parseWithReputation(raw.withReputation),
   });
+}
+
+/**
+ * Seller agent on a register/update body.
+ * `undefined` means the field was omitted. `null` clears it.
+ */
+export function readListingAgentId(input: unknown): string | null | undefined {
+  if (!isRecord(input) || !Object.hasOwn(input, "agentId")) return undefined;
+  return readAgentId(input.agentId);
 }
 
 function normalizeSearchQuery(query: Partial<CapabilitySearchQuery>): CapabilitySearchQuery {
@@ -193,7 +221,15 @@ function normalizeSearchQuery(query: Partial<CapabilitySearchQuery>): Capability
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     throw new RegistryError(400, "invalid_request", `limit must be an integer from 1 to ${MAX_LIMIT.toString()}.`);
   }
-  return { q, tags, maxPriceUsdc, maxP95Ms, limit };
+  const minScore = query.minScore ?? null;
+  if (minScore !== null && (!Number.isFinite(minScore) || minScore < 0 || minScore > 100)) {
+    throw new RegistryError(400, "invalid_request", "minScore must be a number from 0 to 100.");
+  }
+  const withReputation = query.withReputation ?? false;
+  if (typeof withReputation !== "boolean") {
+    throw new RegistryError(400, "invalid_request", 'withReputation must be "1" or "0".');
+  }
+  return { q, tags, maxPriceUsdc, maxP95Ms, limit, minScore, withReputation };
 }
 
 function parseRegisterBody(input: unknown): ListingDraft {
@@ -208,12 +244,24 @@ function parseRegisterBody(input: unknown): ListingDraft {
     latency: readLatency(body.latency),
     tags: body.tags === undefined ? [] : readTags(body.tags),
     status: body.status === undefined ? "active" : readStatus(body.status),
+    agentId: body.agentId === undefined ? null : readAgentId(body.agentId),
   };
 }
 
 function parseUpdateBody(input: unknown, current: CapabilityListing): ListingDraft {
   const body = readBody(input);
-  const mutable = ["name", "description", "version", "inputSchema", "outputSchema", "pricing", "latency", "tags", "status"];
+  const mutable = [
+    "name",
+    "description",
+    "version",
+    "inputSchema",
+    "outputSchema",
+    "pricing",
+    "latency",
+    "tags",
+    "status",
+    "agentId",
+  ];
   if (!mutable.some((key) => key in body)) {
     throw new RegistryError(400, "invalid_request", "Update must change at least one listing field.");
   }
@@ -228,6 +276,7 @@ function parseUpdateBody(input: unknown, current: CapabilityListing): ListingDra
     latency: body.latency === undefined ? current.latency : readLatency(body.latency),
     tags: body.tags === undefined ? current.tags : readTags(body.tags),
     status: body.status === undefined ? current.status : readStatus(body.status),
+    agentId: body.agentId === undefined ? current.agentId : readAgentId(body.agentId),
   };
 }
 
@@ -259,6 +308,35 @@ function readVersion(value: unknown): string {
     throw new RegistryError(400, "invalid_request", "version must look like 1.0.0.");
   }
   return value;
+}
+
+function readAgentId(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !AGENT_ID_RE.test(value)) {
+    throw new RegistryError(400, "invalid_request", "agentId must be an agent id like agt_…, or null.");
+  }
+  return value;
+}
+
+function parseMinScoreParam(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  const trimmed = value.trim();
+  if (!/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    throw new RegistryError(400, "invalid_request", "minScore must be a number from 0 to 100.");
+  }
+  const score = Number(trimmed);
+  if (score > 100) {
+    throw new RegistryError(400, "invalid_request", "minScore must be a number from 0 to 100.");
+  }
+  return score;
+}
+
+function parseWithReputation(value: string | undefined): boolean {
+  if (value === undefined || value.trim() === "") return false;
+  const flag = value.trim().toLowerCase();
+  if (flag === "1" || flag === "true") return true;
+  if (flag === "0" || flag === "false") return false;
+  throw new RegistryError(400, "invalid_request", 'withReputation must be "1" or "0".');
 }
 
 function readStatus(value: unknown): ListingStatus {

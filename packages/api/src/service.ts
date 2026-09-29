@@ -150,6 +150,13 @@ export interface RecordReputationResult {
   passport: ReputationPassport;
 }
 
+/** Listing fields the registry ranker needs in order to resolve a seller passport. */
+export interface ListingReputationRef {
+  id: string;
+  organizationId: string;
+  agentId: string | null;
+}
+
 export interface ServiceOptions {
   mode?: RuntimeMode;
   now?: () => Date;
@@ -245,6 +252,41 @@ export class AgentFinanceService implements ReputationHook {
       const agent = this.store.agents.get(agentId);
       if (!agent) throw this.notFound("Agent not found.");
       return emptyPassport(agent.id, agent.organizationId);
+    });
+  }
+
+  assertOwnedAgent(organizationId: string, agentId: string): Promise<void> {
+    return this.enqueue(async () => {
+      const agent = this.store.agents.get(agentId);
+      if (!agent || agent.organizationId !== organizationId) {
+        throw new ServiceError(400, "invalid_request", "agentId must be an agent in this organization.");
+      }
+    });
+  }
+
+  /**
+   * Observed passport scores for registry ranking, keyed by listing id.
+   * A listing is omitted (neutral, not zero) when it has no resolvable seller,
+   * the seller belongs to another organization, or that passport has no events.
+   *
+   * Seller resolution: `listing.agentId`, otherwise the organization's only agent.
+   */
+  observedPassportScores(listings: readonly ListingReputationRef[]): Promise<Map<string, number>> {
+    return this.enqueue(async () => {
+      const scores = new Map<string, number>();
+      const soleAgentByOrg = new Map<string, string | null>();
+      for (const listing of listings) {
+        const agentId = listing.agentId ?? soleAgentId(this.store, listing.organizationId, soleAgentByOrg);
+        if (!agentId) continue;
+        const agent = this.store.agents.get(agentId);
+        if (!agent || agent.organizationId !== listing.organizationId) continue;
+        const totals = this.reputation.readTotals(agentId);
+        if (!totals || totals.eventCount === 0 || totals.organizationId !== listing.organizationId) continue;
+        const score = Number(projectPassport(totals).score);
+        if (!Number.isFinite(score)) continue;
+        scores.set(listing.id, clampPassportScore(score));
+      }
+      return scores;
     });
   }
 
@@ -1033,6 +1075,32 @@ export class AgentFinanceService implements ReputationHook {
     );
     return run;
   }
+}
+
+function soleAgentId(
+  store: MemoryStore,
+  organizationId: string,
+  cache: Map<string, string | null>,
+): string | null {
+  const cached = cache.get(organizationId);
+  if (cached !== undefined) return cached;
+  let found: string | null = null;
+  for (const agent of store.agents.values()) {
+    if (agent.organizationId !== organizationId) continue;
+    if (found !== null) {
+      cache.set(organizationId, null);
+      return null;
+    }
+    found = agent.id;
+  }
+  cache.set(organizationId, found);
+  return found;
+}
+
+function clampPassportScore(score: number): number {
+  if (score < 0) return 0;
+  if (score > 100) return 100;
+  return score;
 }
 
 function emptyPassport(agentId: string, organizationId: string): ReputationPassport {
