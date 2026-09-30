@@ -39,7 +39,8 @@ echo "== pm2 =="
 if pm2 describe roster-web >/dev/null 2>&1; then
   pm2 restart roster-web --update-env
 else
-  pm2 start "$ROOT/ecosystem.config.cjs"
+  # --only roster-web: ecosystem.config.cjs also defines roster-api.
+  pm2 start "$ROOT/ecosystem.config.cjs" --only roster-web
 fi
 pm2 save
 

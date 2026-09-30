@@ -22,7 +22,7 @@ This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP AP
 3. Fund the agent from the organization treasury.
 4. The agent pays a vendor. The policy engine runs first. Compliant payments settle and a sandbox fee is recorded: **1% + 0.01 USDC**.
 
-State lives in a JSON file (`ALBESA_DATA_FILE`, default `data/sandbox.json` in the API process working directory). Restarting the API reloads organizations, agents, policies, mock balances, transactions, and the ledger. `createApp()` without `dataFile` keeps the in-memory store for tests. One API process should own a given file.
+State lives in a JSON file (`ALBESA_DATA_FILE`, default `data/sandbox.json` in the API process working directory). Restarting the API reloads organizations, agents, policies, mock balances, transactions, and the ledger. Jobs, reputation, and the capability registry reload from `data/jobs.json`, `data/reputation.json`, and `data/registry.json` in that same directory. `createApp()` without `dataFile` keeps the in-memory store for tests. One API process should own a given file. Production keeps the four files outside the git checkout. See [DEPLOY.md](./DEPLOY.md).
 
 ### Pricing context
 
@@ -62,7 +62,7 @@ pnpm install
 pnpm dev
 ```
 
-The API listens on `http://127.0.0.1:8787` and logs `Roster API`.
+The API listens on `http://127.0.0.1:8787` and logs `Roster API`. `HOST` and `PORT` change that bind address. `pnpm --filter @albesa/api start` reads the same variables. Production sets `HOST=127.0.0.1` and `PORT=7001`.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8787/v1/organizations \
@@ -253,7 +253,7 @@ packages/api         Hono HTTP API, JSON sandbox file, ledger, accounts, registr
 packages/sdk         TypeScript client for sandbox payments, accounts, registry search, escrow, jobs, and passports
 packages/mcp         Stdio MCP server. Tools call the HTTP API with one account's API key
 apps/web             Roster marketing site (Next.js). Waitlist route acknowledges an address and stores nothing.
-scripts/             deploy-roster-web.sh — production deploy of apps/web (PM2 on 127.0.0.1:7000)
+scripts/             deploy-roster-web.sh (PM2 roster-web on 127.0.0.1:7000), deploy-roster-api.sh (PM2 roster-api on 127.0.0.1:7001)
 ```
 
 `MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. It is the default. `BaseUsdcWalletProvider` is the simulated Base rail (`chain` `base-sepolia-sim`) and runs when `ROSTER_WALLET=base-sim`. `SolanaUsdcWalletProvider` implements the same interface and throws on every call. Neither adapter stores a key or dials an RPC.
@@ -267,7 +267,7 @@ pnpm --filter web build
 
 The site is the public face of Roster: landing page, a docs stub, and a developer waitlist. `POST /api/waitlist` checks the payload and discards it. There is no payment and no secret collection.
 
-Production is [https://roster.network](https://roster.network), a Cloudflare tunnel to `127.0.0.1:7000` on the Albesa server. Deploy with `bash scripts/deploy-roster-web.sh`. See [DEPLOY.md](./DEPLOY.md).
+Production is [https://roster.network](https://roster.network), a Cloudflare tunnel to `127.0.0.1:7000` on the Albesa server, plus the sandbox API on `127.0.0.1:7001` (suggested hostname `api.roster.network`). Deploy with `bash scripts/deploy-roster-web.sh` and `bash scripts/deploy-roster-api.sh`. See [DEPLOY.md](./DEPLOY.md). The console should call the API through a same-origin Next.js proxy. CORS still allows `https://roster.network` and localhost when a page calls the API directly.
 
 ## Scripts
 
@@ -288,6 +288,7 @@ node packages/mcp/dist/stdio.js
 pnpm --filter web dev
 pnpm --filter web build
 bash scripts/deploy-roster-web.sh
+bash scripts/deploy-roster-api.sh
 ```
 
 CI on pull requests and pushes to `main` runs lint, typecheck, tests, and `pnpm --filter web build`.
