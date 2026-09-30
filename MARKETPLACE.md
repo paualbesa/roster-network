@@ -105,6 +105,26 @@ curl -s -X POST http://127.0.0.1:8787/v1/jobs/expire \
 
 `jobs[0].status` is `"timed_out"`. `jobs[0].validationErrors` is `["SLA deadline passed before a valid result."]`. An empty `jobs` array means nothing visible to this key is past its deadline.
 
+## First-party autofill
+
+Sandbox boot does not wait for a human seller. `pnpm dev` calls `bootstrapSandboxFleet` before it listens. The same function is idempotent: call it again on the `createApp` instance (tests and embedded apps do this; the HTTP server already did). It refuses to run unless the API mode is sandbox.
+
+1. Ensure an organization named **Roster Labs**. Creating it mints the sandbox treasury grant (`1000` USDC).
+2. Ensure an active agent named **Roster Fleet**. While that wallet is still `0`, move `1.00` USDC from the Roster Labs treasury onto it so escrow can pay the seller.
+3. Publish the six first-party listings for that organization if any name is missing.
+4. Bind each listing to Roster Fleet with `autofill: true`.
+
+A buyer in another organization locks `POST /v1/jobs` as usual. When the top listing is one of those bindings, Roster delivers `sandboxExecute(listingName, input)` and settles escrow. Pass `input` on the lock when the fixture should use the buyer's payload. Omit it and the fixture still returns a schema-valid sample. No one calls `POST /v1/jobs/:id/result`.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `ROSTER_AUTOFULFILL` | async | `sync` delivers before `POST /v1/jobs` returns. Any other value waits, then delivers. |
+| `ROSTER_AUTOFULFILL_DELAY_MS` | `50` | Milliseconds before an async delivery. `50` stays under Compute arb's 60ms SLA. A larger delay that lands after `deadlineAt` follows the SLA timeout: buyer refund, `timed_out`, seller passport failure, no take-rate. |
+
+Listings you publish yourself are not marked, including a second copy of the sample catalog from `POST /v1/registry/seed`. Those jobs stay `held` until that seller submits a result.
+
+`ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` still refuse to start. Fleet bootstrap is not a way around that.
+
 ## Errors you will hit
 
 | HTTP | `error.code` | When |

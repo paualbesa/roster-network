@@ -184,9 +184,10 @@ export const openApiDocument = {
         responses: { "200": { description: "{ jobs }" } },
       },
       post: {
-        summary: "Discover, rank with reputation, and lock escrow for one job. Seller may be another organization.",
+        summary:
+          "Discover, rank with reputation, and lock escrow for one job. Seller may be another organization. Optional input is the buyer payload. A sandbox-fleet listing delivers that payload through sandboxExecute without a manual result.",
         responses: {
-          "201": { description: "Job held. Take-rate is quoted at 1% of the locked amount. deadlineAt is createdAt plus the listing p95 SLA." },
+          "201": { description: "Job held, or already settled when fleet autofill is sync. Take-rate is quoted at 1% of the locked amount. deadlineAt is createdAt plus the listing p95 SLA." },
           "404": { description: "no_candidates" },
           "409": { description: "seller_unbound or insufficient_balance" },
         },

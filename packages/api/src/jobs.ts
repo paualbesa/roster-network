@@ -3,6 +3,18 @@ import { dirname } from "node:path";
 import { createId, EscrowSchemaError, parseResultSchema, parseUsdc } from "@albesa/core";
 import { CapabilityRegistry, type CapabilityListing } from "@albesa/registry";
 import {
+  sandboxComputeArbListing,
+  sandboxDocQaListing,
+  sandboxDocSummarizerListing,
+  sandboxExecute,
+  sandboxJobSchema,
+  sandboxMarketplaceListings,
+  sandboxReceiptListing,
+  sandboxSellerBindRequests,
+  sandboxStructuredExtractListing,
+  sandboxUnitConverterListing,
+} from "./catalog.js";
+import {
   AgentFinanceService,
   ServiceError,
   type EscrowNotification,
@@ -24,6 +36,11 @@ export interface ListingSellerBinding {
   organizationId: string;
   sellerAgentId: string;
   createdAt: string;
+  /**
+   * When true, Roster delivers `sandboxExecute` for this listing.
+   * Only the sandbox fleet bootstrap sets it. A normal bind stays false.
+   */
+  autofill: boolean;
 }
 
 export interface JobPassportChange {
@@ -60,6 +77,8 @@ export interface StoredJob {
   validationErrors: string[] | null;
   latencyMs: number | null;
   passport: JobPassportChange | null;
+  /** Buyer payload passed to `sandboxExecute`. Null when the lock omitted `input`. */
+  input: unknown;
   createdAt: string;
   settledAt: string | null;
 }
@@ -102,6 +121,8 @@ export interface CreateJobInput {
   tags: string[];
   maxP95Ms: number | null;
   memo: string | null;
+  /** Buyer payload for a first-party fixture. Null when omitted. */
+  input: unknown;
 }
 
 export interface SubmitJobInput {
@@ -145,7 +166,7 @@ export {
   sandboxSellerBindRequests,
   sandboxStructuredExtractListing,
   sandboxUnitConverterListing,
-} from "./catalog.js";
+};
 
 export class MemoryJobStore implements JobStore {
   protected readonly jobs = new Map<string, StoredJob>();
@@ -245,11 +266,45 @@ export class JsonJobStore extends MemoryJobStore {
   }
 }
 
+/** How the sandbox fleet delivers a locked job. */
+export interface AutofillConfig {
+  /** `sync` settles inside the lock. `async` waits `delayMs` and still honors the SLA. */
+  mode: "sync" | "async";
+  delayMs: number;
+}
+
+/** Default wait before an async fleet delivery. Stays under the shortest catalog SLA (Compute arb, 60ms). */
+export const DEFAULT_AUTOFILL_DELAY_MS = 50;
+
+export function resolveAutofillConfig(
+  override: { mode?: "sync" | "async"; delayMs?: number } = {},
+  env: NodeJS.ProcessEnv = process.env,
+): AutofillConfig {
+  const mode = override.mode ?? (env.ROSTER_AUTOFULFILL?.trim().toLowerCase() === "sync" ? "sync" : "async");
+  const delayMs = override.delayMs ?? readAutofillDelay(env.ROSTER_AUTOFULFILL_DELAY_MS);
+  if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > MAX_LATENCY_MS) {
+    throw new Error(`autofillDelayMs must be an integer from 0 to ${MAX_LATENCY_MS.toString()}.`);
+  }
+  return { mode, delayMs };
+}
+
+function readAutofillDelay(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_AUTOFILL_DELAY_MS;
+  const parsed = Number(raw.trim());
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_LATENCY_MS) {
+    throw new Error(
+      `ROSTER_AUTOFULFILL_DELAY_MS must be an integer from 0 to ${MAX_LATENCY_MS.toString()}.`,
+    );
+  }
+  return parsed;
+}
+
 export interface JobOrchestratorOptions {
   service: AgentFinanceService;
   registry: CapabilityRegistry;
   jobs: JobStore;
   now?: () => Date;
+  autofill?: AutofillConfig;
 }
 
 /**
@@ -266,6 +321,7 @@ export class JobOrchestrator {
   private readonly registry: CapabilityRegistry;
   private readonly jobs: JobStore;
   private readonly now: () => Date;
+  private readonly autofill: AutofillConfig;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: JobOrchestratorOptions) {
@@ -273,10 +329,16 @@ export class JobOrchestrator {
     this.registry = options.registry;
     this.jobs = options.jobs;
     this.now = options.now ?? (() => new Date());
+    this.autofill = options.autofill ?? resolveAutofillConfig();
   }
 
-  bindSeller(organizationId: string, listingId: string, sellerAgentId: string): Promise<ListingSellerBinding> {
-    return this.enqueue(() => this.bindSellerUnlocked(organizationId, listingId, sellerAgentId));
+  bindSeller(
+    organizationId: string,
+    listingId: string,
+    sellerAgentId: string,
+    options?: { autofill?: boolean },
+  ): Promise<ListingSellerBinding> {
+    return this.enqueue(() => this.bindSellerUnlocked(organizationId, listingId, sellerAgentId, options));
   }
 
   createJob(organizationId: string, input: CreateJobInput): Promise<CreateJobResult> {
@@ -314,6 +376,7 @@ export class JobOrchestrator {
     organizationId: string,
     listingId: string,
     sellerAgentId: string,
+    options?: { autofill?: boolean },
   ): Promise<ListingSellerBinding> {
     const listing = this.requireOwnedListing(organizationId, listingId);
     await this.service.getAgentBalance(organizationId, sellerAgentId);
@@ -323,6 +386,7 @@ export class JobOrchestrator {
       organizationId,
       sellerAgentId,
       createdAt: this.now().toISOString(),
+      autofill: options?.autofill === true && isSandboxFleetName(listing.name),
     };
     this.jobs.saveSeller(binding);
     return { ...binding };
@@ -376,11 +440,49 @@ export class JobOrchestrator {
       validationErrors: null,
       latencyMs: null,
       passport: null,
+      input: input.input,
       createdAt,
       settledAt: null,
     };
     this.jobs.saveJob(job);
-    return { job: await this.toView(job), notification: locked.notification };
+    await this.scheduleAutofill(job, binding);
+    const current = this.jobs.readJob(job.id) ?? job;
+    return { job: await this.toView(current), notification: locked.notification };
+  }
+
+  /**
+   * Fleet listings deliver through `sandboxExecute`. Other bindings stay held
+   * until the seller calls `POST /v1/jobs/:id/result`. A timer that fires after
+   * `deadlineAt` uses the same SLA refund as `POST /v1/jobs/expire`.
+   */
+  private async scheduleAutofill(job: StoredJob, binding: ListingSellerBinding): Promise<void> {
+    if (!binding.autofill || !isSandboxFleetName(job.listingName)) return;
+    if (this.autofill.mode === "sync") {
+      await this.deliverAutofill(job.id);
+      return;
+    }
+    const jobId = job.id;
+    const timer = setTimeout(() => {
+      void this.enqueue(() => this.deliverAutofill(jobId)).catch((error: unknown) => {
+        console.error(error);
+      });
+    }, this.autofill.delayMs);
+    timer.unref();
+  }
+
+  private async deliverAutofill(jobId: string): Promise<void> {
+    const job = this.jobs.readJob(jobId);
+    if (!job || job.status !== "held") return;
+    const binding = this.jobs.readSeller(job.listingId);
+    if (!binding?.autofill || binding.organizationId !== job.sellerOrganizationId) return;
+    if (!isSandboxFleetName(job.listingName)) return;
+    if (this.isPastDeadline(job)) {
+      await this.settleTimeout(job);
+      return;
+    }
+    const result = sandboxExecute(job.listingName, job.input ?? {});
+    const latencyMs = this.autofill.mode === "sync" ? 0 : this.autofill.delayMs;
+    await this.submitResultUnlocked(job.sellerOrganizationId, job.id, { result, latencyMs });
   }
 
   private async submitResultUnlocked(
@@ -616,6 +718,7 @@ export function parseCreateJobBody(body: unknown): CreateJobInput {
     tags,
     maxP95Ms,
     memo: typeof body.memo === "string" ? body.memo : null,
+    input: "input" in body ? body.input : null,
   };
 }
 
@@ -704,6 +807,7 @@ function parseStoredJob(value: unknown, index: number): StoredJob {
     validationErrors: readNullableStringList(value.validationErrors, `jobs[${index.toString()}].validationErrors`),
     latencyMs: readNullableInt(value.latencyMs, `jobs[${index.toString()}].latencyMs`),
     passport: parsePassport(value.passport, index),
+    input: "input" in value ? value.input : null,
     createdAt: readText(value.createdAt, `jobs[${index.toString()}].createdAt`),
     settledAt: readNullableText(value.settledAt, `jobs[${index.toString()}].settledAt`),
   };
@@ -723,7 +827,12 @@ function parseBinding(value: unknown, index: number): ListingSellerBinding {
     organizationId: readText(value.organizationId, `sellers[${index.toString()}].organizationId`),
     sellerAgentId: readText(value.sellerAgentId, `sellers[${index.toString()}].sellerAgentId`),
     createdAt: readText(value.createdAt, `sellers[${index.toString()}].createdAt`),
+    autofill: value.autofill === true,
   };
+}
+
+function isSandboxFleetName(name: string): boolean {
+  return sandboxMarketplaceListings().some((draft) => draft.name === name);
 }
 
 function parsePassport(value: unknown, index: number): JobPassportChange | null {

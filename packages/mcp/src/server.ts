@@ -137,6 +137,10 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
         tags: z.array(z.string()).optional(),
         maxP95Ms: z.number().int().optional(),
         memo: z.string().optional(),
+        input: z
+          .unknown()
+          .optional()
+          .describe("Buyer payload for a first-party sandbox fixture. Omit it for the schema-valid sample."),
       },
     },
     async (args) => runTool(() => client.jobs.create(jobInput(args))),
@@ -234,6 +238,7 @@ function jobInput(args: {
   tags?: string[] | undefined;
   maxP95Ms?: number | undefined;
   memo?: string | undefined;
+  input?: unknown;
 }): CreateJobInput {
   const input: CreateJobInput = {
     buyerAgentId: args.buyerAgentId,
@@ -244,5 +249,6 @@ function jobInput(args: {
   if (args.tags !== undefined) input.tags = args.tags;
   if (args.maxP95Ms !== undefined) input.maxP95Ms = args.maxP95Ms;
   if (args.memo !== undefined) input.memo = args.memo;
+  if (args.input !== undefined) input.input = args.input;
   return input;
 }

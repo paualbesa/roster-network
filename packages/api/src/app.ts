@@ -24,10 +24,12 @@ import {
   parseCreateJobBody,
   parseJobResultBody,
   parseSellerBindingBody,
+  resolveAutofillConfig,
   sandboxMarketplaceListings,
   type JobStore,
 } from "./jobs.js";
 import { rosterCors } from "./cors.js";
+import { attachAppRuntime } from "./fleet.js";
 import { openApiDocument } from "./openapi.js";
 import {
   AgentFinanceService,
@@ -73,6 +75,13 @@ export interface AppOptions {
   jobs?: JobStore;
   /** Versioned JSON file for jobs. Ignored when `jobs` is passed. */
   jobsFile?: string;
+  /**
+   * Fleet delivery. `sync` settles inside `POST /v1/jobs`.
+   * Omit it to read `ROSTER_AUTOFULFILL` (`sync` or async).
+   */
+  autofill?: "sync" | "async";
+  /** Wait before an async fleet delivery. Omit it to read `ROSTER_AUTOFULFILL_DELAY_MS` (default 50). */
+  autofillDelayMs?: number;
 }
 
 /** Score for one listing, or null when reputation should stay neutral. */
@@ -86,13 +95,19 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const service = options.service ?? openService(options, mode, walletRail);
   const registry = options.registry ?? new CapabilityRegistry(options.now ? { now: options.now } : {});
   const jobs = openJobStore(options);
+  const autofill = resolveAutofillConfig({
+    ...(options.autofill !== undefined ? { mode: options.autofill } : {}),
+    ...(options.autofillDelayMs !== undefined ? { delayMs: options.autofillDelayMs } : {}),
+  });
   const orchestrator = new JobOrchestrator({
     service,
     registry,
     jobs,
+    autofill,
     ...(options.now ? { now: options.now } : {}),
   });
   const app = new Hono<AppEnv>();
+  attachAppRuntime(app, { mode, service, registry, jobs, orchestrator });
 
   // Direct browser calls from https://roster.network and localhost.
   // A same-origin Next.js proxy on the marketing site is the preferred path.
