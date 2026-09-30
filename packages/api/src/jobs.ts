@@ -123,6 +123,8 @@ export interface CreateJobInput {
   memo: string | null;
   /** Buyer payload for a first-party fixture. Null when omitted. */
   input: unknown;
+  /** When set, lock this listing instead of the top search hit. */
+  listingId: string | null;
 }
 
 export interface SubmitJobInput {
@@ -394,9 +396,13 @@ export class JobOrchestrator {
 
   private async createJobUnlocked(organizationId: string, input: CreateJobInput): Promise<CreateJobResult> {
     this.assertLockInput(input);
-    const top = await this.rankTop(input);
+    const top = input.listingId ? this.pinnedListing(input.listingId) : await this.rankTop(input);
     if (!top) {
-      throw new ServiceError(404, "no_candidates", "No capability listing matched the query.");
+      throw new ServiceError(
+        404,
+        input.listingId ? "not_found" : "no_candidates",
+        input.listingId ? "Capability listing not found." : "No capability listing matched the query.",
+      );
     }
     const binding = this.jobs.readSeller(top.listing.id);
     if (!binding || binding.organizationId !== top.listing.organizationId) {
@@ -616,6 +622,12 @@ export class JobOrchestrator {
     return listing;
   }
 
+  private pinnedListing(listingId: string): { listing: CapabilityListing; score: number } | null {
+    const listing = this.registry.get(listingId);
+    if (!listing || listing.status !== "active") return null;
+    return { listing, score: 1 };
+  }
+
   private async rankTop(input: CreateJobInput) {
     const scores = await this.service.observedPassportScores(this.registry.list());
     const hits = this.registry.search(
@@ -710,6 +722,13 @@ export function parseCreateJobBody(body: unknown): CreateJobInput {
   if (body.memo !== undefined && body.memo !== null && typeof body.memo !== "string") {
     throw new ServiceError(400, "invalid_request", "memo must be a string.");
   }
+  let listingId: string | null = null;
+  if (body.listingId !== undefined && body.listingId !== null) {
+    if (typeof body.listingId !== "string" || body.listingId.trim() === "") {
+      throw new ServiceError(400, "invalid_request", "listingId must be a non-empty string.");
+    }
+    listingId = body.listingId.trim();
+  }
   return {
     buyerAgentId,
     query: trimmedQuery,
@@ -719,6 +738,7 @@ export function parseCreateJobBody(body: unknown): CreateJobInput {
     maxP95Ms,
     memo: typeof body.memo === "string" ? body.memo : null,
     input: "input" in body ? body.input : null,
+    listingId,
   };
 }
 

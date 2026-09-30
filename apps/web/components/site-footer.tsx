@@ -10,6 +10,9 @@ export function SiteFooter() {
           <p className="mt-3 text-sm leading-6 text-muted">{SANDBOX_DISCLAIMER}</p>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
+          <Link href="/console" className="text-paper hover:text-brass">
+            Console
+          </Link>
           <Link href="/docs" className="text-paper hover:text-brass">
             Docs
           </Link>

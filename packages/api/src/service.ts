@@ -260,6 +260,10 @@ export class AgentFinanceService implements ReputationHook {
     return this.enqueue(() => this.createAgentUnlocked(organizationId, input));
   }
 
+  listAgentDetails(organizationId: string): Promise<CreateAgentResult[]> {
+    return this.enqueue(() => this.listAgentDetailsUnlocked(organizationId));
+  }
+
   fundAgent(organizationId: string, agentId: string, amountUsdc: string): Promise<FundResult> {
     return this.enqueue(() => this.fundAgentUnlocked(organizationId, agentId, amountUsdc));
   }
@@ -581,6 +585,26 @@ export class AgentFinanceService implements ReputationHook {
       policy,
       balanceUsdc: await this.wallets.getBalance(wallet.address),
     };
+  }
+
+  private async listAgentDetailsUnlocked(organizationId: string): Promise<CreateAgentResult[]> {
+    this.requireOrganization(organizationId);
+    const agents = [...this.store.agents.values()]
+      .filter((agent) => agent.organizationId === organizationId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const listed: CreateAgentResult[] = [];
+    for (const agent of agents) {
+      const wallet = this.requireWallet(agent.walletId);
+      const policy = this.store.policies.get(agent.policyId);
+      if (!policy || policy.agentId !== agent.id) throw this.notFound("Agent policy not found.");
+      listed.push({
+        agent,
+        wallet,
+        policy,
+        balanceUsdc: await this.wallets.getBalance(wallet.address),
+      });
+    }
+    return listed;
   }
 
   private async fundAgentUnlocked(organizationId: string, agentId: string, amountUsdc: string): Promise<FundResult> {

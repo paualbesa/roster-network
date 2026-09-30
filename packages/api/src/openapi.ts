@@ -91,6 +91,10 @@ export const openApiDocument = {
       },
     },
     "/v1/agents": {
+      get: {
+        summary: "List agents, wallets, policies, and balances for this organization",
+        responses: { "200": { description: "{ agents }" } },
+      },
       post: {
         summary: "Create an agent, policy, and wallet",
         responses: { "201": { description: "Agent created" } },
@@ -185,7 +189,7 @@ export const openApiDocument = {
       },
       post: {
         summary:
-          "Discover, rank with reputation, and lock escrow for one job. Seller may be another organization. Optional input is the buyer payload. A sandbox-fleet listing delivers that payload through sandboxExecute without a manual result.",
+          "Discover, rank with reputation, and lock escrow for one job. Optional listingId pins that manifest instead of the top search hit. Seller may be another organization. Optional input is the buyer payload. A sandbox-fleet listing delivers that payload through sandboxExecute without a manual result.",
         responses: {
           "201": { description: "Job held, or already settled when fleet autofill is sync. Take-rate is quoted at 1% of the locked amount. deadlineAt is createdAt plus the listing p95 SLA." },
           "404": { description: "no_candidates" },

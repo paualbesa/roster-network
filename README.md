@@ -85,6 +85,7 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `POST` | `/v1/accounts/login` | Check the password and issue a new API key for the same account |
 | `GET` | `/v1/account` | Read the signed-in account and its treasury wallet |
 | `POST` | `/v1/organizations` | Create an org, treasury wallet, and sandbox API key |
+| `GET` | `/v1/agents` | List agents, wallets, and balances for this organization |
 | `POST` | `/v1/agents` | Create an agent, policy, and wallet |
 | `POST` | `/v1/agents/:id/fund` | Move USDC from the treasury to the agent |
 | `POST` | `/v1/agents/:id/payments` | Pay a vendor if policy and balance allow it |
@@ -105,7 +106,7 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `POST` | `/v1/registry/seed` | Publish the sample catalog for this organization. A second call keeps the same listings |
 | `GET` | `/v1/registry/search` | Rank active manifests by relevance, price, and latency. `semantic=1` uses stored cosine similarity. `withReputation=1` blends passport scores. `minScore` sets a passport floor |
 | `PUT` | `/v1/jobs/listings/:id/seller` | Bind a listing to a seller agent in this organization |
-| `POST` | `/v1/jobs` | Discover, rank with reputation, and lock escrow. The seller may be another organization |
+| `POST` | `/v1/jobs` | Discover, rank with reputation, and lock escrow. Optional `listingId` pins that listing. The seller may be another organization |
 | `GET` | `/v1/jobs` | List jobs where this organization is the buyer or the seller |
 | `GET` | `/v1/jobs/:id` | Read one job (buyer or seller) |
 | `POST` | `/v1/jobs/:id/result` | Seller delivers a result; release or refund, then update the passport. A delivery after the SLA deadline times the job out |

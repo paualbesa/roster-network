@@ -61,24 +61,18 @@ The script pulls `main` (fast-forward only), enables pnpm through corepack, runs
 
 ### Browser console
 
-Prefer a same-origin Next.js proxy. The console on `https://roster.network` should call a path on that host, and Next.js should rewrite it to `http://127.0.0.1:7001`. The browser stays on one origin.
+`/console` is the sandbox UI (signup, treasury, marketplace, hire). The browser calls the same origin at `/roster-api/*`. `apps/web/app/roster-api/[...path]/route.ts` proxies that prefix to the Roster API, so `https://roster.network/roster-api/health` and `https://roster.network/roster-api/v1/...` do not need a separate Cloudflare hostname.
 
-The API also allows direct browser calls from `https://roster.network` and from `localhost` or `127.0.0.1` (any port, `http` or `https`) for local development.
+| Variable | Default | Role |
+| --- | --- | --- |
+| `NEXT_PUBLIC_ROSTER_API_URL` | `http://127.0.0.1:7001` | Upstream API. Set it before `pnpm --filter web build` if you want the value inlined. |
+| `ROSTER_API_URL` | falls back to the public variable, then port 7001 | Request-time override for the proxy. PM2 sets both to `http://127.0.0.1:7001`. |
 
-Example rewrite in `apps/web/next.config.ts`:
+The API also allows direct browser calls from `https://roster.network` and from `localhost` or `127.0.0.1` (any port, `http` or `https`) for local development. A suggested public hostname remains `https://api.roster.network` → `http://127.0.0.1:7001`.
 
-```ts
-async rewrites() {
-  return [
-    {
-      source: "/roster-api/:path*",
-      destination: "http://127.0.0.1:7001/:path*",
-    },
-  ];
-}
-```
+`pnpm dev` for the API itself still listens on `127.0.0.1:8787` unless `PORT` is set, so point the web env at that port when you run the API locally on the default port.
 
-A page on `https://roster.network` would then call `/roster-api/health` and `/roster-api/v1/...`.
+The console stores the sandbox API key in `localStorage`. Mock USDC only. It does not settle real payments.
 
 ### MCP deploy recipe
 

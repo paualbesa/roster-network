@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "description": "Roster marketing site.",
+  "description": "Roster marketing site and sandbox console.",
   "version": "0.0.0",
   "private": true,
   "scripts": {

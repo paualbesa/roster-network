@@ -465,6 +465,54 @@ describe("reputation passport", () => {
   });
 });
 
+describe("agent roster", () => {
+  it("lists agents and balances for the caller organization only", async () => {
+    const { app, auth } = await bootstrap();
+    const empty = await app.request("/v1/agents", { headers: auth });
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ agents: [] });
+
+    const created = await app.request("/v1/agents", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        name: "buyer",
+        dailySpendLimitUsdc: "10.00",
+        vendorAllowlist: [],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const agent = (await created.json()) as AgentBody;
+    await app.request(`/v1/agents/${agent.agent.id}/fund`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ amountUsdc: "2.50" }),
+    });
+
+    const other = await app.request("/v1/organizations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Other" }),
+    });
+    const otherOrg = (await other.json()) as OrgBody;
+    const otherAuth = { authorization: `Bearer ${otherOrg.apiKey}` };
+
+    const listed = await app.request("/v1/agents", { headers: auth });
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as {
+      agents: { agent: { id: string; name: string }; balanceUsdc: string }[];
+    };
+    expect(body.agents).toHaveLength(1);
+    expect(body.agents[0]?.agent.id).toBe(agent.agent.id);
+    expect(body.agents[0]?.agent.name).toBe("buyer");
+    expect(body.agents[0]?.balanceUsdc).toBe("2.500000");
+
+    const hidden = await app.request("/v1/agents", { headers: otherAuth });
+    expect(hidden.status).toBe(200);
+    expect(await hidden.json()).toEqual({ agents: [] });
+  });
+});
+
 async function createBuyer(app: ReturnType<typeof createApp>, auth: Record<string, string>): Promise<string> {
   const created = await app.request("/v1/agents", {
     method: "POST",
