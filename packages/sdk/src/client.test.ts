@@ -348,4 +348,73 @@ describe("Albesa SDK", () => {
     expect(refunded.passport?.scoreBefore).toBe("85.0100");
     expect(refunded.passport?.scoreAfter).toBe("52.5100");
   });
+
+  it("expires a job past the listing SLA and refunds the buyer", async () => {
+    let current = Date.parse("2026-09-30T12:00:00.000Z");
+    const app = createApp({ mode: "sandbox", now: () => new Date(current) });
+    const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));
+    const buyerOrg = await createSandboxOrganization({
+      name: "Northwind",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+    const sellerOrg = await createSandboxOrganization({
+      name: "Harbor",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+    const buyer = await buyerOrg.client.agents.create({
+      name: "buyer",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: [],
+    });
+    const seller = await sellerOrg.client.agents.create({
+      name: "seller",
+      dailySpendLimitUsdc: "10.00",
+      vendorAllowlist: [],
+    });
+    await buyerOrg.client.agents.fund(buyer.id, "1.00");
+    const listing = await sellerOrg.client.registry.register({
+      name: "Receipt parser",
+      description: "Parse receipts and invoices into a structured total.",
+      inputSchema: { type: "object", properties: { documentUrl: { type: "string" } } },
+      outputSchema: { type: "object", properties: { total: { type: "string" } } },
+      pricing: { model: "per_call", amountUsdc: "0.02" },
+      latency: { p95Ms: 400 },
+      tags: ["receipt"],
+    });
+    await sellerOrg.client.jobs.bindSeller(listing.id, seller.id);
+    const held = await buyerOrg.client.jobs.create({
+      buyerAgentId: buyer.id,
+      query: "parse receipts",
+      amountUsdc: "1.00",
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["total"],
+        properties: { total: { type: "string", minLength: 1 } },
+      },
+      tags: ["receipt"],
+    });
+    expect(held.status).toBe("held");
+    expect(held.slaMs).toBe(400);
+    expect(held.deadlineAt).toBe(new Date(current + 400).toISOString());
+    expect(await buyerOrg.client.jobs.expire()).toEqual([]);
+
+    current += 400;
+    const timedOut = await sellerOrg.client.jobs.expire();
+    expect(timedOut).toHaveLength(1);
+    expect(timedOut[0]).toMatchObject({
+      id: held.id,
+      status: "timed_out",
+      buyerBalanceUsdc: "1.000000",
+      sellerBalanceUsdc: "0.000000",
+      validationErrors: ["SLA deadline passed before a valid result."],
+      passport: { agentId: seller.id, scoreBefore: "0.0000", scoreAfter: "20.0000" },
+    });
+    const passport = await buyerOrg.client.reputation.passport(seller.id);
+    expect(passport.metrics.failureCount).toBe(1);
+    expect(passport.metrics.volumeSettledUsdc).toBe("0.000000");
+    expect(await buyerOrg.client.jobs.expire()).toEqual([]);
+  });
 });

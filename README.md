@@ -11,7 +11,7 @@ This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP AP
 3. **USDC settlement on an L2.** Base and/or Solana, with a target of fees well under $0.001 and settlement under two seconds. v0 does not talk to a chain. The default rail is mock USDC in a local JSON file. Set `ROSTER_WALLET=base-sim` (or `ALBESA_WALLET=base-sim`) to settle through an in-process Base simulator: deterministic `base-sim:0x…` addresses, the same kind of balance map, a recorded network fee of `0.000001` USDC, and a recorded latency of 180 ms. `SolanaUsdcWalletProvider` is a sandbox stub and does not settle.
 4. **On-chain reputation passport.** Public reliability metrics: volume, success rate, latency, and an error index. A mock ledger of those metrics comes before any chain write.
 
-`pnpm demo:job` runs that path inside one organization. `pnpm demo:marketplace` runs it between a buyer organization and a seller organization.
+`pnpm demo:job` runs that path inside one organization. `pnpm demo:marketplace` runs it between a buyer organization and a seller organization. `pnpm demo:sla` locks a job, waits out the listing SLA, and refunds the buyer.
 
 ## Sandbox payment demo
 
@@ -108,7 +108,8 @@ curl -s -X POST http://127.0.0.1:8787/v1/agents \
 | `POST` | `/v1/jobs` | Discover, rank with reputation, and lock escrow. The seller may be another organization |
 | `GET` | `/v1/jobs` | List jobs where this organization is the buyer or the seller |
 | `GET` | `/v1/jobs/:id` | Read one job (buyer or seller) |
-| `POST` | `/v1/jobs/:id/result` | Seller delivers a result; release or refund, then update the passport |
+| `POST` | `/v1/jobs/:id/result` | Seller delivers a result; release or refund, then update the passport. A delivery after the SLA deadline times the job out |
+| `POST` | `/v1/jobs/expire` | Refund held jobs whose listing SLA has passed. No take-rate. Returns the jobs that became `timed_out` |
 | `GET` | `/health` | Process check (`product: "Roster"`, `rail` is `mock` unless `ROSTER_WALLET` selects `base-sim` or `solana-sim`) |
 | `GET` | `/openapi.json` | OpenAPI document for the sandbox (no API key) |
 
@@ -130,7 +131,7 @@ Use the `apiKey` from that response as `ROSTER_API_KEY`. Agents keep calling the
 
 ## Connect an agent via MCP
 
-`@albesa/mcp` is a stdio MCP server. It does not open a wallet of its own. It sends `ROSTER_API_KEY` as a bearer token to the Roster API you already run with `pnpm dev`. The tools are `roster_balance`, `roster_fund`, `roster_search`, `roster_create_job`, `roster_submit_job_result`, and `roster_passport`.
+`@albesa/mcp` is a stdio MCP server. It does not open a wallet of its own. It sends `ROSTER_API_KEY` as a bearer token to the Roster API you already run with `pnpm dev`. The tools are `roster_balance`, `roster_fund`, `roster_search`, `roster_create_job`, `roster_submit_job_result`, `roster_expire_jobs`, and `roster_passport`.
 
 `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` refuse to start the API and this server. Leave the mode at `sandbox`.
 
@@ -160,7 +161,7 @@ Point Cursor or Claude Desktop at the built file. Both use the same `mcpServers`
 
 `ALBESA_API_KEY` is accepted when `ROSTER_API_KEY` is unset. If both are set they must match. `ROSTER_API_URL` defaults to `http://127.0.0.1:8787`.
 
-After the server is connected, an agent can read the treasury with `roster_balance` (omit `agentId`), move demo USDC onto an agent with `roster_fund`, search listings with `roster_search`, lock a marketplace job with `roster_create_job`, deliver it with `roster_submit_job_result`, and read `roster_passport`. The key only spends and reads wallets that belong to that account. A marketplace job can still settle with a seller in another organization.
+After the server is connected, an agent can read the treasury with `roster_balance` (omit `agentId`), move demo USDC onto an agent with `roster_fund`, search listings with `roster_search`, lock a marketplace job with `roster_create_job`, deliver it with `roster_submit_job_result`, refund jobs past their listing SLA with `roster_expire_jobs`, and read `roster_passport`. The key only spends and reads wallets that belong to that account. A marketplace job can still settle with a seller in another organization.
 
 `ROSTER_MODE` selects the runtime. `ALBESA_MODE` is the same switch. Set either to `testnet` to label the org as testnet. Testnet orgs do not receive the 1000 USDC grant. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` exit on startup. If both variables are set, they must be the same value.
 
@@ -215,10 +216,11 @@ The API process writes the metrics ledger to `data/reputation.json` (override wi
 
 ## Running the sandbox marketplace
 
-`pnpm demo:marketplace` is the end-to-end slice: two organizations, a credited buyer wallet, a published listing, reputation-blended search, a paid escrow job, and the seller passport delta. The walkthrough, the HTTP map, and the validation-failure refund are in [MARKETPLACE.md](./MARKETPLACE.md).
+`pnpm demo:marketplace` is the end-to-end slice: two organizations, a credited buyer wallet, a published listing, reputation-blended search, a paid escrow job, and the seller passport delta. `pnpm demo:sla` is the SLA timeout refund. The walkthrough, the HTTP map, the validation-failure refund, and the timeout refund are in [MARKETPLACE.md](./MARKETPLACE.md).
 
 ```bash
 pnpm demo:marketplace
+pnpm demo:sla
 ```
 
 `GET /openapi.json` describes the same routes for an agent that does not want to read this file. `POST /v1/registry/seed` publishes the first-party catalog and does not duplicate listings on a second call. The catalog is Receipt parser, Doc summarizer, Unit converter, Structured data extract, Doc Q&A, and Compute arb. Each draft stores an MCP tool descriptor and an OpenAPI 3.0.3 operation. `outputSchema` is the result schema escrow checks.
@@ -229,13 +231,16 @@ pnpm demo:marketplace
 
 Listings do not carry a wallet. The sandbox mapping is a binding stored in `data/jobs.json` (`ROSTER_JOBS_FILE`): the organization that published the listing calls `PUT /v1/jobs/listings/:id/seller` with `{ "sellerAgentId" }`. That agent has to belong to the listing organization. Binding also stores the agent on the listing so search can read its passport. A listing with no binding returns `seller_unbound` and does not lock funds. Direct `POST /v1/escrows` still requires both agents to share one organization.
 
-`POST /v1/jobs/:id/result` is called by the seller organization. Escrow validates the payload, releases the seller net of the 1% take-rate or refunds the buyer in full, then `recordEscrowCompletion` updates the seller passport. Observed latency defaults to the listing `p95Ms` when the body omits `latencyMs`. Settled volume is the locked amount (GMV), not the net after the take-rate. The buyer and the seller can both read the job. Jobs and bindings reload from the jobs file when the API process restarts. A jobs file written before `sellerOrganizationId` existed still loads; that field defaults to the buyer organization.
+`POST /v1/jobs/:id/result` is called by the seller organization. Escrow validates the payload, releases the seller net of the 1% take-rate or refunds the buyer in full, then `recordEscrowCompletion` updates the seller passport. Observed latency defaults to the listing `p95Ms` when the body omits `latencyMs`. Settled volume is the locked amount (GMV), not the net after the take-rate. The buyer and the seller can both read the job. Jobs and bindings reload from the jobs file when the API process restarts. A jobs file written before `sellerOrganizationId` existed still loads; that field defaults to the buyer organization. A jobs file written before `deadlineAt` existed still loads; those jobs have no SLA and do not time out.
+
+The listing `latency.p95Ms` is the job SLA, stored as `slaMs` and `deadlineAt` (`createdAt` plus that window). `POST /v1/jobs/expire` refunds every held job visible to the caller whose deadline has passed. The job status becomes `timed_out`. The buyer receives the locked principal, the take-rate is not collected, and the seller passport records a failure. A delivery that arrives after the deadline settles the same way and does not release, even when the payload matches the schema. The sandbox evaluates the deadline on that call. It does not run a background timer.
 
 `sandboxReceiptListing()` in `@albesa/api` is the first-party receipt parser. `sandboxMarketplaceListings()` is the catalog behind `POST /v1/registry/seed`. `sandboxJobSchema(name)` is the escrow schema for one of those names, and `sandboxExecute(name, input)` is the local fixture a seller submits. `pnpm demo:marketplace` settles the receipt parser and then a paid Compute arb job.
 
 ```bash
 pnpm demo:job
 pnpm demo:marketplace
+pnpm demo:sla
 ```
 
 ## Repo map
@@ -277,6 +282,7 @@ pnpm demo
 pnpm demo:registry
 pnpm demo:job
 pnpm demo:marketplace
+pnpm demo:sla
 pnpm --filter @albesa/mcp build
 node packages/mcp/dist/stdio.js
 pnpm --filter web dev

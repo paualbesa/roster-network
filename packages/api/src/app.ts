@@ -293,6 +293,11 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return c.json(result, 201);
   });
 
+  app.post("/v1/jobs/expire", async (c) => {
+    const result = await orchestrator.expireDue(c.get("orgId"));
+    return c.json(result);
+  });
+
   app.get("/v1/jobs", async (c) => {
     const result = await orchestrator.listJobs(c.get("orgId"));
     return c.json(result);

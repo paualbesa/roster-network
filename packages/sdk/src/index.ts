@@ -230,7 +230,11 @@ export interface JobPassportChange {
 
 export interface JobHandle {
   id: string;
-  status: "held" | "released" | "refunded";
+  status: "held" | "released" | "refunded" | "timed_out";
+  /** Listing p95 captured when the job was locked. Null on jobs written before SLA deadlines. */
+  slaMs: number | null;
+  /** ISO timestamp when a missing delivery refunds the buyer. Null when the job cannot time out. */
+  deadlineAt: string | null;
   organizationId: string;
   sellerOrganizationId: string;
   buyerAgentId: string;
@@ -360,6 +364,8 @@ export class Albesa {
     list: () => Promise<JobHandle[]>;
     get: (jobId: string) => Promise<JobHandle>;
     submit: (jobId: string, result: unknown, options?: { latencyMs?: number }) => Promise<JobHandle>;
+    /** Refund held jobs for this account whose listing SLA has passed. */
+    expire: () => Promise<JobHandle[]>;
   };
 
   readonly treasury: {
@@ -405,6 +411,7 @@ export class Albesa {
       list: () => this.listJobs(),
       get: (jobId) => this.getJob(jobId),
       submit: (jobId, result, options) => this.submitJob(jobId, result, options),
+      expire: () => this.expireJobs(),
     };
     this.treasury = {
       get: () => this.getTreasury(),
@@ -570,6 +577,11 @@ export class Albesa {
 
   private async listJobs(): Promise<JobHandle[]> {
     const raw = await this.request<{ jobs: JobHandle[] }>("GET", "/v1/jobs");
+    return raw.jobs;
+  }
+
+  private async expireJobs(): Promise<JobHandle[]> {
+    const raw = await this.request<{ jobs: JobHandle[] }>("POST", "/v1/jobs/expire");
     return raw.jobs;
   }
 

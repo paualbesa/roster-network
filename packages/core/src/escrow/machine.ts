@@ -33,6 +33,9 @@ export function quoteEscrowSettlement(amountUsdc: string, takeRateBps = ESCROW_T
   };
 }
 
+/** Stored on a refund when the listing SLA elapsed before a valid delivery. */
+export const SLA_TIMEOUT_REASON = "SLA deadline passed before a valid result.";
+
 export function assertEscrowHeld(status: EscrowStatus): void {
   if (status === "held") return;
   throw new EscrowTransitionError(`Escrow is already ${status} and cannot accept a delivery.`);
@@ -41,6 +44,7 @@ export function assertEscrowHeld(status: EscrowStatus): void {
 /**
  * held + schema match → released
  * held + schema mismatch (or a hook that reports failure) → refunded
+ * held + SLA timeout → refunded, same full-principal path, no take-rate
  * released and refunded are terminal
  */
 export function decideSettlement(
@@ -56,4 +60,13 @@ export function decideSettlement(
   }
   const validationErrors = verdict.errors.length > 0 ? verdict.errors : ["Result did not match the escrow schema."];
   return { status: "refunded", validationErrors };
+}
+
+/**
+ * A held escrow whose SLA has elapsed refunds the buyer in full.
+ * The take-rate is not collected. Released and refunded escrows stay terminal.
+ */
+export function decideSlaTimeout(status: EscrowStatus): SettlementDecision {
+  assertEscrowHeld(status);
+  return { status: "refunded", validationErrors: [SLA_TIMEOUT_REASON] };
 }

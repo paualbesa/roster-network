@@ -5,6 +5,7 @@ import {
   createId,
   createSandboxApiKey,
   decideSettlement,
+  decideSlaTimeout,
   EscrowSchemaError,
   EscrowTransitionError,
   evaluateSpend,
@@ -358,6 +359,14 @@ export class AgentFinanceService implements ReputationHook {
 
   submitEscrowResult(organizationId: string, escrowId: string, result: unknown): Promise<EscrowResult> {
     return this.enqueue(() => this.submitEscrowResultUnlocked(organizationId, escrowId, result));
+  }
+
+  /**
+   * Refund a held marketplace escrow because the listing SLA elapsed.
+   * Uses the same full-principal refund as a schema failure and does not collect the take-rate.
+   */
+  timeoutEscrow(organizationId: string, escrowId: string): Promise<EscrowResult> {
+    return this.enqueue(() => this.timeoutEscrowUnlocked(organizationId, escrowId));
   }
 
   getEscrow(organizationId: string, escrowId: string): Promise<EscrowResult> {
@@ -978,6 +987,33 @@ export class AgentFinanceService implements ReputationHook {
       ...escrow,
       status: decision.status,
       result,
+      validationErrors: decision.validationErrors,
+      settlementProviderRef: moved.settlementProviderRef,
+      feeProviderRef: moved.feeProviderRef,
+      settledAt,
+    };
+    this.store.escrows.set(escrow.id, settled);
+    this.commit();
+    return this.escrowView(settled);
+  }
+
+  private async timeoutEscrowUnlocked(organizationId: string, escrowId: string): Promise<EscrowResult> {
+    const escrow = this.requireEscrow(organizationId, escrowId);
+    let decision: ReturnType<typeof decideSlaTimeout>;
+    try {
+      decision = decideSlaTimeout(escrow.status);
+    } catch (error) {
+      if (error instanceof EscrowTransitionError) {
+        throw new ServiceError(409, "invalid_state", error.message);
+      }
+      throw error;
+    }
+    const settledAt = this.now().toISOString();
+    const moved = await this.refundEscrow(escrow, settledAt);
+    const settled: Escrow = {
+      ...escrow,
+      status: decision.status,
+      result: null,
       validationErrors: decision.validationErrors,
       settlementProviderRef: moved.settlementProviderRef,
       feeProviderRef: moved.feeProviderRef,

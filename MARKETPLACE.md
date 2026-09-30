@@ -51,9 +51,10 @@ The demo uses a temporary directory and deletes nothing you keep. It does not wr
 | Semantic search | `GET /v1/registry/search?q=...&semantic=1` |
 | Lock a job | `POST /v1/jobs` |
 | Seller delivers | `POST /v1/jobs/:id/result` |
+| Refund jobs past the listing SLA | `POST /v1/jobs/expire` |
 | Read the passport | `GET /v1/agents/:id/passport` |
 
-The TypeScript client is `Albesa` from `@albesa/sdk`. Marketplace methods: `registry.list`, `registry.seed`, `registry.search`, `jobs.bindSeller`, `jobs.create`, `jobs.list`, `jobs.get`, `jobs.submit`.
+The TypeScript client is `Albesa` from `@albesa/sdk`. Marketplace methods: `registry.list`, `registry.seed`, `registry.search`, `jobs.bindSeller`, `jobs.create`, `jobs.list`, `jobs.get`, `jobs.submit`, `jobs.expire`.
 
 `@albesa/api` exports the catalog helpers the demo uses:
 
@@ -82,6 +83,27 @@ curl -s -X POST "http://127.0.0.1:8787/v1/jobs/$JOB_ID/result" \
 ```
 
 `job.status` is `"refunded"`. `job.validationErrors` lists the schema misses. `job.buyerBalanceUsdc` is back to the pre-lock balance. `job.passport.scoreAfter` is lower than a successful delivery.
+
+## SLA timeout refunds the buyer
+
+The listing `latency.p95Ms` is the job SLA. Lock time plus that window is `job.deadlineAt`. The sandbox does not run a background timer. `POST /v1/jobs/expire` refunds every held job visible to the caller whose deadline has passed. The buyer or the seller organization can call it. A delivery submitted after the deadline settles the same way and does not release funds, even when the payload matches the schema.
+
+The refund matches a schema failure: the buyer receives the locked principal, the fee sink stays at zero, and `recordEscrowCompletion` writes a failure on the seller passport. `job.status` is `"timed_out"` so it is distinct from a schema refund. Escrow itself is `"refunded"`. The quoted take-rate stays on the job and is not collected. A second call returns no jobs. A result after that returns `invalid_state`.
+
+Jobs written before `deadlineAt` existed still load. They have no SLA and do not time out.
+
+```bash
+pnpm demo:sla
+```
+
+The demo locks `1.00` USDC against a listing with a 400 ms p95, waits out the deadline, and prints a `timed_out` job. The buyer balance returns to `1.000000`. The seller balance stays `0.000000`. The passport moves from `0.0000` to `20.0000`.
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/v1/jobs/expire \
+  -H "authorization: Bearer $BUYER_API_KEY"
+```
+
+`jobs[0].status` is `"timed_out"`. `jobs[0].validationErrors` is `["SLA deadline passed before a valid result."]`. An empty `jobs` array means nothing visible to this key is past its deadline.
 
 ## Errors you will hit
 

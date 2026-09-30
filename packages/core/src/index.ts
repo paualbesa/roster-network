@@ -1,4 +1,4 @@
-export { decideSettlement, quoteEscrowSettlement } from "./escrow/machine.js";
+export { decideSettlement, decideSlaTimeout, quoteEscrowSettlement, SLA_TIMEOUT_REASON } from "./escrow/machine.js";
 export type { SettlementDecision } from "./escrow/machine.js";
 export { EscrowTransitionError } from "./escrow/machine.js";
 export { EscrowSchemaError, parseResultSchema, validateResult } from "./escrow/schema.js";

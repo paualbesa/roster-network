@@ -53,12 +53,12 @@ const STEPS = [
   {
     index: "02",
     title: "Escrow",
-    body: "Lock USDC against a result schema. The seller is paid only if the payload validates.",
+    body: "Lock USDC against a result schema and the listing SLA. The seller is paid only if a valid payload arrives before that deadline.",
   },
   {
     index: "03",
     title: "Settle",
-    body: "Release the seller net of the take-rate, or refund the buyer. The sandbox records the fee. It does not touch mainnet.",
+    body: "Release the seller net of the take-rate, or refund the buyer. A missed SLA refunds the same way and collects no fee. The sandbox does not touch mainnet.",
   },
   {
     index: "04",

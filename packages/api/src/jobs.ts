@@ -32,6 +32,9 @@ export interface JobPassportChange {
   scoreAfter: string;
 }
 
+/** `timed_out` is a refund: the listing SLA elapsed before a valid delivery. */
+export type JobStatus = "held" | "released" | "refunded" | "timed_out";
+
 export interface StoredJob {
   id: string;
   /** Buyer organization. This organization opened the job and funded escrow. */
@@ -48,7 +51,11 @@ export interface StoredJob {
   amountUsdc: string;
   escrowId: string;
   rankScore: number;
-  status: "held" | "released" | "refunded";
+  status: JobStatus;
+  /** Listing p95 captured at lock. Null on jobs written before SLA deadlines existed. */
+  slaMs: number | null;
+  /** `createdAt + slaMs`. Null when the job has no SLA and cannot time out. */
+  deadlineAt: string | null;
   result: unknown;
   validationErrors: string[] | null;
   latencyMs: number | null;
@@ -59,7 +66,7 @@ export interface StoredJob {
 
 export interface JobView {
   id: string;
-  status: "held" | "released" | "refunded";
+  status: JobStatus;
   organizationId: string;
   sellerOrganizationId: string;
   buyerAgentId: string;
@@ -72,6 +79,8 @@ export interface JobView {
   amountUsdc: string;
   escrowId: string;
   rankScore: number;
+  slaMs: number | null;
+  deadlineAt: string | null;
   takeRateUsdc: string;
   sellerNetUsdc: string;
   holdAddress: string;
@@ -246,6 +255,9 @@ export interface JobOrchestratorOptions {
 /**
  * Discover → rank (reputation blend) → lock escrow → deliver → schema check →
  * release or refund → passport.
+ * The listing p95 is the job SLA. When that deadline passes with no valid
+ * delivery, the buyer is refunded in full, the job is `timed_out`, and the
+ * seller passport records a failure. The take-rate is not collected.
  * The buyer may belong to a different organization than the seller. Escrow owns
  * validation and the 1% take-rate. Reputation is recorded on the seller agent.
  */
@@ -288,6 +300,14 @@ export class JobOrchestrator {
 
   submitResult(organizationId: string, jobId: string, input: SubmitJobInput): Promise<JobResult> {
     return this.enqueue(() => this.submitResultUnlocked(organizationId, jobId, input));
+  }
+
+  /**
+   * Refund every held job visible to this organization whose SLA deadline has passed.
+   * Jobs that are still inside the window stay locked. Already settled jobs are skipped.
+   */
+  expireDue(organizationId: string): Promise<{ jobs: JobView[] }> {
+    return this.enqueue(() => this.expireDueUnlocked(organizationId));
   }
 
   private async bindSellerUnlocked(
@@ -334,6 +354,7 @@ export class JobOrchestrator {
       memo: input.memo ?? `Roster job ${top.listing.name}`,
     });
     const createdAt = this.now().toISOString();
+    const slaMs = top.listing.latency.p95Ms;
     const job: StoredJob = {
       id: createId("job"),
       organizationId,
@@ -349,6 +370,8 @@ export class JobOrchestrator {
       escrowId: locked.escrow.id,
       rankScore: top.score,
       status: "held",
+      slaMs,
+      deadlineAt: new Date(Date.parse(createdAt) + slaMs).toISOString(),
       result: null,
       validationErrors: null,
       latencyMs: null,
@@ -371,6 +394,9 @@ export class JobOrchestrator {
     }
     if (job.status !== "held") {
       throw new ServiceError(409, "invalid_state", `Job is already ${job.status}.`);
+    }
+    if (this.isPastDeadline(job)) {
+      return { job: await this.settleTimeout(job) };
     }
     const latencyMs = this.resolveLatency(job.listingId, input.latencyMs);
     const settled = await this.service.submitEscrowResult(job.organizationId, job.escrowId, input.result);
@@ -400,6 +426,53 @@ export class JobOrchestrator {
     };
     this.jobs.saveJob(next);
     return { job: await this.toView(next) };
+  }
+
+  private async expireDueUnlocked(organizationId: string): Promise<{ jobs: JobView[] }> {
+    const due = this.jobs
+      .listJobs(organizationId)
+      .filter((job) => job.status === "held" && this.isPastDeadline(job))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const views: JobView[] = [];
+    for (const job of due) views.push(await this.settleTimeout(job));
+    return { jobs: views };
+  }
+
+  private async settleTimeout(job: StoredJob): Promise<JobView> {
+    const settled = await this.service.timeoutEscrow(job.organizationId, job.escrowId);
+    const before = await this.service.getPassport(job.sellerAgentId);
+    const latencyMs = job.slaMs ?? 0;
+    const after = await this.service.recordEscrowCompletion({
+      organizationId: job.sellerOrganizationId,
+      agentId: job.sellerAgentId,
+      outcome: "failure",
+      latencyMs,
+      volumeUsdc: settled.escrow.amountUsdc,
+      error: true,
+      escrowId: settled.escrow.id,
+    });
+    const next: StoredJob = {
+      ...job,
+      status: "timed_out",
+      result: null,
+      validationErrors: settled.escrow.validationErrors,
+      latencyMs,
+      passport: {
+        agentId: job.sellerAgentId,
+        scoreBefore: before.score,
+        scoreAfter: after.score,
+      },
+      settledAt: settled.escrow.settledAt,
+    };
+    this.jobs.saveJob(next);
+    return this.toView(next);
+  }
+
+  private isPastDeadline(job: StoredJob): boolean {
+    if (job.deadlineAt === null) return false;
+    const deadline = Date.parse(job.deadlineAt);
+    if (Number.isNaN(deadline)) return false;
+    return this.now().getTime() >= deadline;
   }
 
   private resolveLatency(listingId: string, requested: number | null): number {
@@ -482,6 +555,8 @@ export class JobOrchestrator {
       amountUsdc: job.amountUsdc,
       escrowId: job.escrowId,
       rankScore: job.rankScore,
+      slaMs: job.slaMs,
+      deadlineAt: job.deadlineAt,
       takeRateUsdc: live.escrow.takeRateUsdc,
       sellerNetUsdc: live.escrow.sellerNetUsdc,
       holdAddress: live.escrow.holdAddress,
@@ -601,7 +676,7 @@ function parseDocument(value: unknown): JobFile {
 function parseStoredJob(value: unknown, index: number): StoredJob {
   if (!isRecord(value)) throw new JobStoreError(`jobs[${index.toString()}] must be an object.`);
   const status = value.status;
-  if (status !== "held" && status !== "released" && status !== "refunded") {
+  if (status !== "held" && status !== "released" && status !== "refunded" && status !== "timed_out") {
     throw new JobStoreError(`jobs[${index.toString()}].status is invalid.`);
   }
   const rankScore = value.rankScore;
@@ -623,6 +698,8 @@ function parseStoredJob(value: unknown, index: number): StoredJob {
     escrowId: readText(value.escrowId, `jobs[${index.toString()}].escrowId`),
     rankScore,
     status,
+    slaMs: readOptionalSla(value.slaMs, index),
+    deadlineAt: readOptionalDeadline(value.deadlineAt, index),
     result: value.result === undefined ? null : value.result,
     validationErrors: readNullableStringList(value.validationErrors, `jobs[${index.toString()}].validationErrors`),
     latencyMs: readNullableInt(value.latencyMs, `jobs[${index.toString()}].latencyMs`),
@@ -667,6 +744,22 @@ function readText(value: unknown, label: string): string {
 function readNullableText(value: unknown, label: string): string | null {
   if (value === null) return null;
   return readText(value, label);
+}
+
+function readOptionalSla(value: unknown, index: number): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new JobStoreError(`jobs[${index.toString()}].slaMs must be a positive integer or null.`);
+  }
+  return value;
+}
+
+function readOptionalDeadline(value: unknown, index: number): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
+    throw new JobStoreError(`jobs[${index.toString()}].deadlineAt must be an ISO timestamp or null.`);
+  }
+  return value;
 }
 
 function readNullableInt(value: unknown, label: string): number | null {

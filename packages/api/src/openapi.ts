@@ -186,9 +186,21 @@ export const openApiDocument = {
       post: {
         summary: "Discover, rank with reputation, and lock escrow for one job. Seller may be another organization.",
         responses: {
-          "201": { description: "Job held. Take-rate is quoted at 1% of the locked amount." },
+          "201": { description: "Job held. Take-rate is quoted at 1% of the locked amount. deadlineAt is createdAt plus the listing p95 SLA." },
           "404": { description: "no_candidates" },
           "409": { description: "seller_unbound or insufficient_balance" },
+        },
+      },
+    },
+    "/v1/jobs/expire": {
+      post: {
+        summary:
+          "Refund held jobs whose listing SLA has passed. Buyer and seller can call it. No take-rate. Jobs still inside the window stay locked.",
+        responses: {
+          "200": {
+            description:
+              "{ jobs } that just became timed_out. Empty when nothing is due. Each job refunds the buyer and records a seller passport failure.",
+          },
         },
       },
     },
@@ -201,7 +213,8 @@ export const openApiDocument = {
     },
     "/v1/jobs/{jobId}/result": {
       post: {
-        summary: "Seller delivers a result. Schema match releases net of the 1% take-rate. A mismatch refunds the buyer.",
+        summary:
+          "Seller delivers a result. Schema match releases net of the 1% take-rate. A mismatch refunds the buyer. A delivery after the SLA deadline times the job out and refunds without a take-rate.",
         parameters: [{ name: "jobId", in: "path", required: true, schema: { type: "string" } }],
         responses: {
           "200": { description: "Job released or refunded, with passport scoreBefore and scoreAfter." },

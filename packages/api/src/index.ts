@@ -22,6 +22,7 @@ export type {
   CreateJobResult,
   JobPassportChange,
   JobResult,
+  JobStatus,
   JobStore,
   JobView,
   ListingSellerBinding,
