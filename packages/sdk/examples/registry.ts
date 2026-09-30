@@ -63,6 +63,14 @@ try {
       `${(index + 1).toString()}. ${hit.listing.name} score=${hit.score.toFixed(4)} price=${hit.listing.pricing.amountUsdc} p95=${hit.listing.latency.p95Ms.toString()}ms`,
     );
   }
+
+  const semanticHits = await albesa.registry.search({ q: "invioce extractr", semantic: true });
+  if (semanticHits[0]?.listing.name !== "Invoice extractor") {
+    throw new Error("Semantic search should rank the invoice extractor for a near-miss query.");
+  }
+  console.log(
+    `semantic "invioce extractr" -> ${semanticHits[0].listing.name} relevance=${semanticHits[0].relevance.toFixed(4)}`,
+  );
 } finally {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));

@@ -2,6 +2,7 @@ import { createId, formatUsdc, MoneyError, parseUsdc } from "@albesa/core";
 import { RegistryError } from "./errors.js";
 import { writeIndex, readIndex } from "./persist.js";
 import { rankListings } from "./rank.js";
+import { capabilityDocument, embedSemantic } from "./text.js";
 import type {
   CapabilityListing,
   CapabilityManifest,
@@ -56,6 +57,7 @@ interface ListingDraft {
 
 export class CapabilityRegistry {
   private readonly entries = new Map<string, CapabilityListing>();
+  private readonly vectors = new Map<string, Float64Array>();
   private readonly filePath: string | null;
   private readonly now: () => Date;
 
@@ -63,11 +65,13 @@ export class CapabilityRegistry {
     this.filePath = options.filePath ?? null;
     this.now = options.now ?? (() => new Date());
     if (this.filePath) {
-      for (const listing of readIndex(this.filePath)) {
+      const index = readIndex(this.filePath);
+      for (const listing of index.listings) {
         if (this.entries.has(listing.id)) {
           throw new Error(`Duplicate capability id ${listing.id} in ${this.filePath}`);
         }
         this.entries.set(listing.id, listing);
+        this.vectors.set(listing.id, index.vectors.get(listing.id) ?? listingVector(listing));
       }
     }
   }
@@ -96,10 +100,12 @@ export class CapabilityRegistry {
       updatedAt: timestamp,
     };
     this.entries.set(listing.id, listing);
+    this.vectors.set(listing.id, listingVector(listing));
     try {
       this.persist();
     } catch (error) {
       this.entries.delete(listing.id);
+      this.vectors.delete(listing.id);
       throw error;
     }
     return structuredClone(listing);
@@ -129,11 +135,15 @@ export class CapabilityRegistry {
       createdAt: previous.createdAt,
       updatedAt: this.now().toISOString(),
     };
+    const previousVector = this.vectors.get(id);
     this.entries.set(id, listing);
+    this.vectors.set(id, listingVector(listing));
     try {
       this.persist();
     } catch (error) {
       this.entries.set(id, previous);
+      if (previousVector) this.vectors.set(id, previousVector);
+      else this.vectors.delete(id);
       throw error;
     }
     return structuredClone(listing);
@@ -150,14 +160,15 @@ export class CapabilityRegistry {
 
   /**
    * `reputation` opts into the passport blend. Omit it, and leave
-   * `withReputation` / `minScore` unset, to keep keyword + embedding ranking.
+   * `withReputation` / `minScore` unset, to keep the default ranker.
+   * `semantic` ranks by the stored vector instead of keyword overlap.
    */
   search(
     query: Partial<CapabilitySearchQuery> = {},
     reputation: ReputationRankInput | null = null,
   ): CapabilitySearchHit[] {
     const normalized = normalizeSearchQuery(query);
-    return rankListings([...this.entries.values()], normalized, reputation).map((hit) => ({
+    return rankListings([...this.entries.values()], normalized, reputation, this.vectors).map((hit) => ({
       listing: structuredClone(hit.listing),
       score: hit.score,
       relevance: hit.relevance,
@@ -177,7 +188,7 @@ export class CapabilityRegistry {
 
   private persist(): void {
     if (!this.filePath) return;
-    writeIndex(this.filePath, [...this.entries.values()]);
+    writeIndex(this.filePath, [...this.entries.values()], this.vectors);
   }
 }
 
@@ -202,6 +213,7 @@ export function parseSearchQuery(raw: RawSearchParams): CapabilitySearchQuery {
     limit,
     minScore: parseMinScoreParam(raw.minScore),
     withReputation: parseWithReputation(raw.withReputation),
+    semantic: parseSemantic(raw.semantic),
   });
 }
 
@@ -236,7 +248,11 @@ function normalizeSearchQuery(query: Partial<CapabilitySearchQuery>): Capability
   if (typeof withReputation !== "boolean") {
     throw new RegistryError(400, "invalid_request", 'withReputation must be "1" or "0".');
   }
-  return { q, tags, maxPriceUsdc, maxP95Ms, limit, minScore, withReputation };
+  const semantic = query.semantic ?? false;
+  if (typeof semantic !== "boolean") {
+    throw new RegistryError(400, "invalid_request", 'semantic must be "1" or "0".');
+  }
+  return { q, tags, maxPriceUsdc, maxP95Ms, limit, minScore, withReputation, semantic };
 }
 
 function parseRegisterBody(input: unknown): ListingDraft {
@@ -342,11 +358,23 @@ function parseMinScoreParam(value: string | undefined): number | null {
 }
 
 function parseWithReputation(value: string | undefined): boolean {
+  return parseBooleanFlag(value, "withReputation");
+}
+
+function parseSemantic(value: string | undefined): boolean {
+  return parseBooleanFlag(value, "semantic");
+}
+
+function parseBooleanFlag(value: string | undefined, name: string): boolean {
   if (value === undefined || value.trim() === "") return false;
   const flag = value.trim().toLowerCase();
   if (flag === "1" || flag === "true") return true;
   if (flag === "0" || flag === "false") return false;
-  throw new RegistryError(400, "invalid_request", 'withReputation must be "1" or "0".');
+  throw new RegistryError(400, "invalid_request", `${name} must be "1" or "0".`);
+}
+
+function listingVector(listing: CapabilityListing): Float64Array {
+  return embedSemantic(capabilityDocument(listing));
 }
 
 function readStatus(value: unknown): ListingStatus {

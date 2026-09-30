@@ -89,14 +89,20 @@ export interface CapabilitySearchQuery {
   minScore: number | null;
   /** Opt into blending passport scores. Ignored when no reputation input is active. */
   withReputation: boolean;
+  /**
+   * When true, relevance is cosine similarity against the stored listing vector.
+   * When false, relevance stays on the keyword path.
+   */
+  semantic: boolean;
 }
 
 export interface CapabilitySearchHit {
   listing: CapabilityListing;
   /**
-   * Higher is better. Without reputation input this is keyword + embedding
-   * relevance nudged by price and latency. With reputation input it is the
-   * blended score from `RANK_BLEND_WEIGHTS`.
+   * Higher is better. Without reputation input this is relevance nudged by
+   * price and latency. With reputation input it is the blended score from
+   * `RANK_BLEND_WEIGHTS`. Relevance is keyword overlap unless `semantic` is set,
+   * in which case it is cosine similarity.
    */
   score: number;
   relevance: number;
@@ -128,4 +134,6 @@ export interface RawSearchParams {
   minScore: string | undefined;
   /** "1" or "true" opts into the reputation blend. "0" or "false" leaves the default ranker. */
   withReputation: string | undefined;
+  /** "1" or "true" ranks by stored cosine similarity. "0" or "false" keeps keyword search. */
+  semantic: string | undefined;
 }

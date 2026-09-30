@@ -260,6 +260,56 @@ describe("capability registry routes", () => {
     expect(floorIds).not.toContain(flakyId);
     expect(floorIds).not.toContain(unboundId);
   });
+
+  it("ranks near-miss keywords with semantic=1 and still blends reputation", async () => {
+    const scores = new Map<string, number>();
+    const app = createApp({
+      mode: "sandbox",
+      passportScores: (listing) => (scores.has(listing.id) ? (scores.get(listing.id) ?? null) : null),
+    });
+    const auth = await organization(app, "Acme");
+    const lowId = await publish(app, auth, invoice);
+    const highId = await publish(app, auth, invoice);
+    const neighborId = await publish(app, auth, {
+      ...invoice,
+      name: "Inventory notifier",
+      description: "Notifies the team when inventory falls below a threshold.",
+      tags: ["inventory", "notify"],
+      pricing: { model: "per_call", amountUsdc: "0.001" },
+      latency: { p95Ms: 40 },
+    });
+    scores.set(lowId, 0);
+    scores.set(highId, 96);
+    scores.set(neighborId, 100);
+
+    const keyword = await app.request("/v1/registry/search?q=invioce%20extractr", { headers: auth });
+    expect(keyword.status).toBe(200);
+    expect(((await keyword.json()) as SearchBody).hits).toEqual([]);
+
+    const semantic = await app.request("/v1/registry/search?q=invioce%20extractr&semantic=1", { headers: auth });
+    expect(semantic.status).toBe(200);
+    const semanticHits = ((await semantic.json()) as SearchBody).hits;
+    expect(semanticHits.map((hit) => hit.listing.id)).toEqual([lowId, highId].sort());
+    expect(semanticHits.some((hit) => hit.listing.id === neighborId)).toBe(false);
+    expect(semanticHits.every((hit) => hit.reputationScore === undefined)).toBe(true);
+
+    const blended = await app.request(
+      "/v1/registry/search?q=invioce%20extractr&semantic=1&withReputation=1",
+      { headers: auth },
+    );
+    expect(blended.status).toBe(200);
+    const blendedHits = ((await blended.json()) as SearchBody).hits;
+    expect(blendedHits.map((hit) => hit.listing.id)).toEqual([highId, lowId]);
+    expect(blendedHits.map((hit) => hit.reputationScore)).toEqual([96, 0]);
+    expect(blendedHits[0]?.score).toBeGreaterThan(blendedHits[1]?.score ?? 0);
+
+    const off = await app.request("/v1/registry/search?q=invioce%20extractr&semantic=0", { headers: auth });
+    expect(((await off.json()) as SearchBody).hits).toEqual([]);
+
+    const bad = await app.request("/v1/registry/search?semantic=maybe", { headers: auth });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as ErrorBody).error.code).toBe("invalid_request");
+  });
 });
 
 async function createAgent(app: ReturnType<typeof createApp>, headers: Record<string, string>, name: string) {

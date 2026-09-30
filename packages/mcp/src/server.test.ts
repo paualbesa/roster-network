@@ -128,6 +128,13 @@ describe("Roster MCP server", () => {
       expect(hits.isError).toBeUndefined();
       expect(toolText(hits)).toContain("Receipt parser");
 
+      const semantic = await mcp.callTool({
+        name: "roster_search",
+        arguments: { q: "invioce extractr", semantic: true },
+      });
+      expect(semantic.isError).toBeUndefined();
+      expect(toolText(semantic)).toContain("Receipt parser");
+
       const opened = await mcp.callTool({
         name: "roster_create_job",
         arguments: {

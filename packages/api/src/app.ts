@@ -274,6 +274,7 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
       limit: c.req.query("limit"),
       minScore: c.req.query("minScore"),
       withReputation: c.req.query("withReputation"),
+      semantic: c.req.query("semantic"),
     });
     const reputation = await reputationForSearch(registry, service, options.passportScores, query);
     const hits = registry.search(query, reputation);

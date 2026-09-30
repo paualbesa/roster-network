@@ -141,7 +141,8 @@ export const openApiDocument = {
     },
     "/v1/registry/search": {
       get: {
-        summary: "Rank active manifests. withReputation=1 blends passport scores. minScore sets a floor.",
+        summary:
+          "Rank active manifests. semantic=1 uses stored cosine similarity. withReputation=1 blends passport scores. minScore sets a floor.",
         parameters: [
           { name: "q", in: "query", schema: { type: "string" } },
           { name: "tags", in: "query", schema: { type: "string" }, description: "Comma-separated tags" },
@@ -150,6 +151,12 @@ export const openApiDocument = {
           { name: "limit", in: "query", schema: { type: "integer" } },
           { name: "minScore", in: "query", schema: { type: "number" } },
           { name: "withReputation", in: "query", schema: { type: "string", enum: ["0", "1"] } },
+          {
+            name: "semantic",
+            in: "query",
+            schema: { type: "string", enum: ["0", "1"] },
+            description: "1 ranks by the stored listing vector. 0 keeps keyword search.",
+          },
         ],
         responses: { "200": { description: "{ hits }" } },
       },

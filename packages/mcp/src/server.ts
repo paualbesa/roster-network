@@ -113,6 +113,10 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
         limit: z.number().int().positive().optional().describe("Maximum number of hits."),
         minScore: z.number().optional().describe("Passport floor from 0 to 100. Also blends reputation."),
         withReputation: z.boolean().optional().describe("Blend passport scores into the rank."),
+        semantic: z
+          .boolean()
+          .optional()
+          .describe("Rank by stored semantic similarity (cosine). Omit for keyword search."),
       },
       annotations: { readOnlyHint: true },
     },
@@ -197,6 +201,7 @@ function searchQuery(args: {
   limit?: number | undefined;
   minScore?: number | undefined;
   withReputation?: boolean | undefined;
+  semantic?: boolean | undefined;
 }): RegistrySearchQuery {
   const query: RegistrySearchQuery = {};
   if (args.q !== undefined) query.q = args.q;
@@ -206,6 +211,7 @@ function searchQuery(args: {
   if (args.limit !== undefined) query.limit = args.limit;
   if (args.minScore !== undefined) query.minScore = args.minScore;
   if (args.withReputation !== undefined) query.withReputation = args.withReputation;
+  if (args.semantic !== undefined) query.semantic = args.semantic;
   return query;
 }
 

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { deserializeSemanticVector, serializeSemanticVector } from "./text.js";
 import type {
   CapabilityListing,
   CapabilityManifest,
@@ -11,8 +12,15 @@ import type {
 } from "./types.js";
 
 interface IndexFile {
-  version: 1;
+  version: 2;
   listings: CapabilityListing[];
+  /** Sparse semantic vectors keyed by listing id. Omitted pairs are zeros. */
+  vectors: Record<string, number[]>;
+}
+
+export interface LoadedIndex {
+  listings: CapabilityListing[];
+  vectors: Map<string, Float64Array>;
 }
 
 /** Index files written before seller binding omit `agentId`. Files written before manifests omit `manifest`. */
@@ -21,8 +29,8 @@ type StoredListing = Omit<CapabilityListing, "agentId" | "manifest"> & {
   manifest?: CapabilityManifest | null;
 };
 
-export function readIndex(filePath: string): CapabilityListing[] {
-  if (!existsSync(filePath)) return [];
+export function readIndex(filePath: string): LoadedIndex {
+  if (!existsSync(filePath)) return { listings: [], vectors: new Map() };
   const raw = readFileSync(filePath, "utf8");
   let parsed: unknown;
   try {
@@ -30,7 +38,7 @@ export function readIndex(filePath: string): CapabilityListing[] {
   } catch {
     throw new Error(`Capability registry index is not valid JSON: ${filePath}`);
   }
-  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.listings)) {
+  if (!isRecord(parsed) || (parsed.version !== 1 && parsed.version !== 2) || !Array.isArray(parsed.listings)) {
     throw new Error(`Capability registry index has an unsupported shape: ${filePath}`);
   }
   const listings: CapabilityListing[] = [];
@@ -40,18 +48,39 @@ export function readIndex(filePath: string): CapabilityListing[] {
     }
     listings.push({ ...entry, agentId: entry.agentId ?? null, manifest: entry.manifest ?? null });
   }
-  return listings;
+  return { listings, vectors: readVectors(parsed.vectors, filePath) };
 }
 
-export function writeIndex(filePath: string, listings: readonly CapabilityListing[]): void {
-  const payload: IndexFile = {
-    version: 1,
-    listings: [...listings].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)),
-  };
+export function writeIndex(
+  filePath: string,
+  listings: readonly CapabilityListing[],
+  vectors: ReadonlyMap<string, Float64Array>,
+): void {
+  const ordered = [...listings].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+  const stored: Record<string, number[]> = {};
+  for (const listing of ordered) {
+    const vector = vectors.get(listing.id);
+    if (!vector) continue;
+    stored[listing.id] = serializeSemanticVector(vector);
+  }
+  const payload: IndexFile = { version: 2, listings: ordered, vectors: stored };
   mkdirSync(dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${process.pid.toString()}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`);
   renameSync(temporary, filePath);
+}
+
+function readVectors(value: unknown, filePath: string): Map<string, Float64Array> {
+  const vectors = new Map<string, Float64Array>();
+  if (value === undefined) return vectors;
+  if (!isRecord(value)) {
+    throw new Error(`Capability registry index has an unsupported shape: ${filePath}`);
+  }
+  for (const [id, encoded] of Object.entries(value)) {
+    const vector = deserializeSemanticVector(encoded);
+    if (vector) vectors.set(id, vector);
+  }
+  return vectors;
 }
 
 function isStoredListing(value: unknown): value is StoredListing {
