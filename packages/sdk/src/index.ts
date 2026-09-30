@@ -124,6 +124,22 @@ export interface EscrowHandle {
   sellerBalanceUsdc: string;
 }
 
+export interface RegistryManifest {
+  mcp: {
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+  };
+  openapi: {
+    openapi: "3.0.3";
+    operationId: string;
+    method: "post";
+    path: string;
+    requestSchema: Record<string, unknown>;
+    responseSchema: Record<string, unknown>;
+  };
+}
+
 export interface RegistryListing {
   id: string;
   organizationId: string;
@@ -136,6 +152,8 @@ export interface RegistryListing {
   latency: { p95Ms: number; p50Ms: number | null };
   tags: string[];
   status: "active" | "paused";
+  /** MCP tool and OpenAPI operation. Null when the publisher omitted a manifest. */
+  manifest: RegistryManifest | null;
   /** Seller agent bound to this listing, or null when the publisher did not set one. */
   agentId: string | null;
   createdAt: string;
@@ -153,6 +171,7 @@ export interface RegisterCapabilityInput {
   version?: string;
   status?: "active" | "paused";
   agentId?: string | null;
+  manifest?: RegistryManifest | null;
 }
 
 export interface UpdateCapabilityInput {
@@ -166,6 +185,7 @@ export interface UpdateCapabilityInput {
   tags?: string[];
   status?: "active" | "paused";
   agentId?: string | null;
+  manifest?: RegistryManifest | null;
 }
 
 export interface RegistrySearchQuery {

@@ -221,7 +221,7 @@ The API process writes the metrics ledger to `data/reputation.json` (override wi
 pnpm demo:marketplace
 ```
 
-`GET /openapi.json` describes the same routes for an agent that does not want to read this file. `POST /v1/registry/seed` publishes the sample catalog (receipt parser, doc summarizer, unit converter) and does not duplicate listings on a second call.
+`GET /openapi.json` describes the same routes for an agent that does not want to read this file. `POST /v1/registry/seed` publishes the first-party catalog and does not duplicate listings on a second call. The catalog is Receipt parser, Doc summarizer, Unit converter, Structured data extract, Doc Q&A, and Compute arb. Each draft stores an MCP tool descriptor and an OpenAPI 3.0.3 operation. `outputSchema` is the result schema escrow checks.
 
 ## Marketplace jobs
 
@@ -231,7 +231,7 @@ Listings do not carry a wallet. The sandbox mapping is a binding stored in `data
 
 `POST /v1/jobs/:id/result` is called by the seller organization. Escrow validates the payload, releases the seller net of the 1% take-rate or refunds the buyer in full, then `recordEscrowCompletion` updates the seller passport. Observed latency defaults to the listing `p95Ms` when the body omits `latencyMs`. Settled volume is the locked amount (GMV), not the net after the take-rate. The buyer and the seller can both read the job. Jobs and bindings reload from the jobs file when the API process restarts. A jobs file written before `sellerOrganizationId` existed still loads; that field defaults to the buyer organization.
 
-`sandboxReceiptListing()` in `@albesa/api` is the first-party receipt parser. `sandboxMarketplaceListings()` is the sample catalog behind `POST /v1/registry/seed`.
+`sandboxReceiptListing()` in `@albesa/api` is the first-party receipt parser. `sandboxMarketplaceListings()` is the catalog behind `POST /v1/registry/seed`. `sandboxJobSchema(name)` is the escrow schema for one of those names, and `sandboxExecute(name, input)` is the local fixture a seller submits. `pnpm demo:marketplace` settles the receipt parser and then a paid Compute arb job.
 
 ```bash
 pnpm demo:job

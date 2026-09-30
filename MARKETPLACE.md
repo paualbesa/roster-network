@@ -7,18 +7,19 @@ pnpm install
 pnpm demo:marketplace
 ```
 
-The process prints a released job of `1.000000` USDC. The seller receives `0.990000`. The take-rate is `0.010000`, which is 1% of GMV (`ESCROW_TAKE_RATE_BPS = 100`). The seller passport moves from `0.0000` to `85.0100`.
+The process prints a released receipt job of `1.000000` USDC. The seller receives `0.990000`. The take-rate is `0.010000`, which is 1% of GMV (`ESCROW_TAKE_RATE_BPS = 100`). The seller passport moves from `0.0000` to `85.0100`. It then settles a second job on **Compute arb** for `0.500000` USDC (`0.495000` seller net, `0.005000` take-rate). That listing is a sandbox stub: it compares two quotes locally and does not call a GPU or an external market.
 
 ## What the command does
 
 1. Create **Northwind** (buyer), **Harbor** (seller), and **Drift** (a cheaper rival with a failed delivery on its passport).
 2. Create one agent in each organization.
 3. Credit the buyer with `5.00` USDC from the Northwind treasury (`POST /v1/agents/:id/fund`). Sandbox treasuries start with `1000` test USDC.
-4. Harbor publishes the sample catalog (`POST /v1/registry/seed`) and binds **Receipt parser** to its seller agent.
+4. Harbor publishes the first-party catalog (`POST /v1/registry/seed`): Receipt parser, Doc summarizer, Unit converter, Structured data extract, Doc Q&A, and Compute arb. Each listing carries an MCP tool name and an OpenAPI 3.0.3 operation. Harbor binds **Receipt parser** and **Compute arb** to its seller agent. `sandboxSellerBindRequests` maps the seeded ids onto that agent.
 5. Drift publishes the same receipt parser at a lower price and a faster SLA, then records a failed job so its passport score is `20`.
 6. Northwind searches `parse receipts` with `withReputation=1`. Harbor ranks first. A new seller with no events is neutral (`50`), not zero, and that still beats Drift's failed passport.
 7. Northwind opens `POST /v1/jobs` for `1.00` USDC. Roster locks escrow from the buyer agent to Harbor's seller. Drift cannot read the job.
 8. Harbor delivers `{ "total": "12.50" }`. The result matches the schema, so escrow releases the seller net of the 1% take-rate and writes the passport.
+9. Northwind searches `compute arb` with tag `arb`, locks `0.50` USDC against Compute arb, and Harbor delivers the fixture from `sandboxExecute`. The result schema is `sandboxJobSchema("Compute arb")`, the same object stored as the listing `outputSchema`. Escrow releases `0.495000` to the seller.
 
 `pnpm demo:job` is the same settlement inside one organization. Use `demo:marketplace` when you want the two-organization story.
 
@@ -52,6 +53,15 @@ The demo uses a temporary directory and deletes nothing you keep. It does not wr
 | Read the passport | `GET /v1/agents/:id/passport` |
 
 The TypeScript client is `Albesa` from `@albesa/sdk`. Marketplace methods: `registry.list`, `registry.seed`, `registry.search`, `jobs.bindSeller`, `jobs.create`, `jobs.list`, `jobs.get`, `jobs.submit`.
+
+`@albesa/api` exports the catalog helpers the demo uses:
+
+| Helper | Role |
+| --- | --- |
+| `sandboxMarketplaceListings()` | The six drafts `POST /v1/registry/seed` publishes |
+| `sandboxSellerBindRequests(listings, sellerAgentId)` | Listing ids from that catalog, ready for `PUT /v1/jobs/listings/:id/seller` |
+| `sandboxJobSchema(name)` | Escrow result schema for one seeded name |
+| `sandboxExecute(name, input)` | Local fixture. No model, chain, or paid API |
 
 A job ranks with the same reputation blend as `withReputation=1` (relevance 0.70, price/latency 0.15, passport 0.15). The listing owner must bind a seller agent in that organization first. If the top hit has no binding, the API returns `seller_unbound` and does not lock funds. The buyer and the seller may be different organizations. Only the seller organization can deliver the result. Direct `POST /v1/escrows` stays inside one organization.
 

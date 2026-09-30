@@ -6,7 +6,12 @@ import { CapabilityRegistry } from "@albesa/registry";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { AgentFinanceService } from "./service.js";
-import { sandboxReceiptListing } from "./jobs.js";
+import {
+  sandboxExecute,
+  sandboxJobSchema,
+  sandboxMarketplaceListings,
+  sandboxReceiptListing,
+} from "./jobs.js";
 
 const directories: string[] = [];
 
@@ -59,6 +64,7 @@ interface JobBody {
     buyerBalanceUsdc: string;
     sellerBalanceUsdc: string;
     validationErrors: string[] | null;
+    result: unknown;
     latencyMs: number | null;
     passport: { agentId: string; scoreBefore: string; scoreAfter: string } | null;
   };
@@ -453,7 +459,7 @@ describe("marketplace jobs", () => {
     const seeded = await app.request("/v1/registry/seed", { method: "POST", headers: sellerOrg.auth });
     expect(seeded.status).toBe(201);
     const catalog = ((await seeded.json()) as { listings: { id: string; name: string; agentId: string | null }[] }).listings;
-    expect(catalog.map((listing) => listing.name)).toEqual(["Receipt parser", "Doc summarizer", "Unit converter"]);
+    expect(catalog.map((listing) => listing.name)).toEqual(sandboxMarketplaceListings().map((listing) => listing.name));
     const receipt = catalog.find((listing) => listing.name === "Receipt parser");
     expect(receipt).toBeTruthy();
     await bind(app, sellerOrg.auth, receipt!.id, sellerId);
@@ -627,4 +633,104 @@ describe("marketplace jobs", () => {
     const types = ((await history.json()) as { transactions: { type: string }[] }).transactions.map((tx) => tx.type);
     expect(types).toContain("escrow_refund");
   });
+
+  it("seeds, lists, and searches the first-party fleet, then settles a compute arb job", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const buyerOrg = await organization(app, "Northwind");
+    const sellerOrg = await organization(app, "Harbor");
+    const buyerId = await createAgent(app, buyerOrg.auth, "buyer");
+    const sellerId = await createAgent(app, sellerOrg.auth, "seller");
+    await fund(app, buyerOrg.auth, buyerId, "1.00");
+
+    const seeded = await app.request("/v1/registry/seed", { method: "POST", headers: sellerOrg.auth });
+    expect(seeded.status).toBe(201);
+    const catalog = (
+      (await seeded.json()) as {
+        listings: { id: string; name: string; manifest: { mcp: { name: string } } | null }[];
+      }
+    ).listings;
+    expect(catalog.map((listing) => listing.name)).toEqual(sandboxMarketplaceListings().map((listing) => listing.name));
+    expect(catalog.find((listing) => listing.name === "Receipt parser")?.manifest?.mcp.name).toBe("receipt_parser");
+    expect(catalog.find((listing) => listing.name === "Compute arb")?.manifest?.mcp.name).toBe("compute_arb");
+
+    const listed = await app.request("/v1/registry/listings", { headers: buyerOrg.auth });
+    expect(listed.status).toBe(200);
+    const names = ((await listed.json()) as { listings: { name: string }[] }).listings.map((listing) => listing.name);
+    expect(names).toEqual([
+      "Compute arb",
+      "Doc Q&A",
+      "Doc summarizer",
+      "Receipt parser",
+      "Structured data extract",
+      "Unit converter",
+    ]);
+
+    const arbSearch = await app.request("/v1/registry/search?q=compute%20arb&tags=arb", { headers: buyerOrg.auth });
+    const extractSearch = await app.request("/v1/registry/search?q=structured%20data%20extract&tags=structured", {
+      headers: buyerOrg.auth,
+    });
+    const qaSearch = await app.request("/v1/registry/search?q=document%20question&tags=qa", { headers: buyerOrg.auth });
+    const receiptSearch = await app.request("/v1/registry/search?q=parse%20receipts&tags=receipt", {
+      headers: buyerOrg.auth,
+    });
+    expect(hitNames(await arbSearch.json())).toEqual(["Compute arb"]);
+    expect(hitNames(await extractSearch.json())).toEqual(["Structured data extract"]);
+    expect(hitNames(await qaSearch.json())).toEqual(["Doc Q&A"]);
+    expect(hitNames(await receiptSearch.json())).toEqual(["Receipt parser"]);
+
+    const arb = catalog.find((listing) => listing.name === "Compute arb");
+    expect(arb).toBeTruthy();
+    await bind(app, sellerOrg.auth, arb!.id, sellerId);
+
+    const quote = {
+      quotes: [
+        { provider: "spot-b", priceUsdc: "0.006" },
+        { provider: "spot-a", priceUsdc: "0.004" },
+      ],
+    };
+    const delivered = sandboxExecute("Compute arb", quote);
+    const created = await app.request("/v1/jobs", {
+      method: "POST",
+      headers: buyerOrg.auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "compute arb",
+        amountUsdc: "0.50",
+        schema: sandboxJobSchema("Compute arb"),
+        tags: ["arb"],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const held = (await created.json()) as JobBody;
+    expect(held.job.status).toBe("held");
+    expect(held.job.listingName).toBe("Compute arb");
+    expect(held.job.listingId).toBe(arb!.id);
+    expect(held.job.sellerAgentId).toBe(sellerId);
+    expect(held.job.buyerBalanceUsdc).toBe("0.500000");
+
+    const settled = await app.request(`/v1/jobs/${held.job.id}/result`, {
+      method: "POST",
+      headers: sellerOrg.auth,
+      body: JSON.stringify({ result: delivered, latencyMs: 60 }),
+    });
+    expect(settled.status).toBe(200);
+    const released = (await settled.json()) as JobBody;
+    expect(released.job.status).toBe("released");
+    expect(released.job.result).toEqual({ provider: "spot-a", priceUsdc: "0.004000", savedUsdc: "0.002000" });
+    expect(released.job.takeRateUsdc).toBe("0.005000");
+    expect(released.job.sellerNetUsdc).toBe("0.495000");
+    expect(released.job.buyerBalanceUsdc).toBe("0.500000");
+    expect(released.job.sellerBalanceUsdc).toBe("0.495000");
+    expect(released.job.validationErrors).toBeNull();
+    expect(released.job.passport).toEqual({
+      agentId: sellerId,
+      scoreBefore: "0.0000",
+      scoreAfter: "89.2550",
+    });
+  });
 });
+
+function hitNames(body: unknown): string[] {
+  const hits = (body as { hits: { listing: { name: string } }[] }).hits;
+  return hits.map((hit) => hit.listing.name);
+}

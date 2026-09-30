@@ -1,14 +1,25 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { CapabilityListing, JsonSchema, LatencySla, ListingStatus, PricingHint, PricingModel } from "./types.js";
+import type {
+  CapabilityListing,
+  CapabilityManifest,
+  JsonSchema,
+  LatencySla,
+  ListingStatus,
+  PricingHint,
+  PricingModel,
+} from "./types.js";
 
 interface IndexFile {
   version: 1;
   listings: CapabilityListing[];
 }
 
-/** Index files written before seller binding omit `agentId`. */
-type StoredListing = Omit<CapabilityListing, "agentId"> & { agentId?: string | null };
+/** Index files written before seller binding omit `agentId`. Files written before manifests omit `manifest`. */
+type StoredListing = Omit<CapabilityListing, "agentId" | "manifest"> & {
+  agentId?: string | null;
+  manifest?: CapabilityManifest | null;
+};
 
 export function readIndex(filePath: string): CapabilityListing[] {
   if (!existsSync(filePath)) return [];
@@ -27,7 +38,7 @@ export function readIndex(filePath: string): CapabilityListing[] {
     if (!isStoredListing(entry)) {
       throw new Error(`Capability registry index contains an invalid listing: ${filePath}`);
     }
-    listings.push({ ...entry, agentId: entry.agentId ?? null });
+    listings.push({ ...entry, agentId: entry.agentId ?? null, manifest: entry.manifest ?? null });
   }
   return listings;
 }
@@ -59,6 +70,7 @@ function isStoredListing(value: unknown): value is StoredListing {
     value.tags.every((tag) => typeof tag === "string") &&
     isStatus(value.status) &&
     isAgentId(value.agentId) &&
+    isManifest(value.manifest) &&
     typeof value.createdAt === "string" &&
     typeof value.updatedAt === "string"
   );
@@ -66,6 +78,12 @@ function isStoredListing(value: unknown): value is StoredListing {
 
 function isAgentId(value: unknown): boolean {
   return value === undefined || value === null || typeof value === "string";
+}
+
+function isManifest(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (!isRecord(value) || !isRecord(value.mcp) || !isRecord(value.openapi)) return false;
+  return typeof value.mcp.name === "string" && typeof value.openapi.operationId === "string";
 }
 
 function isSchema(value: unknown): value is JsonSchema {

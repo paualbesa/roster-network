@@ -48,6 +48,7 @@ describe("capability registry", () => {
     expect(listing.tags).toEqual(["extract", "invoice"]);
     expect(listing.version).toBe("1.0.0");
     expect(listing.agentId).toBeNull();
+    expect(listing.manifest).toBeNull();
     expect(listing.createdAt).toBe("2026-09-28T00:00:00.000Z");
     expect(registry.get(listing.id)).toEqual(listing);
     expect(registry.get("cap_missing")).toBeNull();
@@ -187,12 +188,48 @@ describe("capability registry", () => {
       listings: Record<string, unknown>[];
     };
     delete parsed.listings[0]?.agentId;
+    delete parsed.listings[0]?.manifest;
     writeFileSync(filePath, JSON.stringify(parsed));
 
     const legacy = new CapabilityRegistry({ filePath });
     expect(legacy.get(live.id)?.agentId).toBeNull();
+    expect(legacy.get(live.id)?.manifest).toBeNull();
     expect(legacy.search({ q: "extract invoices" }).map((hit) => hit.listing.id)).toEqual([live.id]);
     expect(legacy.search({ q: "extract invoices" })[0]?.reputationScore).toBeUndefined();
+  });
+
+  it("stores an MCP and OpenAPI manifest and reloads it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roster-registry-"));
+    tempDirs.push(dir);
+    const filePath = join(dir, "index.json");
+    const registry = new CapabilityRegistry({ filePath, now: clock() });
+    const inputSchema = { type: "object", properties: { text: { type: "string" } } };
+    const outputSchema = { type: "object", properties: { fields: { type: "array" } } };
+    const listing = registry.register(
+      "org_a",
+      body({
+        name: "Structured data extract",
+        manifest: {
+          mcp: { name: "structured_extract", description: "Extract named fields.", inputSchema },
+          openapi: {
+            openapi: "3.0.3",
+            operationId: "extractStructuredData",
+            method: "post",
+            path: "/sandbox/structured-extract",
+            requestSchema: inputSchema,
+            responseSchema: outputSchema,
+          },
+        },
+      }),
+    );
+    expect(listing.manifest?.mcp.name).toBe("structured_extract");
+    expect(listing.manifest?.openapi.path).toBe("/sandbox/structured-extract");
+
+    const reloaded = new CapabilityRegistry({ filePath });
+    expect(reloaded.get(listing.id)?.manifest).toEqual(listing.manifest);
+
+    const cleared = registry.update("org_a", listing.id, { manifest: null });
+    expect(cleared.manifest).toBeNull();
   });
 
   it("rejects malformed manifests", () => {
@@ -203,6 +240,7 @@ describe("capability registry", () => {
     );
     expect(() => registry.register("org_a", body({ latency: { p95Ms: 100, p50Ms: 200 } }))).toThrow(RegistryError);
     expect(() => registry.register("org_a", body({ agentId: "seller" }))).toThrow(RegistryError);
+    expect(() => registry.register("org_a", body({ manifest: { mcp: { name: "Bad Name" } } }))).toThrow(RegistryError);
     expect(() => registry.search({ limit: 0 })).toThrow(RegistryError);
     expect(() => registry.search({ minScore: 101 })).toThrow(RegistryError);
     expect(registry.get("cap_none")).toBeNull();

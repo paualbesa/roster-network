@@ -16,12 +16,15 @@ export type { CapabilityRegistryOptions } from "./registry.js";
 export { embedText, cosineSimilarity, tokenize, listingDocument, EMBEDDING_DIMENSIONS } from "./text.js";
 export type {
   CapabilityListing,
+  CapabilityManifest,
   CapabilitySearchHit,
   CapabilitySearchQuery,
   JsonSchema,
   JsonValue,
   LatencySla,
   ListingStatus,
+  McpToolManifest,
+  OpenApiOperationManifest,
   PricingHint,
   PricingModel,
   RawSearchParams,

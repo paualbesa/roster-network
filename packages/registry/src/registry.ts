@@ -4,6 +4,7 @@ import { writeIndex, readIndex } from "./persist.js";
 import { rankListings } from "./rank.js";
 import type {
   CapabilityListing,
+  CapabilityManifest,
   CapabilitySearchHit,
   CapabilitySearchQuery,
   JsonSchema,
@@ -30,6 +31,9 @@ const MAX_USDC_MICROS = 1_000_000n * 1_000_000n;
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const TAG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const AGENT_ID_RE = /^agt_[a-z0-9]{1,64}$/;
+const MCP_NAME_RE = /^[a-z][a-z0-9_]{0,63}$/;
+const OPERATION_ID_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const OPENAPI_PATH_RE = /^\/[A-Za-z0-9/_-]{1,80}$/;
 
 export interface CapabilityRegistryOptions {
   filePath?: string;
@@ -47,6 +51,7 @@ interface ListingDraft {
   tags: string[];
   status: ListingStatus;
   agentId: string | null;
+  manifest: CapabilityManifest | null;
 }
 
 export class CapabilityRegistry {
@@ -86,6 +91,7 @@ export class CapabilityRegistry {
       tags: draft.tags,
       status: draft.status,
       agentId: draft.agentId,
+      manifest: draft.manifest,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -119,6 +125,7 @@ export class CapabilityRegistry {
       tags: draft.tags,
       status: draft.status,
       agentId: draft.agentId,
+      manifest: draft.manifest,
       createdAt: previous.createdAt,
       updatedAt: this.now().toISOString(),
     };
@@ -245,6 +252,7 @@ function parseRegisterBody(input: unknown): ListingDraft {
     tags: body.tags === undefined ? [] : readTags(body.tags),
     status: body.status === undefined ? "active" : readStatus(body.status),
     agentId: body.agentId === undefined ? null : readAgentId(body.agentId),
+    manifest: body.manifest === undefined ? null : readManifest(body.manifest),
   };
 }
 
@@ -261,6 +269,7 @@ function parseUpdateBody(input: unknown, current: CapabilityListing): ListingDra
     "tags",
     "status",
     "agentId",
+    "manifest",
   ];
   if (!mutable.some((key) => key in body)) {
     throw new RegistryError(400, "invalid_request", "Update must change at least one listing field.");
@@ -277,6 +286,7 @@ function parseUpdateBody(input: unknown, current: CapabilityListing): ListingDra
     tags: body.tags === undefined ? current.tags : readTags(body.tags),
     status: body.status === undefined ? current.status : readStatus(body.status),
     agentId: body.agentId === undefined ? current.agentId : readAgentId(body.agentId),
+    manifest: body.manifest === undefined ? current.manifest : readManifest(body.manifest),
   };
 }
 
@@ -476,6 +486,67 @@ function parseLimit(value: string): number {
     throw new RegistryError(400, "invalid_request", `limit must be an integer from 1 to ${MAX_LIMIT.toString()}.`);
   }
   return Number(value);
+}
+
+function readManifest(value: unknown): CapabilityManifest | null {
+  if (value === null) return null;
+  if (!isRecord(value)) throw new RegistryError(400, "invalid_request", "manifest must be an object.");
+  assertKeys(value, ["mcp", "openapi"], "manifest");
+  return { mcp: readMcpManifest(value.mcp), openapi: readOpenApiManifest(value.openapi) };
+}
+
+function readMcpManifest(value: unknown): CapabilityManifest["mcp"] {
+  if (!isRecord(value)) throw new RegistryError(400, "invalid_request", "manifest.mcp must be an object.");
+  assertKeys(value, ["name", "description", "inputSchema"], "manifest.mcp");
+  if (typeof value.name !== "string" || !MCP_NAME_RE.test(value.name)) {
+    throw new RegistryError(
+      400,
+      "invalid_request",
+      "manifest.mcp.name must be a lowercase tool name like structured_extract.",
+    );
+  }
+  return {
+    name: value.name,
+    description: readDescription(value.description),
+    inputSchema: readSchema(value.inputSchema, "manifest.mcp.inputSchema"),
+  };
+}
+
+function readOpenApiManifest(value: unknown): CapabilityManifest["openapi"] {
+  if (!isRecord(value)) throw new RegistryError(400, "invalid_request", "manifest.openapi must be an object.");
+  assertKeys(
+    value,
+    ["openapi", "operationId", "method", "path", "requestSchema", "responseSchema"],
+    "manifest.openapi",
+  );
+  if (value.openapi !== "3.0.3") {
+    throw new RegistryError(400, "invalid_request", 'manifest.openapi.openapi must be "3.0.3".');
+  }
+  if (typeof value.operationId !== "string" || !OPERATION_ID_RE.test(value.operationId)) {
+    throw new RegistryError(400, "invalid_request", "manifest.openapi.operationId must be an identifier.");
+  }
+  if (value.method !== "post") {
+    throw new RegistryError(400, "invalid_request", 'manifest.openapi.method must be "post".');
+  }
+  if (typeof value.path !== "string" || !OPENAPI_PATH_RE.test(value.path)) {
+    throw new RegistryError(400, "invalid_request", "manifest.openapi.path must be a relative path.");
+  }
+  return {
+    openapi: "3.0.3",
+    operationId: value.operationId,
+    method: "post",
+    path: value.path,
+    requestSchema: readSchema(value.requestSchema, "manifest.openapi.requestSchema"),
+    responseSchema: readSchema(value.responseSchema, "manifest.openapi.responseSchema"),
+  };
+}
+
+function assertKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      throw new RegistryError(400, "invalid_request", `${label}: unknown field "${key}".`);
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
