@@ -53,6 +53,8 @@ module.exports = {
         PORT: "7000",
         HOSTNAME: "127.0.0.1",
         TZ: "Europe/Madrid",
+        NEXT_PUBLIC_ROSTER_API_URL: "http://127.0.0.1:7001",
+        ROSTER_API_URL: "http://127.0.0.1:7001",
       },
     },
     {

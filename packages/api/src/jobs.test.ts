@@ -947,6 +947,57 @@ describe("marketplace jobs", () => {
     expect(delivered.status).toBe(200);
     expect(((await delivered.json()) as JobBody).job.status).toBe("released");
   });
+
+  it("locks the listing id from the request when a cheaper candidate would otherwise win", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const buyerOrg = await organization(app, "Buyer");
+    const sellerOrg = await organization(app, "Harbor");
+    const rivalOrg = await organization(app, "Drift");
+    const buyerId = await createAgent(app, buyerOrg.auth, "buyer");
+    const sellerId = await createAgent(app, sellerOrg.auth, "seller");
+    const rivalId = await createAgent(app, rivalOrg.auth, "rival");
+    await fund(app, buyerOrg.auth, buyerId, "5.00");
+    const harborId = await register(app, sellerOrg.auth, sandboxReceiptListing());
+    const driftId = await register(app, rivalOrg.auth, {
+      ...sandboxReceiptListing(),
+      pricing: { model: "per_call", amountUsdc: "0.01" },
+      latency: { p95Ms: 80 },
+    });
+    await bind(app, sellerOrg.auth, harborId, sellerId);
+    await bind(app, rivalOrg.auth, driftId, rivalId);
+
+    const created = await app.request("/v1/jobs", {
+      method: "POST",
+      headers: buyerOrg.auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "Receipt parser",
+        amountUsdc: "1.00",
+        schema: totalSchema,
+        tags: ["receipt"],
+        listingId: harborId,
+      }),
+    });
+    expect(created.status).toBe(201);
+    const held = (await created.json()) as JobBody;
+    expect(held.job.listingId).toBe(harborId);
+    expect(held.job.sellerAgentId).toBe(sellerId);
+
+    const missing = await app.request("/v1/jobs", {
+      method: "POST",
+      headers: buyerOrg.auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "Receipt parser",
+        amountUsdc: "1.00",
+        schema: totalSchema,
+        listingId: "cap_missing",
+      }),
+    });
+    expect(missing.status).toBe(404);
+    expect(((await missing.json()) as ErrorBody).error.code).toBe("not_found");
+  });
+
 });
 
 function hitNames(body: unknown): string[] {

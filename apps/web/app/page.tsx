@@ -100,6 +100,11 @@ export default function HomePage() {
                 Read the docs
               </Link>
             </div>
+            <p className="rise rise-delay-4 mt-5 text-sm">
+              <Link href="/console" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">
+                Open the sandbox console
+              </Link>
+            </p>
           </div>
           <LedgerCard />
         </div>

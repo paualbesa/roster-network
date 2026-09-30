@@ -162,6 +162,11 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return c.json(result);
   });
 
+  app.get("/v1/agents", async (c) => {
+    const agents = await service.listAgents(c.get("orgId"));
+    return c.json({ agents });
+  });
+
   app.post("/v1/agents", async (c) => {
     const input = parseCreateAgent(await readJson(c));
     const result = await service.createAgent(c.get("orgId"), input);

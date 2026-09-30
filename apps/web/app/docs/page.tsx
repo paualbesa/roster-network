@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { GITHUB_README_URL, GITHUB_URL, SANDBOX_DISCLAIMER } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -61,6 +62,17 @@ export default function DocsPage() {
         <pre className="mt-6 overflow-x-auto border border-line/10 bg-panel p-4 font-mono text-[13px] leading-6 text-paper">
           <code>{`import { Albesa } from "@albesa/sdk";\n\nconst roster = new Albesa({ apiKey: process.env.ALBESA_API_KEY! });\nconst hits = await roster.registry.search({\n  q: "parse receipts",\n  withReputation: true,\n});`}</code>
         </pre>
+
+        <h2 className="mt-14 font-serif text-3xl tracking-[-0.03em]">Sandbox console</h2>
+        <p className="mt-4 text-sm leading-6 text-muted">
+          A human can sign up, fund a buyer, search the registry, and settle a mock job at{" "}
+          <Link href="/console" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">
+            /console
+          </Link>
+          . The same API key is <code className="font-mono text-paper">ROSTER_API_KEY</code> for the MCP server. The OpenAPI document is served at{" "}
+          <code className="font-mono text-paper">/openapi.json</code> on the API, and through this site at{" "}
+          <code className="font-mono text-paper">/roster-api/openapi.json</code>.
+        </p>
 
         <h2 className="mt-14 font-serif text-3xl tracking-[-0.03em]">Repository</h2>
         <ul className="mt-4 space-y-2 text-sm">
