@@ -220,6 +220,8 @@ export interface CreateJobInput {
   tags?: string[];
   maxP95Ms?: number;
   memo?: string;
+  /** Buyer payload for a first-party sandbox fixture. Omit it for the schema-valid sample. */
+  input?: unknown;
 }
 
 export interface JobPassportChange {
@@ -263,6 +265,8 @@ export interface ListingSellerBinding {
   organizationId: string;
   sellerAgentId: string;
   createdAt: string;
+  /** True only for the sandbox fleet. Those jobs deliver without a seller submit. */
+  autofill: boolean;
 }
 
 export class AlbesaError extends Error {
@@ -567,6 +571,7 @@ export class Albesa {
     if (input.tags !== undefined) body.tags = input.tags;
     if (input.maxP95Ms !== undefined) body.maxP95Ms = input.maxP95Ms;
     if (input.memo !== undefined) body.memo = input.memo;
+    if (input.input !== undefined) body.input = input.input;
     const raw = await this.request<{ job: JobHandle }>("POST", "/v1/jobs", body);
     return raw.job;
   }

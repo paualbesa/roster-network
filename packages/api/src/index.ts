@@ -1,6 +1,13 @@
 export { createApp } from "./app.js";
 export type { AppOptions, ListingPassportScore } from "./app.js";
 export {
+  bootstrapSandboxFleet,
+  SANDBOX_FLEET_AGENT_NAME,
+  SANDBOX_FLEET_FUND_USDC,
+  SANDBOX_FLEET_ORG_NAME,
+} from "./fleet.js";
+export type { SandboxFleetListing, SandboxFleetSnapshot } from "./fleet.js";
+export {
   JobOrchestrator,
   JsonJobStore,
   MemoryJobStore,

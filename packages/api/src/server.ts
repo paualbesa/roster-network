@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { resolveRuntimeMode, resolveWalletRail } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
 import { createApp } from "./app.js";
+import { bootstrapSandboxFleet } from "./fleet.js";
 import { readListenAddress } from "./listen.js";
 
 const mode = resolveRuntimeMode();
@@ -21,6 +22,12 @@ const app = createApp({
   jobsFile,
   registry: new CapabilityRegistry({ filePath: registryPath }),
 });
+if (mode === "sandbox") {
+  const fleet = await bootstrapSandboxFleet(app);
+  console.log(
+    `Roster Labs fleet: ${fleet.listings.length.toString()} listings on ${fleet.sellerAgentId}`,
+  );
+}
 serve({ fetch: app.fetch, hostname, port }, (info) => {
   console.log(
     `Roster API on http://${hostname}:${info.port.toString()} (${mode}, ${walletRail} USDC, ${dataFile})`,

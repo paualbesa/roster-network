@@ -224,6 +224,20 @@ export class AgentFinanceService implements ReputationHook {
     return this.enqueue(() => this.createOrganizationUnlocked(name));
   }
 
+  listOrganizations(): Promise<Organization[]> {
+    return this.enqueue(async () =>
+      [...this.store.organizations.values()].map((organization) => ({ ...organization })),
+    );
+  }
+
+  listAgents(organizationId: string): Promise<Agent[]> {
+    return this.enqueue(async () =>
+      [...this.store.agents.values()]
+        .filter((agent) => agent.organizationId === organizationId)
+        .map((agent) => ({ ...agent })),
+    );
+  }
+
   createAccount(input: CreateAccountInput): Promise<CreateAccountResult> {
     return this.enqueue(() => this.createAccountUnlocked(input));
   }
