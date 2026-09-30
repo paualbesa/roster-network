@@ -3,13 +3,11 @@ import { serve } from "@hono/node-server";
 import { resolveRuntimeMode, resolveWalletRail } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
 import { createApp } from "./app.js";
+import { readListenAddress } from "./listen.js";
 
 const mode = resolveRuntimeMode();
 const walletRail = resolveWalletRail();
-const port = Number(process.env.PORT ?? 8787);
-if (!Number.isInteger(port) || port <= 0) {
-  throw new Error("PORT must be a positive integer.");
-}
+const { hostname, port } = readListenAddress();
 
 const dataFile = process.env.ALBESA_DATA_FILE?.trim() || join(process.cwd(), "data", "sandbox.json");
 const reputationFile = process.env.ROSTER_REPUTATION_FILE?.trim() || join(process.cwd(), "data", "reputation.json");
@@ -23,8 +21,8 @@ const app = createApp({
   jobsFile,
   registry: new CapabilityRegistry({ filePath: registryPath }),
 });
-serve({ fetch: app.fetch, port }, (info) => {
+serve({ fetch: app.fetch, hostname, port }, (info) => {
   console.log(
-    `Roster API on http://127.0.0.1:${info.port.toString()} (${mode}, ${walletRail} USDC, ${dataFile})`,
+    `Roster API on http://${hostname}:${info.port.toString()} (${mode}, ${walletRail} USDC, ${dataFile})`,
   );
 });

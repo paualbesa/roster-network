@@ -27,6 +27,7 @@ import {
   sandboxMarketplaceListings,
   type JobStore,
 } from "./jobs.js";
+import { rosterCors } from "./cors.js";
 import { openApiDocument } from "./openapi.js";
 import {
   AgentFinanceService,
@@ -92,6 +93,10 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     ...(options.now ? { now: options.now } : {}),
   });
   const app = new Hono<AppEnv>();
+
+  // Direct browser calls from https://roster.network and localhost.
+  // A same-origin Next.js proxy on the marketing site is the preferred path.
+  app.use("*", rosterCors());
 
   app.get("/health", (c) => c.json({ ok: true, product: "Roster", mode, rail: walletRail, asset: "USDC" }));
 

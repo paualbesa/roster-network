@@ -1,11 +1,28 @@
 /**
- * PM2 — Roster marketing site on the Albesa server.
- * Next.js production on 127.0.0.1:7000.
- * Cloudflare tunnel: roster.network → http://127.0.0.1:7000
+ * PM2 on the Albesa server.
  *
+ * roster-web  Next.js on 127.0.0.1:7000
+ *   Cloudflare: roster.network → http://127.0.0.1:7000
  *   bash scripts/deploy-roster-web.sh
+ *
+ * roster-api  Roster HTTP API on 127.0.0.1:7001
+ *   Suggested Cloudflare hostname: api.roster.network → http://127.0.0.1:7001
+ *   bash scripts/deploy-roster-api.sh
+ *
+ * Sandbox only. No mainnet and no API keys in this file.
+ * An MCP deploy recipe named roster-api may be added later.
  */
+const fs = require("fs");
 const path = require("path");
+
+function rosterDataDir() {
+  const configured = process.env.ROSTER_DATA_DIR;
+  if (typeof configured === "string" && configured.trim() !== "") return configured.trim();
+  if (fs.existsSync("/home/ats-server/albesa")) return "/home/ats-server/albesa/roster-data";
+  return path.join(__dirname, "data");
+}
+
+const dataDir = rosterDataDir();
 
 module.exports = {
   apps: [
@@ -36,6 +53,30 @@ module.exports = {
         PORT: "7000",
         HOSTNAME: "127.0.0.1",
         TZ: "Europe/Madrid",
+      },
+    },
+    {
+      name: "roster-api",
+      cwd: path.join(__dirname, "packages", "api"),
+      script: path.join(__dirname, "packages", "api", "dist", "server.js"),
+      interpreter: "node",
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      watch: false,
+      max_restarts: 30,
+      min_uptime: 5000,
+      restart_delay: 3000,
+      env: {
+        NODE_ENV: "production",
+        HOST: "127.0.0.1",
+        PORT: "7001",
+        ROSTER_MODE: "sandbox",
+        TZ: "Europe/Madrid",
+        ALBESA_DATA_FILE: path.join(dataDir, "sandbox.json"),
+        ROSTER_REPUTATION_FILE: path.join(dataDir, "reputation.json"),
+        REGISTRY_INDEX_PATH: path.join(dataDir, "registry.json"),
+        ROSTER_JOBS_FILE: path.join(dataDir, "jobs.json"),
       },
     },
   ],
