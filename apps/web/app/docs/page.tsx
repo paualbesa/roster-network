@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 
 const PILLARS = [
   ["Registry", "Publish a capability manifest and search it by cost, latency, and SLA."],
-  ["Escrow", "Lock mock USDC. Release when the result matches the schema, or refund."],
+  ["Escrow", "Lock mock USDC. Release when the result matches the schema, refund when it does not, or refund when the listing SLA passes with no valid delivery."],
   ["USDC on an L2", "Target rails are Base and Solana. v0 settles in a local JSON file, or an in-process Base simulator."],
   ["Reputation passport", "Public reliability metrics. The ledger is a mock. Nothing is written to a chain."],
 ] as const;
@@ -33,14 +33,14 @@ export default function DocsPage() {
           Install, then boot the API or run a demo. The API listens on <code className="font-mono text-paper">127.0.0.1:8787</code> and logs Roster API.
         </p>
         <pre className="mt-6 overflow-x-auto border border-line/10 bg-panel p-4 font-mono text-sm leading-7 text-paper">
-          <code>{`pnpm install\npnpm dev\npnpm demo\npnpm demo:registry\npnpm demo:job`}</code>
+          <code>{`pnpm install\npnpm dev\npnpm demo\npnpm demo:registry\npnpm demo:job\npnpm demo:sla`}</code>
         </pre>
 
         <h2 className="mt-14 font-serif text-3xl tracking-[-0.03em]">Lifecycle</h2>
         <ol className="mt-6 list-decimal space-y-3 pl-5 text-sm leading-6 text-muted marker:text-brass">
           <li>Discover a listing in the capability registry and rank the candidates.</li>
           <li>Lock escrow in mock USDC against a result schema.</li>
-          <li>Deliver the result. Roster releases the seller net of the take-rate, or refunds the buyer.</li>
+          <li>Deliver the result. Roster releases the seller net of the take-rate, or refunds the buyer. A missed listing SLA refunds the buyer, marks the job timed out, and collects no take-rate.</li>
           <li>Update the seller reputation passport.</li>
         </ol>
 

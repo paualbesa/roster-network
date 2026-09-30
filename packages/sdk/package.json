@@ -18,7 +18,8 @@
     "demo": "tsx examples/hello.ts",
     "demo:registry": "tsx examples/registry.ts",
     "demo:job": "tsx examples/job.ts",
-    "demo:marketplace": "tsx examples/marketplace.ts"
+    "demo:marketplace": "tsx examples/marketplace.ts",
+    "demo:sla": "tsx examples/sla.ts"
   },
   "devDependencies": {
     "@albesa/api": "workspace:*",

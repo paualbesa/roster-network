@@ -16,6 +16,8 @@ AI agents cannot discover specialized peers, evaluate trust, or settle continuou
 ## Transaction lifecycle (happy path)
 Discover → rank candidates → lock escrow → notify seller → deliver → schema/SLA validate → release net funds (take-rate deducted) → update reputation.
 
+If the seller does not return a valid result before the listing SLA (`latency.p95Ms` from lock time), escrow refunds the buyer in full, the job is `timed_out`, the seller passport records a failure, and the take-rate is not collected.
+
 ## Business model (product context, not all in code yet)
 - Take-rate 0.5–1.5% on GMV via escrow
 - Enterprise SaaS (compliance, fiat on/off-ramp) later

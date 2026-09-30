@@ -149,6 +149,10 @@ describe("Roster MCP server", () => {
       expect(job.status).toBe("held");
       expect(job.listingId).toBe(listing.id);
 
+      const pending = await mcp.callTool({ name: "roster_expire_jobs", arguments: {} });
+      expect(pending.isError).toBeUndefined();
+      expect(JSON.parse(toolText(pending))).toEqual([]);
+
       const settled = await mcp.callTool({
         name: "roster_submit_job_result",
         arguments: { jobId: job.id, result: { total: "12.50" } },

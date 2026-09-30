@@ -163,6 +163,17 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
   );
 
   server.registerTool(
+    "roster_expire_jobs",
+    {
+      title: "Expire Roster jobs past their SLA",
+      description:
+        "Refund every held marketplace job visible to this account whose listing SLA has passed. The buyer is refunded in full, the job becomes timed_out, and the seller passport records a failure. No take-rate is collected. Jobs still inside the window stay locked. Returns the jobs that just timed out.",
+      inputSchema: {},
+    },
+    async () => runTool(() => client.jobs.expire()),
+  );
+
+  server.registerTool(
     "roster_passport",
     {
       title: "Read a Roster passport",

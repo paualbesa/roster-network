@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MockWalletProvider } from "@albesa/core";
+import { MockWalletProvider, SLA_TIMEOUT_REASON } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
@@ -58,6 +58,9 @@ interface JobBody {
     buyerAgentId: string;
     sellerOrganizationId: string;
     escrowId: string;
+    slaMs: number | null;
+    deadlineAt: string | null;
+    createdAt: string;
     amountUsdc: string;
     takeRateUsdc: string;
     sellerNetUsdc: string;
@@ -495,6 +498,7 @@ describe("marketplace jobs", () => {
     expect(spec.status).toBe(200);
     const document = (await spec.json()) as { paths: Record<string, unknown> };
     expect(document.paths["/v1/jobs"]).toBeTruthy();
+    expect(document.paths["/v1/jobs/expire"]).toBeTruthy();
     expect(document.paths["/v1/registry/seed"]).toBeTruthy();
 
     const direct = await app.request("/v1/escrows", {
@@ -727,6 +731,221 @@ describe("marketplace jobs", () => {
       scoreBefore: "0.0000",
       scoreAfter: "89.2550",
     });
+  });
+
+
+  it("refunds the buyer with no take-rate when the listing SLA elapses", async () => {
+    let current = Date.parse("2026-09-30T12:00:00.000Z");
+    const now = () => new Date(current);
+    const wallets = new MockWalletProvider();
+    const app = createApp({
+      mode: "sandbox",
+      now,
+      service: new AgentFinanceService({ mode: "sandbox", wallets, now }),
+    });
+    const buyerOrg = await organization(app, "Northwind");
+    const sellerOrg = await organization(app, "Harbor");
+    const strangerOrg = await organization(app, "Drift");
+    const buyerId = await createAgent(app, buyerOrg.auth, "buyer");
+    const sellerId = await createAgent(app, sellerOrg.auth, "seller");
+    await fund(app, buyerOrg.auth, buyerId, "1.00");
+    const listingId = await register(app, sellerOrg.auth, sandboxReceiptListing());
+    await bind(app, sellerOrg.auth, listingId, sellerId);
+
+    const created = await app.request("/v1/jobs", {
+      method: "POST",
+      headers: buyerOrg.auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "parse receipts",
+        amountUsdc: "1.00",
+        schema: totalSchema,
+        tags: ["receipt"],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const held = (await created.json()) as JobBody;
+    expect(held.job.status).toBe("held");
+    expect(held.job.slaMs).toBe(400);
+    expect(held.job.deadlineAt).toBe(new Date(Date.parse(held.job.createdAt) + 400).toISOString());
+    expect(held.job.buyerBalanceUsdc).toBe("0.000000");
+
+    const early = await app.request("/v1/jobs/expire", { method: "POST", headers: buyerOrg.auth });
+    expect(early.status).toBe(200);
+    expect(((await early.json()) as { jobs: { id: string }[] }).jobs).toEqual([]);
+    const stillHeld = await app.request(`/v1/jobs/${held.job.id}`, { headers: buyerOrg.auth });
+    expect(((await stillHeld.json()) as JobBody).job.status).toBe("held");
+
+    current += 399;
+    const almost = await app.request("/v1/jobs/expire", { method: "POST", headers: sellerOrg.auth });
+    expect(((await almost.json()) as { jobs: { id: string }[] }).jobs).toEqual([]);
+
+    current += 1;
+    const stranger = await app.request("/v1/jobs/expire", { method: "POST", headers: strangerOrg.auth });
+    expect(((await stranger.json()) as { jobs: { id: string }[] }).jobs).toEqual([]);
+
+    const expired = await app.request("/v1/jobs/expire", { method: "POST", headers: buyerOrg.auth });
+    expect(expired.status).toBe(200);
+    const timedOut = ((await expired.json()) as { jobs: JobBody["job"][] }).jobs;
+    expect(timedOut).toHaveLength(1);
+    expect(timedOut[0]).toMatchObject({
+      id: held.job.id,
+      status: "timed_out",
+      validationErrors: [SLA_TIMEOUT_REASON],
+      buyerBalanceUsdc: "1.000000",
+      sellerBalanceUsdc: "0.000000",
+      takeRateUsdc: "0.010000",
+      latencyMs: 400,
+      result: null,
+      passport: { agentId: sellerId, scoreBefore: "0.0000", scoreAfter: "20.0000" },
+    });
+
+    const escrow = await app.request(`/v1/escrows/${held.job.escrowId}`, { headers: buyerOrg.auth });
+    const escrowBody = (await escrow.json()) as {
+      escrow: { status: string; feeProviderRef: string | null; validationErrors: string[] | null };
+    };
+    expect(escrowBody.escrow.status).toBe("refunded");
+    expect(escrowBody.escrow.feeProviderRef).toBeNull();
+    expect(escrowBody.escrow.validationErrors).toEqual([SLA_TIMEOUT_REASON]);
+    expect(await wallets.getBalance(`mock:fees:${buyerOrg.organizationId}`)).toBe("0.000000");
+
+    const history = await app.request(`/v1/agents/${buyerId}/transactions`, { headers: buyerOrg.auth });
+    const transactions = ((await history.json()) as { transactions: { type: string; feeUsdc: string; amountUsdc: string }[] })
+      .transactions;
+    const refund = transactions.find((tx) => tx.type === "escrow_refund");
+    expect(refund).toMatchObject({ feeUsdc: "0.000000", amountUsdc: "1.000000" });
+    expect(transactions.some((tx) => tx.type === "escrow_release")).toBe(false);
+
+    const passport = await app.request(`/v1/agents/${sellerId}/passport`, { headers: buyerOrg.auth });
+    const passportBody = (await passport.json()) as PassportBody & {
+      passport: { metrics: { errorCount: number } };
+    };
+    expect(passportBody.passport.score).toBe("20.0000");
+    expect(passportBody.passport.metrics.failureCount).toBe(1);
+    expect(passportBody.passport.metrics.errorCount).toBe(1);
+    expect(passportBody.passport.metrics.successCount).toBe(0);
+    expect(passportBody.passport.metrics.volumeSettledUsdc).toBe("0.000000");
+
+    const again = await app.request("/v1/jobs/expire", { method: "POST", headers: sellerOrg.auth });
+    expect(((await again.json()) as { jobs: unknown[] }).jobs).toEqual([]);
+    const balance = await app.request(`/v1/agents/${buyerId}/balance`, { headers: buyerOrg.auth });
+    expect(((await balance.json()) as { balanceUsdc: string }).balanceUsdc).toBe("1.000000");
+
+    const late = await app.request(`/v1/jobs/${held.job.id}/result`, {
+      method: "POST",
+      headers: sellerOrg.auth,
+      body: JSON.stringify({ result: { total: "12.50" } }),
+    });
+    expect(late.status).toBe(409);
+    expect(((await late.json()) as ErrorBody).error.code).toBe("invalid_state");
+  });
+
+  it("times out a late valid delivery instead of releasing the seller", async () => {
+    let current = Date.parse("2026-09-30T12:00:00.000Z");
+    const now = () => new Date(current);
+    const wallets = new MockWalletProvider();
+    const app = createApp({
+      mode: "sandbox",
+      now,
+      service: new AgentFinanceService({ mode: "sandbox", wallets, now }),
+    });
+    const org = await organization(app);
+    const buyerId = await createAgent(app, org.auth, "buyer");
+    const sellerId = await createAgent(app, org.auth, "seller");
+    await fund(app, org.auth, buyerId, "1.00");
+    const listingId = await register(app, org.auth, sandboxReceiptListing());
+    await bind(app, org.auth, listingId, sellerId);
+    const created = await app.request("/v1/jobs", {
+      method: "POST",
+      headers: org.auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "parse receipts",
+        amountUsdc: "1.00",
+        schema: totalSchema,
+      }),
+    });
+    const held = (await created.json()) as JobBody;
+
+    current += 400;
+    const delivered = await app.request(`/v1/jobs/${held.job.id}/result`, {
+      method: "POST",
+      headers: org.auth,
+      body: JSON.stringify({ result: { total: "12.50" } }),
+    });
+    expect(delivered.status).toBe(200);
+    const timedOut = (await delivered.json()) as JobBody;
+    expect(timedOut.job.status).toBe("timed_out");
+    expect(timedOut.job.result).toBeNull();
+    expect(timedOut.job.validationErrors).toEqual([SLA_TIMEOUT_REASON]);
+    expect(timedOut.job.buyerBalanceUsdc).toBe("1.000000");
+    expect(timedOut.job.sellerBalanceUsdc).toBe("0.000000");
+    expect(timedOut.job.passport?.scoreAfter).toBe("20.0000");
+    expect(await wallets.getBalance(`mock:fees:${org.organizationId}`)).toBe("0.000000");
+  });
+
+  it("keeps a job without a stored deadline from timing out", async () => {
+    let current = Date.parse("2026-09-30T12:00:00.000Z");
+    const now = () => new Date(current);
+    const directory = mkdtempSync(join(tmpdir(), "roster-sla-"));
+    directories.push(directory);
+    const dataFile = join(directory, "sandbox.json");
+    const reputationFile = join(directory, "reputation.json");
+    const jobsFile = join(directory, "jobs.json");
+    const registryPath = join(directory, "registry.json");
+    const boot = () =>
+      createApp({
+        mode: "sandbox",
+        now,
+        dataFile,
+        reputationFile,
+        jobsFile,
+        registry: new CapabilityRegistry({ filePath: registryPath, now }),
+      });
+
+    const first = boot();
+    const { auth } = await organization(first);
+    const buyerId = await createAgent(first, auth, "buyer");
+    const sellerId = await createAgent(first, auth, "seller");
+    await fund(first, auth, buyerId, "1.00");
+    const listingId = await register(first, auth, sandboxReceiptListing());
+    await bind(first, auth, listingId, sellerId);
+    const created = await first.request("/v1/jobs", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "parse receipts",
+        amountUsdc: "1.00",
+        schema: totalSchema,
+      }),
+    });
+    const held = (await created.json()) as JobBody;
+    expect(held.job.deadlineAt).toBeTruthy();
+
+    const onDisk = JSON.parse(readFileSync(jobsFile, "utf8")) as { jobs: Record<string, unknown>[] };
+    delete onDisk.jobs[0]?.slaMs;
+    delete onDisk.jobs[0]?.deadlineAt;
+    writeFileSync(jobsFile, `${JSON.stringify(onDisk, null, 2)}\n`);
+
+    current += 86_400_000;
+    const second = boot();
+    const expired = await second.request("/v1/jobs/expire", { method: "POST", headers: auth });
+    expect(((await expired.json()) as { jobs: unknown[] }).jobs).toEqual([]);
+    const read = await second.request(`/v1/jobs/${held.job.id}`, { headers: auth });
+    const reloaded = (await read.json()) as JobBody;
+    expect(reloaded.job.status).toBe("held");
+    expect(reloaded.job.slaMs).toBeNull();
+    expect(reloaded.job.deadlineAt).toBeNull();
+    expect(reloaded.job.buyerBalanceUsdc).toBe("0.000000");
+
+    const delivered = await second.request(`/v1/jobs/${held.job.id}/result`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ result: { total: "12.50" } }),
+    });
+    expect(delivered.status).toBe(200);
+    expect(((await delivered.json()) as JobBody).job.status).toBe("released");
   });
 });
 

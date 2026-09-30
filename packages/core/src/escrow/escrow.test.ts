@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideSettlement, quoteEscrowSettlement } from "./machine.js";
+import { decideSettlement, decideSlaTimeout, quoteEscrowSettlement, SLA_TIMEOUT_REASON } from "./machine.js";
 import { EscrowSchemaError, parseResultSchema, validateResult } from "./schema.js";
 import { ESCROW_TAKE_RATE_BPS } from "./types.js";
 
@@ -74,5 +74,14 @@ describe("escrow state machine", () => {
     expect(hooked).toEqual({ status: "refunded", validationErrors: ["manual rejection"] });
     expect(() => decideSettlement("released", schema, { status: "ok", rows: 2 })).toThrow(/already released/);
     expect(() => decideSettlement("refunded", schema, {})).toThrow(/already refunded/);
+  });
+
+  it("refunds a held escrow when the SLA elapses and refuses a second settlement", () => {
+    expect(decideSlaTimeout("held")).toEqual({
+      status: "refunded",
+      validationErrors: [SLA_TIMEOUT_REASON],
+    });
+    expect(() => decideSlaTimeout("released")).toThrow(/already released/);
+    expect(() => decideSlaTimeout("refunded")).toThrow(/already refunded/);
   });
 });
