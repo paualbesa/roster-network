@@ -7,6 +7,32 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 /** JSON Schema document stored with the listing. Validated as JSON, not executed. */
 export type JsonSchema = { [key: string]: JsonValue };
 
+/** MCP tool descriptor stored with a listing. Schemas are JSON, not executed. */
+export interface McpToolManifest {
+  name: string;
+  description: string;
+  inputSchema: JsonSchema;
+}
+
+/** OpenAPI 3.0.3 operation the same capability exposes. */
+export interface OpenApiOperationManifest {
+  openapi: "3.0.3";
+  operationId: string;
+  method: "post";
+  path: string;
+  requestSchema: JsonSchema;
+  responseSchema: JsonSchema;
+}
+
+/**
+ * Publisher manifest. The registry stores it for discovery.
+ * Escrow validates the buyer's job schema, which should match `outputSchema`.
+ */
+export interface CapabilityManifest {
+  mcp: McpToolManifest;
+  openapi: OpenApiOperationManifest;
+}
+
 export interface PricingHint {
   model: PricingModel;
   /** Six-decimal USDC string. "0.000000" when model is free. */
@@ -34,6 +60,11 @@ export interface CapabilityListing {
   latency: LatencySla;
   tags: string[];
   status: ListingStatus;
+  /**
+   * MCP tool plus the OpenAPI operation for this capability.
+   * Null on listings published before manifests existed.
+   */
+  manifest: CapabilityManifest | null;
   /**
    * Seller agent whose reputation passport ranks this listing.
    * Null when the publisher did not bind one. Search may then use the

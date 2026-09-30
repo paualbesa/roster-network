@@ -269,7 +269,14 @@ describe("Albesa SDK", () => {
     expect(funded.balanceUsdc).toBe("5.000000");
 
     const catalog = await sellerOrg.client.registry.seed();
-    expect(catalog.map((listing) => listing.name)).toEqual(["Receipt parser", "Doc summarizer", "Unit converter"]);
+    expect(catalog.map((listing) => listing.name)).toEqual([
+      "Receipt parser",
+      "Doc summarizer",
+      "Unit converter",
+      "Structured data extract",
+      "Doc Q&A",
+      "Compute arb",
+    ]);
     const receipt = catalog[0];
     expect(receipt?.name).toBe("Receipt parser");
     if (!receipt) throw new Error("missing receipt listing");

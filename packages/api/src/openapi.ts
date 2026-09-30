@@ -156,7 +156,8 @@ export const openApiDocument = {
     },
     "/v1/registry/seed": {
       post: {
-        summary: "Publish the sample marketplace catalog for this organization. Idempotent by listing name.",
+        summary:
+          "Publish the first-party sandbox catalog (receipt parser, doc summarizer, unit converter, structured data extract, doc Q&A, compute arb). Idempotent by listing name.",
         responses: {
           "200": { description: "Catalog already present. { listings }" },
           "201": { description: "One or more sample listings created. { listings }" },

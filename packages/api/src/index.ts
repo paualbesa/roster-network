@@ -4,10 +4,18 @@ export {
   JobOrchestrator,
   JsonJobStore,
   MemoryJobStore,
+  sandboxComputeArbListing,
+  sandboxDocQaListing,
+  sandboxDocSummarizerListing,
+  sandboxExecute,
+  sandboxJobSchema,
   sandboxMarketplaceListings,
   sandboxReceiptListing,
+  sandboxSellerBindRequests,
+  sandboxStructuredExtractListing,
+  sandboxUnitConverterListing,
 } from "./jobs.js";
-export type { SandboxCapabilityDraft } from "./jobs.js";
+export type { SandboxCapabilityDraft, SandboxSellerBindRequest } from "./jobs.js";
 export { openApiDocument } from "./openapi.js";
 export type {
   CreateJobInput,

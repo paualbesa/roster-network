@@ -124,81 +124,19 @@ export class JobStoreError extends Error {
   }
 }
 
-/** Manifest draft accepted by `POST /v1/registry/listings`. */
-export interface SandboxCapabilityDraft {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  outputSchema: Record<string, unknown>;
-  pricing: { model: "per_call"; amountUsdc: string };
-  latency: { p95Ms: number };
-  tags: string[];
-}
-
-/** First-party receipt parser used by the sandbox demos. Register it, then bind a seller agent. */
-export function sandboxReceiptListing(): SandboxCapabilityDraft {
-  return {
-    name: "Receipt parser",
-    description: "Parse receipts and invoices into a structured total.",
-    inputSchema: {
-      type: "object",
-      properties: { documentUrl: { type: "string" } },
-      required: ["documentUrl"],
-    },
-    outputSchema: {
-      type: "object",
-      properties: { total: { type: "string" } },
-      required: ["total"],
-    },
-    pricing: { model: "per_call", amountUsdc: "0.02" },
-    latency: { p95Ms: 400 },
-    tags: ["receipt", "invoice", "extract"],
-  };
-}
-
-/**
- * Sample catalog published by `POST /v1/registry/seed`.
- * Names are stable so a second call does not create duplicates.
- */
-export function sandboxMarketplaceListings(): SandboxCapabilityDraft[] {
-  return [
-    sandboxReceiptListing(),
-    {
-      name: "Doc summarizer",
-      description: "Summarize a document into a short brief.",
-      inputSchema: {
-        type: "object",
-        properties: { documentUrl: { type: "string" } },
-        required: ["documentUrl"],
-      },
-      outputSchema: {
-        type: "object",
-        properties: { summary: { type: "string" } },
-        required: ["summary"],
-      },
-      pricing: { model: "per_call", amountUsdc: "0.03" },
-      latency: { p95Ms: 700 },
-      tags: ["docs", "summarize"],
-    },
-    {
-      name: "Unit converter",
-      description: "Convert an amount from one unit to another.",
-      inputSchema: {
-        type: "object",
-        properties: { value: { type: "string" }, unit: { type: "string" } },
-        required: ["value", "unit"],
-      },
-      outputSchema: {
-        type: "object",
-        properties: { value: { type: "string" } },
-        required: ["value"],
-      },
-      pricing: { model: "per_call", amountUsdc: "0.01" },
-      latency: { p95Ms: 120 },
-      tags: ["compute", "convert"],
-    },
-  ];
-}
+export type { SandboxCapabilityDraft, SandboxSellerBindRequest } from "./catalog.js";
+export {
+  sandboxComputeArbListing,
+  sandboxDocQaListing,
+  sandboxDocSummarizerListing,
+  sandboxExecute,
+  sandboxJobSchema,
+  sandboxMarketplaceListings,
+  sandboxReceiptListing,
+  sandboxSellerBindRequests,
+  sandboxStructuredExtractListing,
+  sandboxUnitConverterListing,
+} from "./catalog.js";
 
 export class MemoryJobStore implements JobStore {
   protected readonly jobs = new Map<string, StoredJob>();
