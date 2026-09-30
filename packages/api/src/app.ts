@@ -163,7 +163,7 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   });
 
   app.get("/v1/agents", async (c) => {
-    const agents = await service.listAgents(c.get("orgId"));
+    const agents = await service.listAgentDetails(c.get("orgId"));
     return c.json({ agents });
   });
 

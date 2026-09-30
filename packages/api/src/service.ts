@@ -260,8 +260,8 @@ export class AgentFinanceService implements ReputationHook {
     return this.enqueue(() => this.createAgentUnlocked(organizationId, input));
   }
 
-  listAgents(organizationId: string): Promise<CreateAgentResult[]> {
-    return this.enqueue(() => this.listAgentsUnlocked(organizationId));
+  listAgentDetails(organizationId: string): Promise<CreateAgentResult[]> {
+    return this.enqueue(() => this.listAgentDetailsUnlocked(organizationId));
   }
 
   fundAgent(organizationId: string, agentId: string, amountUsdc: string): Promise<FundResult> {
@@ -587,7 +587,7 @@ export class AgentFinanceService implements ReputationHook {
     };
   }
 
-  private async listAgentsUnlocked(organizationId: string): Promise<CreateAgentResult[]> {
+  private async listAgentDetailsUnlocked(organizationId: string): Promise<CreateAgentResult[]> {
     this.requireOrganization(organizationId);
     const agents = [...this.store.agents.values()]
       .filter((agent) => agent.organizationId === organizationId)
