@@ -13,7 +13,16 @@ export {
 export type { BlendRankInput } from "./rank.js";
 export { CapabilityRegistry, parseSearchQuery, readListingAgentId } from "./registry.js";
 export type { CapabilityRegistryOptions } from "./registry.js";
-export { embedText, cosineSimilarity, tokenize, listingDocument, EMBEDDING_DIMENSIONS } from "./text.js";
+export {
+  capabilityDocument,
+  cosineSimilarity,
+  embedSemantic,
+  embedText,
+  listingDocument,
+  EMBEDDING_DIMENSIONS,
+  SEMANTIC_DIMENSIONS,
+  tokenize,
+} from "./text.js";
 export type {
   CapabilityListing,
   CapabilityManifest,

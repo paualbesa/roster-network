@@ -173,6 +173,11 @@ describe("Albesa SDK", () => {
     expect(hits.map((hit) => hit.listing.id)).toEqual([cheap.id, pricey.id]);
     expect(hits[0]?.score).toBeGreaterThan(hits[1]?.score ?? 0);
 
+    const keywordMiss = await client.registry.search({ q: "invioce extractr" });
+    expect(keywordMiss.map((hit) => hit.listing.id)).not.toContain(cheap.id);
+    const semanticHits = await client.registry.search({ q: "invioce extractr", semantic: true });
+    expect(semanticHits.map((hit) => hit.listing.id)).toEqual([cheap.id, pricey.id]);
+
     const loaded = await client.registry.get(cheap.id);
     expect(loaded.pricing.amountUsdc).toBe("0.020000");
   });

@@ -166,7 +166,15 @@ describe("capability registry", () => {
     expect(registry.get(paused.id)?.status).toBe("paused");
 
     const raw = readFileSync(filePath, "utf8");
-    expect(raw).not.toContain("embedding");
+    const saved = JSON.parse(raw) as {
+      version: number;
+      listings: Record<string, unknown>[];
+      vectors: Record<string, number[]>;
+    };
+    expect(saved.version).toBe(2);
+    expect(saved.listings.every((listing) => !("vector" in listing) && !("embedding" in listing))).toBe(true);
+    expect(saved.vectors[live.id]?.length).toBeGreaterThan(0);
+    expect(registry.get(live.id)).not.toHaveProperty("vector");
     const reloaded = new CapabilityRegistry({ filePath, now: clock("2026-09-29T00:00:00.000Z") });
     expect(reloaded.get(live.id)?.description).toBe(live.description);
     expect(reloaded.search({ q: "parse receipts" }).map((hit) => hit.listing.id)).toEqual([live.id]);

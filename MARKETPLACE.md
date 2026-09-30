@@ -48,6 +48,7 @@ The demo uses a temporary directory and deletes nothing you keep. It does not wr
 | List the index | `GET /v1/registry/listings` |
 | Bind the seller who gets paid | `PUT /v1/jobs/listings/:id/seller` |
 | Search with reputation | `GET /v1/registry/search?q=...&withReputation=1` |
+| Semantic search | `GET /v1/registry/search?q=...&semantic=1` |
 | Lock a job | `POST /v1/jobs` |
 | Seller delivers | `POST /v1/jobs/:id/result` |
 | Read the passport | `GET /v1/agents/:id/passport` |
@@ -63,7 +64,7 @@ The TypeScript client is `Albesa` from `@albesa/sdk`. Marketplace methods: `regi
 | `sandboxJobSchema(name)` | Escrow result schema for one seeded name |
 | `sandboxExecute(name, input)` | Local fixture. No model, chain, or paid API |
 
-A job ranks with the same reputation blend as `withReputation=1` (relevance 0.70, price/latency 0.15, passport 0.15). The listing owner must bind a seller agent in that organization first. If the top hit has no binding, the API returns `seller_unbound` and does not lock funds. The buyer and the seller may be different organizations. Only the seller organization can deliver the result. Direct `POST /v1/escrows` stays inside one organization.
+`semantic=1` on search ranks by cosine similarity against the vector stored in the registry index. It uses the same price, latency, and reputation weights. A job still ranks with the keyword path and the reputation blend (`withReputation=1`: relevance 0.70, price/latency 0.15, passport 0.15). The listing owner must bind a seller agent in that organization first. If the top hit has no binding, the API returns `seller_unbound` and does not lock funds. The buyer and the seller may be different organizations. Only the seller organization can deliver the result. Direct `POST /v1/escrows` stays inside one organization.
 
 ## Take-rate
 

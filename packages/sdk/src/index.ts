@@ -198,6 +198,8 @@ export interface RegistrySearchQuery {
   minScore?: number;
   /** Blend passport scores into the rank. Missing passports stay neutral (50). */
   withReputation?: boolean;
+  /** Rank by stored semantic vectors (cosine). Omit to keep keyword search. */
+  semantic?: boolean;
 }
 
 export interface RegistrySearchHit {
@@ -590,6 +592,7 @@ export class Albesa {
     if (query.limit !== undefined) params.set("limit", query.limit.toString());
     if (query.minScore !== undefined) params.set("minScore", query.minScore.toString());
     if (query.withReputation) params.set("withReputation", "1");
+    if (query.semantic) params.set("semantic", "1");
     const search = params.toString();
     const raw = await this.request<{ hits: RegistrySearchHit[] }>(
       "GET",

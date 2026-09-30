@@ -5,7 +5,7 @@ import type {
   CapabilitySearchQuery,
   ReputationRankInput,
 } from "./types.js";
-import { cosineSimilarity, embedText, listingDocument, tokenize } from "./text.js";
+import { capabilityDocument, cosineSimilarity, embedSemantic, embedText, listingDocument, tokenize } from "./text.js";
 
 const KEYWORD_WEIGHT = 0.65;
 const EMBEDDING_WEIGHT = 0.35;
@@ -13,12 +13,14 @@ const EMBEDDING_WEIGHT = 0.35;
 const PRICE_HINT_WEIGHT = 0.15;
 const LATENCY_HINT_WEIGHT = 0.1;
 const MIN_RELEVANCE = 0.12;
+/** Cosine floor for `semantic=1`. Near-miss keywords clear it; unrelated listings do not. */
+const SEMANTIC_MIN_RELEVANCE = 0.12;
 
 /**
  * Opt-in blend used only when reputation data is supplied (`withReputation`
  * or `minScore`, or a `ReputationRankInput`). Weights sum to 1:
  *
- * - relevance 0.70 — keyword overlap + hashing-trick embedding
+ * - relevance 0.70 — keyword overlap, or cosine similarity when `semantic` is set
  * - priceLatency 0.15 — cheaper and faster commercial hints
  * - reputation 0.15 — passport score / 100
  *
@@ -101,22 +103,27 @@ export function normalizeReputationScore(value: number | null | undefined): numb
 }
 
 /**
- * Keyword overlap plus a deterministic hashing-trick embedding.
+ * Default path: keyword overlap plus a deterministic hashing-trick embedding.
+ * `query.semantic` replaces that relevance term with cosine similarity against
+ * the listing vector stored on the index (character bigrams + canonical tokens).
  * Price and latency hints rescale the relevance score; they do not replace it.
  * An empty query browses active listings by those hints alone.
  *
  * Pass `reputation` (or set `query.withReputation` / `query.minScore`) to blend
  * passport scores. Without that input the score matches the pre-reputation ranker
- * and hits omit `reputationScore`.
+ * and hits omit `reputationScore`. The blend uses the same weights for both paths.
  */
 export function rankListings(
   listings: readonly CapabilityListing[],
   query: CapabilitySearchQuery,
   reputation: ReputationRankInput | null = null,
+  vectors: ReadonlyMap<string, Float64Array> | null = null,
 ): CapabilitySearchHit[] {
   const queryTokens = tokenize(query.q);
   const browsing = queryTokens.length === 0;
-  const queryEmbedding = browsing ? null : embedText(query.q);
+  const semantic = query.semantic && !browsing;
+  const queryEmbedding = browsing || semantic ? null : embedText(query.q);
+  const semanticQuery = semantic ? embedSemantic(query.q) : null;
   const useReputation = reputation !== null || query.withReputation || query.minScore !== null;
   const hits: CapabilitySearchHit[] = [];
 
@@ -128,13 +135,10 @@ export function rankListings(
 
     const price = priceHint(listing.pricing.amountUsdc);
     const latency = latencyHint(listing.latency.p95Ms);
-    const keyword = keywordScore(queryTokens, listing);
-    const embedding =
-      queryEmbedding === null
-        ? 0
-        : Math.max(0, cosineSimilarity(queryEmbedding, embedText(listingDocument(listing))));
-    const relevance = browsing ? 0 : KEYWORD_WEIGHT * keyword + EMBEDDING_WEIGHT * embedding;
-    if (!browsing && relevance < MIN_RELEVANCE) continue;
+    const relevance = semantic
+      ? semanticRelevance(semanticQuery, listing, vectors)
+      : keywordRelevance(browsing, queryTokens, queryEmbedding, listing);
+    if (!browsing && relevance < (semantic ? SEMANTIC_MIN_RELEVANCE : MIN_RELEVANCE)) continue;
 
     if (!useReputation) {
       const score = browsing
@@ -158,6 +162,29 @@ export function rankListings(
 
   hits.sort(compareHits);
   return hits.slice(0, query.limit);
+}
+
+function keywordRelevance(
+  browsing: boolean,
+  queryTokens: readonly string[],
+  queryEmbedding: Float64Array | null,
+  listing: CapabilityListing,
+): number {
+  if (browsing) return 0;
+  const keyword = keywordScore(queryTokens, listing);
+  const embedding =
+    queryEmbedding === null ? 0 : Math.max(0, cosineSimilarity(queryEmbedding, embedText(listingDocument(listing))));
+  return KEYWORD_WEIGHT * keyword + EMBEDDING_WEIGHT * embedding;
+}
+
+function semanticRelevance(
+  queryEmbedding: Float64Array | null,
+  listing: CapabilityListing,
+  vectors: ReadonlyMap<string, Float64Array> | null,
+): number {
+  if (queryEmbedding === null) return 0;
+  const stored = vectors?.get(listing.id) ?? embedSemantic(capabilityDocument(listing));
+  return Math.max(0, cosineSimilarity(queryEmbedding, stored));
 }
 
 function keywordScore(queryTokens: readonly string[], listing: CapabilityListing): number {
