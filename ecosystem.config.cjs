@@ -22,6 +22,13 @@ function rosterDataDir() {
   return path.join(__dirname, "data");
 }
 
+/** Operator gate for /v1/admin. Unset leaves the admin API disabled. Never invent a token here. */
+function adminTokenEnv() {
+  const token = process.env.ROSTER_ADMIN_TOKEN;
+  if (typeof token !== "string" || token.trim() === "") return {};
+  return { ROSTER_ADMIN_TOKEN: token.trim() };
+}
+
 const dataDir = rosterDataDir();
 
 module.exports = {
@@ -79,6 +86,7 @@ module.exports = {
         ROSTER_REPUTATION_FILE: path.join(dataDir, "reputation.json"),
         REGISTRY_INDEX_PATH: path.join(dataDir, "registry.json"),
         ROSTER_JOBS_FILE: path.join(dataDir, "jobs.json"),
+        ...adminTokenEnv(),
       },
     },
   ],

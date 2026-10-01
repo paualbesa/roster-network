@@ -144,8 +144,11 @@ export interface JobResult {
 export interface JobStore {
   readJob(id: string): StoredJob | null;
   listJobs(organizationId: string): StoredJob[];
+  /** Every job, buyer or seller. Copies, not live records. */
+  listAllJobs(): StoredJob[];
   saveJob(job: StoredJob): void;
   readSeller(listingId: string): ListingSellerBinding | null;
+  listSellerBindings(): ListingSellerBinding[];
   saveSeller(binding: ListingSellerBinding): void;
 }
 
@@ -185,6 +188,10 @@ export class MemoryJobStore implements JobStore {
       .map((job) => cloneJob(job));
   }
 
+  listAllJobs(): StoredJob[] {
+    return [...this.jobs.values()].map((job) => cloneJob(job));
+  }
+
   saveJob(job: StoredJob): void {
     this.jobs.set(job.id, cloneJob(job));
   }
@@ -192,6 +199,10 @@ export class MemoryJobStore implements JobStore {
   readSeller(listingId: string): ListingSellerBinding | null {
     const binding = this.sellers.get(listingId);
     return binding ? { ...binding } : null;
+  }
+
+  listSellerBindings(): ListingSellerBinding[] {
+    return [...this.sellers.values()].map((binding) => ({ ...binding }));
   }
 
   saveSeller(binding: ListingSellerBinding): void {
@@ -358,6 +369,47 @@ export class JobOrchestrator {
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
       const views: JobView[] = [];
       for (const job of jobs) views.push(await this.toView(job));
+      return { jobs: views };
+    });
+  }
+
+  /** Every marketplace job, newest first. No organization filter. */
+  listAllJobs(): Promise<{ jobs: JobView[] }> {
+    return this.enqueue(async () => {
+      const jobs = this.jobs
+        .listAllJobs()
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
+      const views: JobView[] = [];
+      for (const job of jobs) views.push(await this.toView(job));
+      return { jobs: views };
+    });
+  }
+
+  /** Read one job without an organization membership check. */
+  getAnyJob(jobId: string): Promise<JobResult> {
+    return this.enqueue(async () => {
+      const job = this.jobs.readJob(jobId);
+      if (!job) throw new ServiceError(404, "not_found", "Job not found.");
+      return { job: await this.toView(job) };
+    });
+  }
+
+  listSellerBindings(): Promise<ListingSellerBinding[]> {
+    return this.enqueue(async () => this.jobs.listSellerBindings());
+  }
+
+  /**
+   * Refund every held job whose SLA deadline has passed, across organizations.
+   * Jobs still inside the window stay locked. Already settled jobs are skipped.
+   */
+  expireAllDue(): Promise<{ jobs: JobView[] }> {
+    return this.enqueue(async () => {
+      const due = this.jobs
+        .listAllJobs()
+        .filter((job) => job.status === "held" && this.isPastDeadline(job))
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+      const views: JobView[] = [];
+      for (const job of due) views.push(await this.settleTimeout(job));
       return { jobs: views };
     });
   }

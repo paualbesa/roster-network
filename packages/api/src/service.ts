@@ -182,6 +182,62 @@ export interface RecordReputationResult {
   passport: ReputationPassport;
 }
 
+/** One organization as the operator panel may show it. No password hash and no API key. */
+export interface OperatorAccount {
+  email: string | null;
+  displayName: string | null;
+  userId: string | null;
+  userCreatedAt: string | null;
+  organizationId: string;
+  organizationName: string;
+  organizationCreatedAt: string;
+  treasuryBalanceUsdc: string;
+  agentCount: number;
+}
+
+/** Agent name index for listings and reputation. No wallet secrets. */
+export interface OperatorAgentRef {
+  id: string;
+  name: string;
+  organizationId: string;
+  status: Agent["status"];
+  createdAt: string;
+}
+
+export interface OperatorDirectory {
+  accounts: OperatorAccount[];
+  agents: OperatorAgentRef[];
+}
+
+export interface OperatorReputationAgent {
+  agentId: string;
+  agentName: string;
+  organizationId: string;
+  organizationName: string;
+  score: string;
+  eventCount: number;
+  successCount: number;
+  failureCount: number;
+  updatedAt: string | null;
+}
+
+export interface OperatorReputationFailure {
+  id: string;
+  agentId: string;
+  agentName: string;
+  organizationId: string;
+  createdAt: string;
+  latencyMs: number;
+  error: boolean;
+  hallucination: boolean;
+  sourceRef: string | null;
+}
+
+export interface OperatorReputation {
+  agents: OperatorReputationAgent[];
+  recentFailures: OperatorReputationFailure[];
+}
+
 /** Listing fields the registry ranker needs in order to resolve a seller passport. */
 export interface ListingReputationRef {
   id: string;
@@ -228,6 +284,94 @@ export class AgentFinanceService implements ReputationHook {
     return this.enqueue(async () =>
       [...this.store.organizations.values()].map((organization) => ({ ...organization })),
     );
+  }
+
+  /**
+   * Accounts, organizations, and agent names for the operator panel.
+   * Password hashes and API keys stay in the store.
+   */
+  listOperatorDirectory(): Promise<OperatorDirectory> {
+    return this.enqueue(async () => {
+      const organizations = [...this.store.organizations.values()].sort(
+        (left, right) =>
+          right.createdAt.localeCompare(left.createdAt) || left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+      );
+      const accounts: OperatorAccount[] = [];
+      for (const organization of organizations) {
+        const user = this.userForOrganization(organization.id);
+        const treasury = await this.readTreasury(organization.id);
+        const agents = [...this.store.agents.values()].filter((agent) => agent.organizationId === organization.id);
+        accounts.push({
+          email: user?.email ?? null,
+          displayName: user?.displayName ?? null,
+          userId: user?.id ?? null,
+          userCreatedAt: user?.createdAt ?? null,
+          organizationId: organization.id,
+          organizationName: organization.name,
+          organizationCreatedAt: organization.createdAt,
+          treasuryBalanceUsdc: treasury.balanceUsdc,
+          agentCount: agents.length,
+        });
+      }
+      const agents: OperatorAgentRef[] = [...this.store.agents.values()]
+        .map((agent) => ({
+          id: agent.id,
+          name: agent.name,
+          organizationId: agent.organizationId,
+          status: agent.status,
+          createdAt: agent.createdAt,
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+      return { accounts, agents };
+    });
+  }
+
+  /** Passport scores for agents that have events, plus the newest failures. */
+  listOperatorReputation(): Promise<OperatorReputation> {
+    return this.enqueue(async () => {
+      const ranked: OperatorReputationAgent[] = [];
+      for (const agent of this.store.agents.values()) {
+        const totals = this.reputation.readTotals(agent.id);
+        if (!totals || totals.eventCount === 0) continue;
+        const passport = projectPassport(totals);
+        const organization = this.store.organizations.get(agent.organizationId);
+        ranked.push({
+          agentId: agent.id,
+          agentName: agent.name,
+          organizationId: agent.organizationId,
+          organizationName: organization?.name ?? agent.organizationId,
+          score: passport.score,
+          eventCount: passport.metrics.eventCount,
+          successCount: passport.metrics.successCount,
+          failureCount: passport.metrics.failureCount,
+          updatedAt: passport.updatedAt,
+        });
+      }
+      ranked.sort(
+        (left, right) =>
+          Number(right.score) - Number(left.score) ||
+          right.failureCount - left.failureCount ||
+          left.agentName.localeCompare(right.agentName),
+      );
+      const names = new Map([...this.store.agents.values()].map((agent) => [agent.id, agent.name]));
+      const recentFailures: OperatorReputationFailure[] = this.reputation
+        .listEvents()
+        .filter((event) => event.outcome === "failure")
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))
+        .slice(0, 25)
+        .map((event) => ({
+          id: event.id,
+          agentId: event.agentId,
+          agentName: names.get(event.agentId) ?? event.agentId,
+          organizationId: event.organizationId,
+          createdAt: event.createdAt,
+          latencyMs: event.latencyMs,
+          error: event.error,
+          hallucination: event.hallucination,
+          sourceRef: event.sourceRef,
+        }));
+      return { agents: ranked, recentFailures };
+    });
   }
 
   listAgents(organizationId: string): Promise<Agent[]> {

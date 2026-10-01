@@ -48,7 +48,13 @@ mkdir -p "$DATA_DIR"
 chmod 700 "$DATA_DIR"
 
 # Sandbox only. Do not forward a shell key or a mainnet switch into PM2.
+# ROSTER_ADMIN_TOKEN is kept when the operator exported it. The value is not printed.
 unset ROSTER_API_KEY ALBESA_API_KEY ROSTER_WALLET ALBESA_WALLET ALBESA_MODE || true
+if [ -z "${ROSTER_ADMIN_TOKEN:-}" ]; then
+  echo "note: ROSTER_ADMIN_TOKEN is unset, so /v1/admin stays disabled"
+else
+  echo "note: ROSTER_ADMIN_TOKEN is set and will be passed to roster-api"
+fi
 export ROSTER_MODE=sandbox
 export HOST=127.0.0.1
 export PORT=7001
