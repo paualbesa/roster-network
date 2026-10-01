@@ -29,6 +29,39 @@ function adminTokenEnv() {
   return { ROSTER_ADMIN_TOKEN: token.trim() };
 }
 
+function trimmed(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** Passed through from the shell. This file never contains a real key. */
+function supabaseServerEnv() {
+  const url = trimmed(process.env.SUPABASE_URL);
+  const anon = trimmed(process.env.SUPABASE_ANON_KEY);
+  const service = trimmed(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const env = {};
+  if (url) env.SUPABASE_URL = url;
+  if (anon) env.SUPABASE_ANON_KEY = anon;
+  if (service) env.SUPABASE_SERVICE_ROLE_KEY = service;
+  return env;
+}
+
+/** Public URL and anon key only. The service role stays off the web process. */
+function supabaseWebEnv() {
+  const url = trimmed(process.env.NEXT_PUBLIC_SUPABASE_URL) || trimmed(process.env.SUPABASE_URL);
+  const anon = trimmed(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) || trimmed(process.env.SUPABASE_ANON_KEY);
+  if (!url && !anon) return {};
+  const env = {};
+  if (url) {
+    env.NEXT_PUBLIC_SUPABASE_URL = url;
+    env.SUPABASE_URL = url;
+  }
+  if (anon) {
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY = anon;
+    env.SUPABASE_ANON_KEY = anon;
+  }
+  return env;
+}
+
 const dataDir = rosterDataDir();
 
 module.exports = {
@@ -62,6 +95,7 @@ module.exports = {
         TZ: "Europe/Madrid",
         NEXT_PUBLIC_ROSTER_API_URL: "http://127.0.0.1:7001",
         ROSTER_API_URL: "http://127.0.0.1:7001",
+        ...supabaseWebEnv(),
       },
     },
     {
@@ -87,6 +121,7 @@ module.exports = {
         REGISTRY_INDEX_PATH: path.join(dataDir, "registry.json"),
         ROSTER_JOBS_FILE: path.join(dataDir, "jobs.json"),
         ...adminTokenEnv(),
+        ...supabaseServerEnv(),
       },
     },
   ],

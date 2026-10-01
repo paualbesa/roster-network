@@ -60,6 +60,8 @@ export class CapabilityRegistry {
   private readonly vectors = new Map<string, Float64Array>();
   private readonly filePath: string | null;
   private readonly now: () => Date;
+  /** Set by the Supabase mirror. File writes do not use it. */
+  onPersist: (() => void) | null = null;
 
   constructor(options: CapabilityRegistryOptions = {}) {
     this.filePath = options.filePath ?? null;
@@ -162,13 +164,15 @@ export class CapabilityRegistry {
    * `reputation` opts into the passport blend. Omit it, and leave
    * `withReputation` / `minScore` unset, to keep the default ranker.
    * `semantic` ranks by the stored vector instead of keyword overlap.
+   * `semanticSimilarities` replaces that cosine term with pgvector scores.
    */
   search(
     query: Partial<CapabilitySearchQuery> = {},
     reputation: ReputationRankInput | null = null,
+    semanticSimilarities: ReadonlyMap<string, number> | null = null,
   ): CapabilitySearchHit[] {
     const normalized = normalizeSearchQuery(query);
-    return rankListings([...this.entries.values()], normalized, reputation, this.vectors).map((hit) => ({
+    return rankListings([...this.entries.values()], normalized, reputation, this.vectors, semanticSimilarities).map((hit) => ({
       listing: structuredClone(hit.listing),
       score: hit.score,
       relevance: hit.relevance,
@@ -186,9 +190,26 @@ export class CapabilityRegistry {
     return count;
   }
 
+  /** Copy of the stored semantic vector, or null when the listing is missing. */
+  embeddingFor(id: string): Float64Array | null {
+    const vector = this.vectors.get(id);
+    return vector ? new Float64Array(vector) : null;
+  }
+
+  /** Replace the index without writing. Used when Postgres is loaded at startup. */
+  replaceAll(listings: readonly CapabilityListing[]): void {
+    this.entries.clear();
+    this.vectors.clear();
+    for (const listing of listings) {
+      const copy = structuredClone(listing);
+      this.entries.set(copy.id, copy);
+      this.vectors.set(copy.id, listingVector(copy));
+    }
+  }
+
   private persist(): void {
-    if (!this.filePath) return;
-    writeIndex(this.filePath, [...this.entries.values()], this.vectors);
+    if (this.filePath) writeIndex(this.filePath, [...this.entries.values()], this.vectors);
+    this.onPersist?.();
   }
 }
 

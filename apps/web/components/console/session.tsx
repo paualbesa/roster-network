@@ -7,6 +7,7 @@ import {
   writeBrowserSession,
   type SandboxSession,
 } from "@/lib/session";
+import { beginSupabaseSignOut } from "@/lib/supabase/browser";
 
 interface SessionValue {
   session: SandboxSession | null;
@@ -44,6 +45,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         });
       },
       clear() {
+        beginSupabaseSignOut();
         clearBrowserSession();
         setSession(null);
       },

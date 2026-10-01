@@ -26,6 +26,20 @@ fi
 echo "== pnpm install =="
 pnpm install --frozen-lockfile
 
+# Public Supabase Auth config is inlined at build time. The service role stays off this process.
+unset SUPABASE_SERVICE_ROLE_KEY || true
+if [ -n "${SUPABASE_URL:-}${SUPABASE_ANON_KEY:-}${NEXT_PUBLIC_SUPABASE_URL:-}${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}" ]; then
+  export NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-${SUPABASE_URL:-}}"
+  export NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-${SUPABASE_ANON_KEY:-}}"
+  if [ -z "${NEXT_PUBLIC_SUPABASE_URL}" ] || [ -z "${NEXT_PUBLIC_SUPABASE_ANON_KEY}" ]; then
+    echo "FATAL: set SUPABASE_URL and SUPABASE_ANON_KEY (or the NEXT_PUBLIC_ names) together before building the console." >&2
+    exit 1
+  fi
+  echo "note: console OAuth is enabled (anon key is not printed)"
+else
+  echo "note: Supabase env is unset; the console keeps email and password against the API"
+fi
+
 echo "== build apps/web =="
 pnpm --filter web build
 
