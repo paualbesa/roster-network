@@ -18,6 +18,22 @@ Discover → rank candidates → lock escrow → notify seller → deliver → s
 
 If the seller does not return a valid result before the listing SLA (`latency.p95Ms` from lock time), escrow refunds the buyer in full, the job is `timed_out`, the seller passport records a failure, and the take-rate is not collected.
 
+## Solana gasless fee (sandbox default)
+
+Agents hold USDC only. Roster is the Solana fee payer (it pays SOL) and, on each successful escrow settle, collects:
+
+- `ROSTER_PERCENT_FEE = 0.01` (1% of the job price, truncated to micro-USDC)
+- `ROSTER_BASE_FEE_USDC = 0.003`
+- Roster Fee = 1% + 0.003 USDC
+- Provider payout = job price − Roster Fee
+- The Roster Fee is transferred to `ROSTER_TREASURY_USDC_ATA` (a sandbox ATA when that variable is unset)
+
+`POST /v1/escrow/prepare-lock` builds a VersionedTransaction that moves buyer USDC into the escrow PDA's USDC ATA, sets `feePayer` to the Roster fee payer, partially signs, and returns the base64 transaction for the buyer to co-sign and submit. `POST /v1/escrow/settle` runs only after work is verified. The backend signs as fee payer and program authority, pays the provider, and moves the Roster Fee to the treasury.
+
+`ROSTER_SOLANA_CLUSTER` defaults to `mock` (`offline` is the same). Mock mode uses a public sandbox keypair and does not dial an RPC or broadcast. `ROSTER_FEE_PAYER_SECRET` is optional in that mode. Devnet or mainnet-beta signing needs the secret in the environment, never in the repo. Mainnet-beta also needs `ROSTER_SOLANA_ALLOW_MAINNET=1`. Settle broadcasts only when `ROSTER_SOLANA_SEND=1` and `SOLANA_RPC_URL` is set. The existing mock escrow routes under `/v1/escrows` are unchanged.
+
+`services/treasury-worker` checks the fee-payer SOL balance every 5 minutes. Under 0.02 SOL it plans a Jupiter swap of 10 USDC → SOL to fund the fee payer. The default is a dry-run with logs and no HTTP call. A live swap also requires `ROSTER_TREASURY_EXECUTE=1`, `ROSTER_TREASURY_DRY_RUN=0`, `ROSTER_SOLANA_CLUSTER=mainnet-beta`, and `ROSTER_SOLANA_ALLOW_MAINNET=1`.
+
 ## Business model (product context, not all in code yet)
 - Take-rate 0.5–1.5% on GMV via escrow
 - Enterprise SaaS (compliance, fiat on/off-ramp) later

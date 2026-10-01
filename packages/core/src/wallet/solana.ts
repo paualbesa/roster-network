@@ -15,6 +15,7 @@ export interface SolanaUsdcWalletOptions {
  * Sandbox placeholder for USDC on Solana.
  * Transfers are not implemented. No RPC client is loaded and no keys are stored.
  * Settlement stays on MockWalletProvider or the simulated Base rail.
+ * Gasless escrow transactions are built by @albesa/solana, which stays offline unless a cluster send flag is set.
  */
 export class SolanaUsdcWalletProvider implements WalletProvider {
   readonly id = "solana-usdc" as const;

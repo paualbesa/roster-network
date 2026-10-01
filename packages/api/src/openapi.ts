@@ -8,7 +8,7 @@ export const openApiDocument = {
     title: "Roster sandbox API",
     version: "0.0.0",
     description:
-      "Marketplace and settlement API for the Roster sandbox. Mock or simulated USDC only. No mainnet and no private keys. Marketplace jobs take 1% of GMV (100 bps) on release.",
+      "Marketplace and settlement API for the Roster sandbox. Mock or simulated USDC only. No mainnet and no private keys. Marketplace jobs take 1% of GMV (100 bps) on release. Gasless Solana escrow (POST /v1/escrow/prepare-lock and POST /v1/escrow/settle) charges 1% + 0.003 USDC and stays on the mock cluster unless ROSTER_SOLANA_CLUSTER is set.",
   },
   servers: [{ url: "http://127.0.0.1:8787" }],
   components: {
@@ -310,6 +310,26 @@ export const openApiDocument = {
         responses: {
           "200": { description: "{ fleet } snapshot. Does not return an API key." },
           "403": { description: "API mode is not sandbox." },
+        },
+      },
+    },
+    "/v1/escrow/prepare-lock": {
+      post: {
+        summary:
+          "Build a VersionedTransaction that locks buyer USDC into an escrow ATA. Roster is the fee payer and returns a partially signed base64 transaction. Mock cluster by default; the buyer co-signs and submits. No broadcast.",
+        responses: {
+          "201": { description: "Partially signed lock transaction and the 1% + 0.003 USDC quote." },
+          "400": { description: "invalid_request or fee_exceeds_price" },
+        },
+      },
+    },
+    "/v1/escrow/settle": {
+      post: {
+        summary:
+          "After verified work, build the settle transaction: provider payout plus Roster fee to the treasury USDC ATA. Fee payer and program authority sign. Mock mode does not broadcast.",
+        responses: {
+          "200": { description: "Signed settle transaction. broadcast is false unless live send gates are armed." },
+          "409": { description: "invalid_state when verified is not true" },
         },
       },
     },
