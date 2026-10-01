@@ -9,29 +9,22 @@
 -- Cosine distance matches the L2-normalized vectors the API already stores.
 -- HNSW can be built on an empty table; IVFFlat cannot. Realtime is omitted.
 
-create extension if not exists vector with schema extensions;
+-- vector may already live in public. Creating it again, or requiring schema
+-- extensions before that schema exists, must not abort the migration.
+create schema if not exists extensions;
+
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'vector') then
+    create extension vector with schema extensions;
+  end if;
+end
+$$;
 
 create schema if not exists private;
 
 revoke all on schema private from public, anon, authenticated;
 grant usage on schema private to authenticated, service_role;
-
--- Authorization data lives on profiles.auth_user_id, never in user_metadata.
-create or replace function private.current_organization_id()
-returns text
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select p.organization_id
-  from public.profiles as p
-  where p.auth_user_id = (select auth.uid())
-  limit 1
-$$;
-
-revoke all on function private.current_organization_id() from public, anon;
-grant execute on function private.current_organization_id() to authenticated, service_role;
 
 create table public.organizations (
   id text primary key,
@@ -53,6 +46,24 @@ create table public.profiles (
 create unique index profiles_email_lower_idx on public.profiles (lower(email));
 create index profiles_auth_user_id_idx on public.profiles (auth_user_id);
 create index profiles_organization_id_idx on public.profiles (organization_id);
+
+-- SQL functions resolve relations at create time, so profiles must exist first.
+-- Authorization data lives on profiles.auth_user_id, never in user_metadata.
+create or replace function private.current_organization_id()
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p.organization_id
+  from public.profiles as p
+  where p.auth_user_id = (select auth.uid())
+  limit 1
+$$;
+
+revoke all on function private.current_organization_id() from public, anon;
+grant execute on function private.current_organization_id() to authenticated, service_role;
 
 create table public.password_hashes (
   user_id text primary key references public.profiles (id) on delete cascade,
