@@ -25,10 +25,12 @@
     "@albesa/solana": "workspace:*",
     "@hono/node-server": "^1.19.5",
     "@supabase/supabase-js": "^2.117.2",
-    "hono": "^4.9.8"
+    "hono": "^4.9.8",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.18.6",
+    "@types/ws": "^8.18.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
