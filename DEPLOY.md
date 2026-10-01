@@ -74,6 +74,21 @@ The API also allows direct browser calls from `https://roster.network` and from 
 
 The console stores the sandbox API key in `localStorage`. Mock USDC only. It does not settle real payments.
 
+### Operator panel
+
+`/admin` is the sandbox operator view: health, accounts, fleet listings, jobs, reputation, an SLA sweep, and an idempotent fleet bootstrap. The marketing header links it as a small Admin entry. `/` and `/console` stay as they are.
+
+The API checks `ROSTER_ADMIN_TOKEN`. Send it as `X-Roster-Admin-Token`, `Authorization: Bearer`, or the `roster_admin_token` cookie. A user API key does not open `/v1/admin`. When the variable is unset, those routes return `503` `admin_disabled`.
+
+Set the token in the shell before `bash scripts/deploy-roster-api.sh`. The deploy script keeps that value and PM2 passes it to `roster-api` through `ecosystem.config.cjs`. Do not commit the token. `roster-web` does not need a copy: the operator types it into `/admin`, the site stores it in an httpOnly cookie, and `/roster-api/*` forwards that cookie as `X-Roster-Admin-Token`.
+
+```bash
+export ROSTER_ADMIN_TOKEN='choose-a-long-sandbox-token'
+bash scripts/deploy-roster-api.sh
+```
+
+Ops actions (`POST /v1/admin/jobs/expire` and `POST /v1/admin/fleet/bootstrap`) run only when the API mode is sandbox.
+
 ### MCP deploy recipe
 
 An Albesa MCP deploy recipe named `roster-api` may be added later. Until then, deploy with `scripts/deploy-roster-api.sh`.

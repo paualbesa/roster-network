@@ -28,6 +28,7 @@ import {
   sandboxMarketplaceListings,
   type JobStore,
 } from "./jobs.js";
+import { adminGateFor, adminGateResponse, isAdminPath, registerAdminRoutes } from "./admin.js";
 import { rosterCors } from "./cors.js";
 import { attachAppRuntime } from "./fleet.js";
 import { openApiDocument } from "./openapi.js";
@@ -82,6 +83,11 @@ export interface AppOptions {
   autofill?: "sync" | "async";
   /** Wait before an async fleet delivery. Omit it to read `ROSTER_AUTOFULFILL_DELAY_MS` (default 50). */
   autofillDelayMs?: number;
+  /**
+   * Operator token for `/v1/admin/*`.
+   * Omit it to read `ROSTER_ADMIN_TOKEN`. `null` or a blank string disables the admin API.
+   */
+  adminToken?: string | null;
 }
 
 /** Score for one listing, or null when reputation should stay neutral. */
@@ -117,7 +123,23 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
 
   app.get("/openapi.json", (c) => c.json(openApiDocument));
 
+  const adminDeps = {
+    mode,
+    rail: walletRail,
+    service,
+    registry,
+    orchestrator,
+    appHandle: app,
+    ...(options.adminToken !== undefined ? { adminToken: options.adminToken } : {}),
+  };
+
   app.use("/v1/*", async (c, next) => {
+    if (isAdminPath(c.req.path)) {
+      const gate = adminGateFor(c.req.raw.headers, adminDeps);
+      if (!gate.ok) return adminGateResponse(c, gate);
+      await next();
+      return;
+    }
     if (isPublicRoute(c.req.method, c.req.path)) {
       await next();
       return;
@@ -338,6 +360,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     const result = await orchestrator.submitResult(c.get("orgId"), c.req.param("jobId"), input);
     return c.json(result);
   });
+
+  registerAdminRoutes(app, adminDeps);
 
   app.onError((error, c) => {
     if (error instanceof ServiceError) {

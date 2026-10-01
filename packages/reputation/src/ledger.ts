@@ -14,6 +14,10 @@ export class ReputationStoreError extends Error {
 export interface ReputationLedger {
   readTotals(agentId: string): ReputationTotals | null;
   readEvents(agentId: string): ReputationEventRecord[];
+  /** Every agent that has at least one stored total. Copies, not live records. */
+  listTotals(): ReputationTotals[];
+  /** Every stored event, oldest first. Copies, not live records. */
+  listEvents(): ReputationEventRecord[];
   append(totals: ReputationTotals, event: ReputationEventRecord): void;
 }
 
@@ -29,6 +33,14 @@ export class MemoryReputationLedger implements ReputationLedger {
 
   readEvents(agentId: string): ReputationEventRecord[] {
     return this.events.filter((event) => event.agentId === agentId).map(cloneEvent);
+  }
+
+  listTotals(): ReputationTotals[] {
+    return [...this.totals.values()].map(cloneTotals);
+  }
+
+  listEvents(): ReputationEventRecord[] {
+    return this.events.map(cloneEvent);
   }
 
   append(totals: ReputationTotals, event: ReputationEventRecord): void {

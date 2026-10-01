@@ -17,7 +17,14 @@ export const openApiDocument = {
         type: "http",
         scheme: "bearer",
         description:
-          "Sandbox API key returned once by POST /v1/organizations or POST /v1/accounts. POST /v1/accounts/login issues another key for the same account.",
+          "Sandbox API key returned once by POST /v1/organizations or POST /v1/accounts. POST /v1/accounts/login issues another key for the same account. This key does not open /v1/admin.",
+      },
+      adminToken: {
+        type: "apiKey",
+        in: "header",
+        name: "X-Roster-Admin-Token",
+        description:
+          "Operator token from ROSTER_ADMIN_TOKEN on the API process. Also accepted as Authorization: Bearer or the roster_admin_token cookie. A user API key is rejected. When ROSTER_ADMIN_TOKEN is unset these routes return 503 admin_disabled.",
       },
     },
     schemas: {
@@ -32,7 +39,7 @@ export const openApiDocument = {
               code: {
                 type: "string",
                 description:
-                  "unauthorized, invalid_request, invalid_schema, not_found, forbidden, no_candidates, seller_unbound, insufficient_balance, invalid_state, agent_suspended, or internal.",
+                  "unauthorized, admin_disabled, invalid_request, invalid_schema, not_found, forbidden, no_candidates, seller_unbound, insufficient_balance, invalid_state, agent_suspended, or internal.",
               },
               message: { type: "string" },
             },
@@ -224,6 +231,85 @@ export const openApiDocument = {
         responses: {
           "200": { description: "Job released or refunded, with passport scoreBefore and scoreAfter." },
           "403": { description: "Caller is not the seller organization." },
+        },
+      },
+    },
+    "/v1/admin/overview": {
+      get: {
+        security: [{ adminToken: [] }],
+        summary: "Operator snapshot: health, mode, counts, locked and released GMV, and take-rate already collected",
+        responses: {
+          "200": { description: "Counts and GMV. No password hashes and no API keys." },
+          "401": { description: "Admin token missing or incorrect." },
+          "503": { description: "ROSTER_ADMIN_TOKEN is unset." },
+        },
+      },
+    },
+    "/v1/admin/accounts": {
+      get: {
+        security: [{ adminToken: [] }],
+        summary: "Organizations with email, display name, treasury balance, and createdAt when an account exists",
+        responses: { "200": { description: "{ accounts }" } },
+      },
+    },
+    "/v1/admin/listings": {
+      get: {
+        security: [{ adminToken: [] }],
+        summary: "Listings with first-party versus third-party, autofill, seller binding, price, and SLA",
+        responses: { "200": { description: "{ listings }" } },
+      },
+    },
+    "/v1/admin/jobs": {
+      get: {
+        security: [{ adminToken: [] }],
+        summary: "Every marketplace job. Optional status filter: locked, released, timed_out, failed, or all.",
+        parameters: [
+          {
+            name: "status",
+            in: "query",
+            schema: { type: "string", enum: ["locked", "released", "timed_out", "failed", "all"] },
+          },
+        ],
+        responses: { "200": { description: "{ jobs }" } },
+      },
+    },
+    "/v1/admin/jobs/{jobId}": {
+      get: {
+        security: [{ adminToken: [] }],
+        summary: "One job with escrow state, quoted and collected take-rate, and result or refund",
+        parameters: [{ name: "jobId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "{ job, escrow }" },
+          "404": { description: "not_found" },
+        },
+      },
+    },
+    "/v1/admin/reputation": {
+      get: {
+        security: [{ adminToken: [] }],
+        summary: "Agents with passport events, highest score first, and recent failures",
+        responses: { "200": { description: "{ agents, recentFailures }" } },
+      },
+    },
+    "/v1/admin/jobs/expire": {
+      post: {
+        security: [{ adminToken: [] }],
+        summary:
+          "Sandbox only. Refund every held job whose listing SLA has passed, across organizations. No take-rate.",
+        responses: {
+          "200": { description: "{ jobs, swept } for jobs that just became timed_out." },
+          "403": { description: "API mode is not sandbox." },
+        },
+      },
+    },
+    "/v1/admin/fleet/bootstrap": {
+      post: {
+        security: [{ adminToken: [] }],
+        summary:
+          "Sandbox only. Idempotent Roster Labs bootstrap: organization, fleet agent, six first-party listings, autofill bindings.",
+        responses: {
+          "200": { description: "{ fleet } snapshot. Does not return an API key." },
+          "403": { description: "API mode is not sandbox." },
         },
       },
     },

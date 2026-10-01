@@ -43,6 +43,12 @@ export function SiteHeader() {
           >
             Waitlist
           </Link>
+          <Link
+            href="/admin"
+            className="font-mono text-[11px] tracking-[0.16em] text-muted uppercase hover:text-paper"
+          >
+            Admin
+          </Link>
         </nav>
         <button
           type="button"
@@ -75,6 +81,15 @@ export function SiteHeader() {
                 onClick={() => setOpen(false)}
               >
                 Waitlist
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/admin"
+                className="mt-3 block py-2 font-mono text-[11px] tracking-[0.16em] text-muted uppercase"
+                onClick={() => setOpen(false)}
+              >
+                Admin
               </Link>
             </li>
           </ul>

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { resolveRosterApiOrigin, rosterProxyTarget } from "@/lib/api-base";
+import { buildProxyHeaders } from "@/lib/admin-session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
-const FORWARD_REQUEST = ["authorization", "content-type", "accept"] as const;
 const FORWARD_RESPONSE = ["content-type"] as const;
 
 async function proxy(request: Request, context: RouteContext): Promise<Response> {
@@ -22,11 +22,7 @@ async function proxy(request: Request, context: RouteContext): Promise<Response>
     );
   }
 
-  const headers = new Headers();
-  for (const name of FORWARD_REQUEST) {
-    const value = request.headers.get(name);
-    if (value) headers.set(name, value);
-  }
+  const headers = buildProxyHeaders(request.headers, path);
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   const init: RequestInit = {

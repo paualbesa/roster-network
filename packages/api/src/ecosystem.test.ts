@@ -18,9 +18,11 @@ interface Pm2App {
 
 describe("PM2 ecosystem", () => {
   const previousDataDir = process.env.ROSTER_DATA_DIR;
+  const previousAdminToken = process.env.ROSTER_ADMIN_TOKEN;
 
   afterEach(() => {
     restoreEnv("ROSTER_DATA_DIR", previousDataDir);
+    restoreEnv("ROSTER_ADMIN_TOKEN", previousAdminToken);
     delete require.cache[configPath];
   });
 
@@ -49,6 +51,21 @@ describe("PM2 ecosystem", () => {
     expect(api?.env.REGISTRY_INDEX_PATH).toBe(join(dataDir, "registry.json"));
     expect(api?.env.ROSTER_JOBS_FILE).toBe(join(dataDir, "jobs.json"));
   });
+
+  it("forwards ROSTER_ADMIN_TOKEN to roster-api and does not invent one", () => {
+    delete process.env.ROSTER_ADMIN_TOKEN;
+    const absent = loadApps().find((app) => app.name === "roster-api");
+    expect(absent?.env.ROSTER_ADMIN_TOKEN).toBeUndefined();
+    expect(loadApps().find((app) => app.name === "roster-web")?.env.ROSTER_ADMIN_TOKEN).toBeUndefined();
+
+    process.env.ROSTER_ADMIN_TOKEN = "  sandbox-operator  ";
+    const present = loadApps().find((app) => app.name === "roster-api");
+    expect(present?.env.ROSTER_ADMIN_TOKEN).toBe("sandbox-operator");
+    expect(loadApps().find((app) => app.name === "roster-web")?.env.ROSTER_ADMIN_TOKEN).toBeUndefined();
+
+    process.env.ROSTER_ADMIN_TOKEN = "   ";
+    expect(loadApps().find((app) => app.name === "roster-api")?.env.ROSTER_ADMIN_TOKEN).toBeUndefined();
+  });
 });
 
 function loadApps(): Pm2App[] {
@@ -62,7 +79,7 @@ function expectedDataDir(): string {
   return join(root, "data");
 }
 
-function restoreEnv(name: "ROSTER_DATA_DIR", value: string | undefined): void {
+function restoreEnv(name: "ROSTER_DATA_DIR" | "ROSTER_ADMIN_TOKEN", value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
