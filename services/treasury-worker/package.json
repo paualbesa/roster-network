@@ -1,6 +1,6 @@
 {
-  "name": "@albesa/api",
-  "description": "Roster HTTP API for sandbox USDC agent payments.",
+  "name": "@albesa/treasury-worker",
+  "description": "Dry-run skeleton that tops up the Roster Solana fee payer with SOL.",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,18 +15,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run --environment node",
-    "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js"
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts"
   },
   "dependencies": {
-    "@albesa/core": "workspace:*",
-    "@albesa/registry": "workspace:*",
-    "@albesa/reputation": "workspace:*",
-    "@albesa/solana": "workspace:*",
-    "@hono/node-server": "^1.19.5",
-    "hono": "^4.9.8"
+    "@albesa/solana": "workspace:*"
   },
   "devDependencies": {
+    "@solana/web3.js": "^1.98.4",
     "@types/node": "^22.18.6",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",

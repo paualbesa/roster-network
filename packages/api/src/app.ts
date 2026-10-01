@@ -1,3 +1,4 @@
+import { SolanaFeeError, resolveSolanaEngineConfig, type SolanaEngineConfig } from "@albesa/solana";
 import { Hono } from "hono";
 import {
   createWalletProvider,
@@ -32,6 +33,7 @@ import { adminGateFor, adminGateResponse, isAdminPath, registerAdminRoutes } fro
 import { rosterCors } from "./cors.js";
 import { attachAppRuntime } from "./fleet.js";
 import { openApiDocument } from "./openapi.js";
+import { registerSolanaEscrowRoutes } from "./solana-routes.js";
 import {
   AgentFinanceService,
   ServiceError,
@@ -83,6 +85,11 @@ export interface AppOptions {
   autofill?: "sync" | "async";
   /** Wait before an async fleet delivery. Omit it to read `ROSTER_AUTOFULFILL_DELAY_MS` (default 50). */
   autofillDelayMs?: number;
+  /**
+   * Gasless Solana fee engine. Omit it to read ROSTER_SOLANA_* from the environment.
+   * The default cluster is mock and does not broadcast.
+   */
+  solana?: SolanaEngineConfig;
   /**
    * Operator token for `/v1/admin/*`.
    * Omit it to read `ROSTER_ADMIN_TOKEN`. `null` or a blank string disables the admin API.
@@ -362,8 +369,12 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   });
 
   registerAdminRoutes(app, adminDeps);
+  registerSolanaEscrowRoutes(app, options.solana ?? resolveSolanaEngineConfig());
 
   app.onError((error, c) => {
+    if (error instanceof SolanaFeeError) {
+      return c.json({ error: { code: error.code, message: error.message } }, error.status);
+    }
     if (error instanceof ServiceError) {
       const body = error.transaction
         ? { error: { code: error.code, message: error.message }, transaction: error.transaction }

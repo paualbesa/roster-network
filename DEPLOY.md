@@ -92,3 +92,28 @@ Ops actions (`POST /v1/admin/jobs/expire` and `POST /v1/admin/fleet/bootstrap`) 
 ### MCP deploy recipe
 
 An Albesa MCP deploy recipe named `roster-api` may be added later. Until then, deploy with `scripts/deploy-roster-api.sh`.
+
+### Solana fee payer (sandbox)
+
+Gasless escrow is off-chain mock unless the variables below say otherwise. Do not put a fee-payer secret in the repo, in `ecosystem.config.cjs`, or in the deploy scripts. The API deploy does not start the treasury worker.
+
+| Variable | Default | Role |
+| --- | --- | --- |
+| `ROSTER_SOLANA_CLUSTER` | `mock` | `mock` or `offline` (no RPC), `devnet`, or `mainnet-beta` |
+| `ROSTER_FEE_PAYER_PUBKEY` | sandbox fixture | Fee payer address on the lock and settle transactions |
+| `ROSTER_FEE_PAYER_SECRET` | unset | Required only to sign on devnet or mainnet-beta. Ignored in mock mode |
+| `ROSTER_PROGRAM_AUTHORITY_SECRET` | unset | Required to sign settle on a live cluster |
+| `ROSTER_TREASURY_USDC_ATA` | sandbox ATA | Destination of the 1% + 0.003 USDC Roster fee |
+| `SOLANA_RPC_URL` | unset | Required to read a live SOL balance or broadcast |
+| `ROSTER_SOLANA_SEND` | unset | Set to `1` before settle broadcasts |
+| `ROSTER_SOLANA_ALLOW_MAINNET` | unset | Set to `1` before any mainnet-beta signature or swap |
+
+Fee constants, compiled into `@albesa/solana`: `ROSTER_PERCENT_FEE = 0.01`, `ROSTER_BASE_FEE_USDC = 0.003`. Provider payout is the job price minus that fee.
+
+The treasury worker is a separate process. It checks the fee payer every 5 minutes and, under 0.02 SOL, plans a Jupiter swap of about 10 USDC into SOL. Dry-run is the default (logs only, no request). One sandbox check:
+
+```bash
+ROSTER_TREASURY_ONCE=1 pnpm --filter @albesa/treasury-worker start
+```
+
+Set `ROSTER_FEE_PAYER_SOL_BALANCE=0.01` to simulate a low balance. A live swap is refused unless `ROSTER_TREASURY_EXECUTE=1`, `ROSTER_TREASURY_DRY_RUN=0`, `ROSTER_SOLANA_CLUSTER=mainnet-beta`, and `ROSTER_SOLANA_ALLOW_MAINNET=1` are all set, with a fee-payer secret and `SOLANA_RPC_URL`. The worker is not part of `scripts/deploy-roster-api.sh`.
