@@ -10,6 +10,7 @@ import {
 } from "@albesa/core";
 import {
   CapabilityRegistry,
+  embedSemantic,
   parseSearchQuery,
   readListingAgentId,
   RegistryError,
@@ -95,6 +96,17 @@ export interface AppOptions {
    * Omit it to read `ROSTER_ADMIN_TOKEN`. `null` or a blank string disables the admin API.
    */
   adminToken?: string | null;
+  /**
+   * Supabase Auth and Postgres. Omit it and the API keeps API keys and JSON files.
+   * Agents are not required to present a Supabase user.
+   */
+  supabase?: {
+    verifyAccessToken: (
+      accessToken: string,
+    ) => Promise<{ id: string; email: string; displayName: string | null } | null>;
+    matchCapabilities?: (query: ArrayLike<number>, limit: number) => Promise<ReadonlyMap<string, number>>;
+    flush?: () => Promise<void>;
+  };
 }
 
 /** Score for one listing, or null when reputation should stay neutral. */
@@ -121,6 +133,25 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   });
   const app = new Hono<AppEnv>();
   attachAppRuntime(app, { mode, service, registry, jobs, orchestrator });
+
+  const flush = options.supabase?.flush;
+  if (flush) {
+    app.use("*", async (_c, next) => {
+      let failure: unknown;
+      try {
+        await next();
+      } catch (error) {
+        failure = error;
+      }
+      try {
+        await flush();
+      } catch (error) {
+        if (failure === undefined) throw error;
+        console.error(error);
+      }
+      if (failure !== undefined) throw failure;
+    });
+  }
 
   // Direct browser calls from https://roster.network and localhost.
   // A same-origin Next.js proxy on the marketing site is the preferred path.
@@ -157,6 +188,15 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     if (!apiKey) {
       return c.json({ error: { code: "unauthorized", message: "Send Authorization: Bearer <api key>." } }, 401);
     }
+    if (looksLikeJwt(apiKey)) {
+      const orgId = await organizationForSupabaseToken(service, options.supabase, apiKey);
+      if (typeof orgId !== "string") {
+        return c.json({ error: { code: orgId.code, message: orgId.message } }, orgId.status);
+      }
+      c.set("orgId", orgId);
+      await next();
+      return;
+    }
     const orgId = service.authenticate(apiKey);
     if (!orgId) {
       return c.json({ error: { code: "unauthorized", message: "Unknown API key." } }, 401);
@@ -183,6 +223,40 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   app.post("/v1/accounts/login", async (c) => {
     const input = parseLogin(await readJson(c));
     const result = await service.loginAccount(input.email, input.password);
+    return c.json(result);
+  });
+
+  app.post("/v1/accounts/session", async (c) => {
+    const supabase = options.supabase;
+    if (!supabase) {
+      return c.json(
+        {
+          error: {
+            code: "supabase_unconfigured",
+            message:
+              "Supabase Auth is not configured. Use email and password, or set SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY.",
+          },
+        },
+        503,
+      );
+    }
+    const header = c.req.header("authorization") ?? "";
+    const token = /^Bearer\s+(\S+)$/.exec(header)?.[1];
+    if (!token) {
+      return c.json(
+        { error: { code: "unauthorized", message: "Send Authorization: Bearer <supabase access token>." } },
+        401,
+      );
+    }
+    const identity = await supabase.verifyAccessToken(token);
+    if (!identity) {
+      return c.json({ error: { code: "unauthorized", message: "Supabase access token was rejected." } }, 401);
+    }
+    const result = await service.acceptAuthUser({
+      authUserId: identity.id,
+      email: identity.email,
+      displayName: identity.displayName,
+    });
     return c.json(result);
   });
 
@@ -331,7 +405,11 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
       semantic: c.req.query("semantic"),
     });
     const reputation = await reputationForSearch(registry, service, options.passportScores, query);
-    const hits = registry.search(query, reputation);
+    const similarities =
+      query.semantic && query.q.trim() !== "" && options.supabase?.matchCapabilities
+        ? await options.supabase.matchCapabilities(embedSemantic(query.q), 200)
+        : null;
+    const hits = registry.search(query, reputation, similarities);
     return c.json({ hits });
   });
 
@@ -539,8 +617,43 @@ function parseEscrowResult(body: unknown): unknown {
 function isPublicRoute(method: string, path: string): boolean {
   return (
     method === "POST" &&
-    (path === "/v1/organizations" || path === "/v1/accounts" || path === "/v1/accounts/login")
+    (path === "/v1/organizations" ||
+      path === "/v1/accounts" ||
+      path === "/v1/accounts/login" ||
+      path === "/v1/accounts/session")
   );
+}
+
+function looksLikeJwt(token: string): boolean {
+  return token.startsWith("eyJ") && token.split(".").length === 3;
+}
+
+async function organizationForSupabaseToken(
+  service: AgentFinanceService,
+  supabase: AppOptions["supabase"],
+  accessToken: string,
+): Promise<string | { status: 401 | 503; code: string; message: string }> {
+  if (!supabase) {
+    return {
+      status: 503,
+      code: "supabase_unconfigured",
+      message:
+        "Supabase Auth is not configured on this API. Send a sandbox API key, or set SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY.",
+    };
+  }
+  const identity = await supabase.verifyAccessToken(accessToken);
+  if (!identity) {
+    return { status: 401, code: "unauthorized", message: "Supabase access token was rejected." };
+  }
+  const orgId = service.authenticateAuthUser(identity.id);
+  if (!orgId) {
+    return {
+      status: 401,
+      code: "unauthorized",
+      message: "This Supabase user has no Roster organization yet. Call POST /v1/accounts/session first.",
+    };
+  }
+  return orgId;
 }
 
 function parseCreateAccount(body: unknown): CreateAccountInput {

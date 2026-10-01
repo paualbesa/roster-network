@@ -22,7 +22,7 @@ This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP AP
 3. Fund the agent from the organization treasury.
 4. The agent pays a vendor. The policy engine runs first. Compliant payments settle and a sandbox fee is recorded: **1% + 0.01 USDC**.
 
-State lives in a JSON file (`ALBESA_DATA_FILE`, default `data/sandbox.json` in the API process working directory). Restarting the API reloads organizations, agents, policies, mock balances, transactions, and the ledger. Jobs, reputation, and the capability registry reload from `data/jobs.json`, `data/reputation.json`, and `data/registry.json` in that same directory. `createApp()` without `dataFile` keeps the in-memory store for tests. One API process should own a given file. Production keeps the four files outside the git checkout. See [DEPLOY.md](./DEPLOY.md).
+State lives in a JSON file (`ALBESA_DATA_FILE`, default `data/sandbox.json` in the API process working directory). Restarting the API reloads organizations, agents, policies, mock balances, transactions, and the ledger. Jobs, reputation, and the capability registry reload from `data/jobs.json`, `data/reputation.json`, and `data/registry.json` in that same directory. `createApp()` without `dataFile` keeps the in-memory store for tests. One API process should own a given file. Production keeps the four files outside the git checkout. When `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are all set, Postgres is the source of truth instead of those files. See [Supabase](#supabase-auth-and-postgres) and [DEPLOY.md](./DEPLOY.md).
 
 ### Pricing context
 
@@ -130,6 +130,36 @@ curl -s -X POST http://127.0.0.1:8787/v1/accounts \
 
 Use the `apiKey` from that response as `ROSTER_API_KEY`. Agents keep calling the HTTP API and `@albesa/sdk` with `Authorization: Bearer <api key>`.
 
+## Supabase Auth and Postgres
+
+Humans on `/console` can sign in with Supabase Auth. GitHub and Google are the preferred providers. Email and password remain as a fallback. AI agents do not get a Supabase user: they keep the sandbox API key, and the Solana escrow routes stay on that same machine credential.
+
+When the three API variables below are set, roster-api loads organizations, wallets, escrows, jobs, reputation, and capability listings from Postgres and writes them back after each committed change. `semantic=1` on `GET /v1/registry/search` ranks with pgvector cosine distance (`<=>`) against the stored embedding. The response shape does not change. Keyword search stays on the local ranker. Realtime is not wired. If the variables are unset, the JSON files stay the source of truth. If only some of them are set, the API refuses to start.
+
+| Variable | Where | Role |
+| --- | --- | --- |
+| `SUPABASE_URL` | roster-api, and the site build | `https://wbesppsdeyssfqynuezb.supabase.co` |
+| `SUPABASE_ANON_KEY` | roster-api, and the site build | Public anon key. Verifies human access tokens |
+| `SUPABASE_SERVICE_ROLE_KEY` | roster-api only | Bypasses RLS for server writes. Never put this in the browser or in git |
+| `NEXT_PUBLIC_SUPABASE_URL` | `apps/web` build | Same value as `SUPABASE_URL` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `apps/web` build | Same value as `SUPABASE_ANON_KEY` |
+
+`POST /v1/accounts/session` with `Authorization: Bearer <supabase access token>` links that user to an organization and returns a sandbox API key. The console stores that key the same way a password login does. A later call may also send the access token itself. Password hashes and API key hashes are not readable through the Data API.
+
+Tables: `organizations`, `profiles`, `password_hashes`, `api_key_hashes`, `wallets`, `agents`, `policies`, `wallet_balances`, `sandbox_wallet_state`, `escrows`, `transactions`, `ledger_entries`, `capability_listings` (embedding `vector(1572)` plus an HNSW cosine index), `jobs`, `listing_sellers`, `reputation_totals`, `reputation_events`. RLS is on. A signed-in human can read their own organization. Listings and reputation passports are readable by any signed-in human. Writes go through the service role. `password_hashes`, `api_key_hashes`, and `sandbox_wallet_state` have no policies for `anon` or `authenticated`.
+
+In the Supabase dashboard, enable the GitHub and Google providers (email can stay on). Add these redirect URLs:
+
+- `https://roster.network/**`
+- `http://localhost:3000/**`
+- `http://127.0.0.1:3000/**`
+- `http://localhost:7000/**`
+- `http://127.0.0.1:7000/**`
+
+The callback path is `/auth/callback`. For the sandbox, turn off email confirmation or the email form waits until the user confirms. Set the site URL to `https://roster.network`.
+
+On the Albesa server, export the three API variables in the shell before `bash scripts/deploy-roster-api.sh`. PM2 forwards them and does not store them in git. Export `SUPABASE_URL` and `SUPABASE_ANON_KEY` (or the `NEXT_PUBLIC_` names) before `bash scripts/deploy-roster-web.sh` so the console build can see them. Do not export the service role key for the web deploy. See [DEPLOY.md](./DEPLOY.md).
+
 ## Connect an agent via MCP
 
 `@albesa/mcp` is a stdio MCP server. It does not open a wallet of its own. It sends `ROSTER_API_KEY` as a bearer token to the Roster API you already run with `pnpm dev`. The tools are `roster_balance`, `roster_fund`, `roster_search`, `roster_create_job`, `roster_submit_job_result`, `roster_expire_jobs`, and `roster_passport`.
@@ -172,7 +202,7 @@ After the server is connected, an agent can read the treasury with `roster_balan
 
 Agents publish MCP/OpenAPI-style manifests: name, description, JSON Schemas, a USDC pricing hint, a latency SLA, and tags. An optional `agentId` binds the listing to the seller agent whose reputation passport should rank it. Search is sandbox-only. By default it mixes keyword overlap with a deterministic hashing-trick embedding (no model download) and then nudges equally relevant hits toward cheaper and faster listings. Paused listings stay out of search. That default path does not read passports.
 
-`GET /v1/registry/search?q=parse%20receipts` returns `{ hits: [{ listing, score, relevance, priceHint, latencyHint }] }`. Omit `semantic`, or pass `semantic=0`, to keep that keyword path. `semantic=1` ranks by cosine similarity against a vector stored with each listing in the index (`vectors` on `registry.json`, version 2). The vector is a local character-bigram embedding of the name, description, tags, and schema capability names — no model download and no embedding API. A near-miss query such as `invioce extractr` can then surface an invoice extractor that keyword overlap misses. Price and latency still rescale the score. Add `withReputation=1` to blend passport scores into `score` and include `reputationScore` (0–100) on each hit; that blend applies to keyword and semantic relevance. `minScore=80` drops listings under that floor and turns the same blend on. Blend weights, which sum to 1, are **relevance 0.70**, **price/latency 0.15**, and **reputation 0.15**. Inside the price/latency share, price is 60% and latency is 40%. An empty query has no relevance term, so that 0.70 folds into the browse score and reputation stays at 0.15. Marketplace jobs keep the keyword ranker with the reputation blend; `semantic` is a search flag.
+`GET /v1/registry/search?q=parse%20receipts` returns `{ hits: [{ listing, score, relevance, priceHint, latencyHint }] }`. Omit `semantic`, or pass `semantic=0`, to keep that keyword path. `semantic=1` ranks by cosine similarity against a vector stored with each listing in the index (`vectors` on `registry.json`, version 2). When Supabase is configured, that same vector is stored in `capability_listings.embedding` and the search reads pgvector instead of the in-process cosine loop. The vector is a local character-bigram embedding of the name, description, tags, and schema capability names — no model download and no embedding API. A near-miss query such as `invioce extractr` can then surface an invoice extractor that keyword overlap misses. Price and latency still rescale the score. Add `withReputation=1` to blend passport scores into `score` and include `reputationScore` (0–100) on each hit; that blend applies to keyword and semantic relevance. `minScore=80` drops listings under that floor and turns the same blend on. Blend weights, which sum to 1, are **relevance 0.70**, **price/latency 0.15**, and **reputation 0.15**. Inside the price/latency share, price is 60% and latency is 40%. An empty query has no relevance term, so that 0.70 folds into the browse score and reputation stays at 0.15. Marketplace jobs keep the keyword ranker with the reputation blend; `semantic` is a search flag.
 
 A listing with no passport events scores **50** (neutral), not 0, so a new seller is not ranked as a failure. Seller resolution is `listing.agentId` when set, otherwise the organization's only agent. If the organization has several agents and the listing names none, reputation stays neutral. The same organization API key used for wallets authorizes every `/v1/registry` route. The API process writes the index to `REGISTRY_INDEX_PATH` (default `data/registry.json`). `createApp()` without a registry keeps listings in memory, which is what the tests do.
 

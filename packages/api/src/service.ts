@@ -173,6 +173,7 @@ export interface CreateEscrowResult extends EscrowResult {
 
 const NAME_MAX = 80;
 const PASSWORD_MIN = 8;
+const AUTH_USER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PASSWORD_MAX = 128;
 const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 const VENDOR_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -390,6 +391,25 @@ export class AgentFinanceService implements ReputationHook {
     return this.enqueue(() => this.loginAccountUnlocked(email, password));
   }
 
+  /**
+   * Link a Supabase Auth user to a Roster organization and issue a sandbox API key.
+   * Agents do not call this. Email/password accounts stay on `loginAccount`.
+   */
+  acceptAuthUser(input: {
+    authUserId: string;
+    email: string;
+    displayName: string | null;
+  }): Promise<LoginAccountResult> {
+    return this.enqueue(() => this.acceptAuthUserUnlocked(input));
+  }
+
+  /** Organization for a Supabase user that already called `acceptAuthUser`. */
+  authenticateAuthUser(authUserId: string): string | null {
+    const userId = this.store.authUsersById.get(authUserId);
+    if (!userId) return null;
+    return this.store.users.get(userId)?.organizationId ?? null;
+  }
+
   getAccount(organizationId: string): Promise<AccountView> {
     return this.enqueue(async () => {
       const user = this.userForOrganization(organizationId);
@@ -586,6 +606,59 @@ export class AgentFinanceService implements ReputationHook {
       apiKey: created.apiKey,
       treasury: created.treasury,
     };
+  }
+
+  private async acceptAuthUserUnlocked(input: {
+    authUserId: string;
+    email: string;
+    displayName: string | null;
+  }): Promise<LoginAccountResult> {
+    if (!AUTH_USER_ID_RE.test(input.authUserId)) {
+      throw new ServiceError(400, "invalid_request", "Supabase user id must be a UUID.");
+    }
+    const email = canonicalEmail(input.email);
+    if (!email) {
+      throw new ServiceError(400, "invalid_request", "Supabase account has no usable email.");
+    }
+    const linkedUserId = this.store.authUsersById.get(input.authUserId);
+    let user = linkedUserId ? this.store.users.get(linkedUserId) : undefined;
+    if (!user) {
+      const existingId = this.store.usersByEmail.get(email);
+      const existing = existingId ? this.store.users.get(existingId) : undefined;
+      if (existing) {
+        const linkedAuth = authUserIdFor(this.store, existing.id);
+        if (linkedAuth && linkedAuth !== input.authUserId) {
+          throw new ServiceError(409, "account_exists", "This email is already linked to another sign-in.");
+        }
+        this.store.authUsersById.set(input.authUserId, existing.id);
+        user = existing;
+        this.commit();
+      }
+    }
+    if (!user) {
+      const provided = input.displayName?.trim() ?? "";
+      const displayName = provided.length > NAME_MAX ? provided.slice(0, NAME_MAX) : provided;
+      const created = await this.createOrganizationUnlocked(
+        accountDisplayName(email, displayName.length > 0 ? displayName : null),
+      );
+      user = {
+        id: createId("usr"),
+        email,
+        displayName: accountDisplayName(email, displayName.length > 0 ? displayName : null),
+        organizationId: created.organization.id,
+        createdAt: created.organization.createdAt,
+      };
+      this.store.users.set(user.id, user);
+      this.store.usersByEmail.set(email, user.id);
+      this.store.authUsersById.set(input.authUserId, user.id);
+      this.commit();
+      return { user, apiKey: created.apiKey, treasury: created.treasury };
+    }
+    const apiKey = createSandboxApiKey();
+    this.store.apiKeys.set(hashSandboxApiKey(apiKey), user.organizationId);
+    this.store.authUsersById.set(input.authUserId, user.id);
+    this.commit();
+    return { user, apiKey, treasury: await this.readTreasury(user.organizationId) };
   }
 
   private async loginAccountUnlocked(emailRaw: string, password: string): Promise<LoginAccountResult> {
@@ -1474,6 +1547,13 @@ function canonicalOrRaw(amountUsdc: string): string {
   } catch {
     return amountUsdc;
   }
+}
+
+function authUserIdFor(store: MemoryStore, userId: string): string | null {
+  for (const [authUserId, linkedUserId] of store.authUsersById) {
+    if (linkedUserId === userId) return authUserId;
+  }
+  return null;
 }
 
 function canonicalEmail(value: string): string | null {

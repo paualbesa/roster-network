@@ -39,8 +39,14 @@ export class MemoryStore {
   readonly escrows = new Map<string, Escrow>();
   readonly transactions: Transaction[] = [];
   readonly ledger: LedgerEntry[] = [];
+  /** Supabase Auth user id (uuid) to Roster user id. Omitted from the JSON file. */
+  readonly authUsersById = new Map<string, string>();
+  /** Set by the Supabase mirror. The JSON store does not use it. */
+  onCommit: ((wallet: MockWalletSnapshot | null) => void) | null = null;
 
-  commit(_wallet: MockWalletSnapshot | null): void {}
+  commit(wallet: MockWalletSnapshot | null): void {
+    this.onCommit?.(wallet);
+  }
 
   readWalletState(): MockWalletSnapshot {
     return { balances: [], sequence: 0 };

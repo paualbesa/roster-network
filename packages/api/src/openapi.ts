@@ -17,7 +17,7 @@ export const openApiDocument = {
         type: "http",
         scheme: "bearer",
         description:
-          "Sandbox API key returned once by POST /v1/organizations or POST /v1/accounts. POST /v1/accounts/login issues another key for the same account. This key does not open /v1/admin.",
+          "Sandbox API key returned once by POST /v1/organizations or POST /v1/accounts. POST /v1/accounts/login and POST /v1/accounts/session issue another key for the same account. A Supabase access token is also accepted when Supabase is configured. Agents keep using API keys. This key does not open /v1/admin.",
       },
       adminToken: {
         type: "apiKey",
@@ -88,6 +88,19 @@ export const openApiDocument = {
         responses: {
           "200": { description: "New apiKey for the existing account." },
           "401": { description: "Email or password is incorrect." },
+        },
+      },
+    },
+    "/v1/accounts/session": {
+      post: {
+        security: [],
+        summary: "Exchange a Supabase access token for a sandbox API key",
+        description:
+          "Humans sign in with GitHub, Google, or email through Supabase Auth. The token is Authorization: Bearer. Agents do not call this route. Returns 503 supabase_unconfigured when the API has no Supabase env.",
+        responses: {
+          "200": { description: "New apiKey for the linked organization. The same shape as login." },
+          "401": { description: "The access token was rejected." },
+          "503": { description: "supabase_unconfigured" },
         },
       },
     },

@@ -176,6 +176,8 @@ export {
 export class MemoryJobStore implements JobStore {
   protected readonly jobs = new Map<string, StoredJob>();
   protected readonly sellers = new Map<string, ListingSellerBinding>();
+  /** Set by the Supabase mirror. JSON writes do not use it. */
+  onChange: (() => void) | null = null;
 
   readJob(id: string): StoredJob | null {
     const job = this.jobs.get(id);
@@ -194,6 +196,7 @@ export class MemoryJobStore implements JobStore {
 
   saveJob(job: StoredJob): void {
     this.jobs.set(job.id, cloneJob(job));
+    this.onChange?.();
   }
 
   readSeller(listingId: string): ListingSellerBinding | null {
@@ -207,6 +210,15 @@ export class MemoryJobStore implements JobStore {
 
   saveSeller(binding: ListingSellerBinding): void {
     this.sellers.set(binding.listingId, { ...binding });
+    this.onChange?.();
+  }
+
+  /** Hydrate from Postgres without marking the store dirty. */
+  replaceAll(jobs: readonly StoredJob[], sellers: readonly ListingSellerBinding[]): void {
+    this.jobs.clear();
+    this.sellers.clear();
+    for (const job of jobs) this.jobs.set(job.id, cloneJob(job));
+    for (const seller of sellers) this.sellers.set(seller.listingId, { ...seller });
   }
 }
 

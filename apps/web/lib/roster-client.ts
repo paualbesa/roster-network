@@ -110,9 +110,17 @@ export function createRosterClient(options: RosterClientOptions = {}) {
   const baseUrl = (options.baseUrl ?? ROSTER_BROWSER_API_BASE).replace(/\/$/, "");
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
-  async function request<T>(method: string, path: string, body?: unknown, auth = true): Promise<T> {
+  async function request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    auth = true,
+    bearer?: string,
+  ): Promise<T> {
     const headers: Record<string, string> = { accept: "application/json" };
-    if (auth) {
+    if (bearer) {
+      headers.authorization = `Bearer ${bearer}`;
+    } else if (auth) {
       const apiKey = options.apiKey?.trim() ?? "";
       if (!apiKey) throw new RosterApiError(401, "unauthorized", "Sign in to use the sandbox console.");
       headers.authorization = `Bearer ${apiKey}`;
@@ -153,6 +161,9 @@ export function createRosterClient(options: RosterClientOptions = {}) {
         { email: input.email.trim(), password: input.password },
         false,
       ).then(readSignup);
+    },
+    adoptSession(accessToken: string): Promise<SignupResult> {
+      return request<unknown>("POST", "/v1/accounts/session", undefined, false, accessToken).then(readSignup);
     },
     account(): Promise<AccountSnapshot> {
       return request<unknown>("GET", "/v1/account").then(readAccount);

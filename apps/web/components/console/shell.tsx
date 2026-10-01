@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { SANDBOX_DISCLAIMER } from "@/lib/site";
 import { SessionProvider, useSandboxSession } from "./session";
+import { SupabaseSessionBridge } from "./supabase-bridge";
 
 const LINKS = [
   { href: "/console/dashboard", label: "Dashboard" },
@@ -16,6 +17,7 @@ const LINKS = [
 export function ConsoleShell({ children }: { children: ReactNode }) {
   return (
     <SessionProvider>
+      <SupabaseSessionBridge />
       <div className="border-b border-line/10 bg-panel">
         <div className="mx-auto max-w-6xl px-6 py-3">
           <p className="text-sm leading-6 text-muted" role="note">

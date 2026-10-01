@@ -118,6 +118,7 @@ export function rankListings(
   query: CapabilitySearchQuery,
   reputation: ReputationRankInput | null = null,
   vectors: ReadonlyMap<string, Float64Array> | null = null,
+  semanticSimilarities: ReadonlyMap<string, number> | null = null,
 ): CapabilitySearchHit[] {
   const queryTokens = tokenize(query.q);
   const browsing = queryTokens.length === 0;
@@ -136,7 +137,7 @@ export function rankListings(
     const price = priceHint(listing.pricing.amountUsdc);
     const latency = latencyHint(listing.latency.p95Ms);
     const relevance = semantic
-      ? semanticRelevance(semanticQuery, listing, vectors)
+      ? semanticRelevance(semanticQuery, listing, vectors, semanticSimilarities)
       : keywordRelevance(browsing, queryTokens, queryEmbedding, listing);
     if (!browsing && relevance < (semantic ? SEMANTIC_MIN_RELEVANCE : MIN_RELEVANCE)) continue;
 
@@ -181,7 +182,12 @@ function semanticRelevance(
   queryEmbedding: Float64Array | null,
   listing: CapabilityListing,
   vectors: ReadonlyMap<string, Float64Array> | null,
+  semanticSimilarities: ReadonlyMap<string, number> | null,
 ): number {
+  if (semanticSimilarities) {
+    const score = semanticSimilarities.get(listing.id);
+    return score === undefined || !Number.isFinite(score) ? 0 : Math.max(0, score);
+  }
   if (queryEmbedding === null) return 0;
   const stored = vectors?.get(listing.id) ?? embedSemantic(capabilityDocument(listing));
   return Math.max(0, cosineSimilarity(queryEmbedding, stored));

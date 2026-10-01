@@ -89,6 +89,45 @@ bash scripts/deploy-roster-api.sh
 
 Ops actions (`POST /v1/admin/jobs/expire` and `POST /v1/admin/fleet/bootstrap`) run only when the API mode is sandbox.
 
+### Supabase
+
+Project **Roster Network** (`wbesppsdeyssfqynuezb`, eu-west-1) is already created. Do not create another. The `vector` extension is already enabled.
+
+Postgres replaces the four JSON files when all three variables are set on `roster-api`. Unset keeps the JSON files. A partial set makes `scripts/deploy-roster-api.sh` exit before PM2 starts. The script does not print the keys. `ecosystem.config.cjs` only forwards values that are already in the shell.
+
+```bash
+export SUPABASE_URL='https://wbesppsdeyssfqynuezb.supabase.co'
+export SUPABASE_ANON_KEY='paste-the-anon-key'
+export SUPABASE_SERVICE_ROLE_KEY='paste-the-service-role-key'
+bash scripts/deploy-roster-api.sh
+```
+
+The service role key is server-only. `scripts/deploy-roster-web.sh` unsets `SUPABASE_SERVICE_ROLE_KEY` before the site build. The console needs the public pair at **build** time, because Next inlines `NEXT_PUBLIC_*`:
+
+```bash
+export SUPABASE_URL='https://wbesppsdeyssfqynuezb.supabase.co'
+export SUPABASE_ANON_KEY='paste-the-anon-key'
+bash scripts/deploy-roster-web.sh
+```
+
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are the same two values if you prefer those names. The web process does not receive the service role key.
+
+In the Supabase dashboard, Authentication → URL configuration:
+
+| Redirect URL |
+| --- |
+| `https://roster.network/**` |
+| `http://localhost:3000/**` |
+| `http://127.0.0.1:3000/**` |
+| `http://localhost:7000/**` |
+| `http://127.0.0.1:7000/**` |
+
+Site URL: `https://roster.network`. Enable GitHub and Google under Authentication → Providers. Email and password can stay enabled. For the sandbox, disable "Confirm email" or the console waits until the inbox link is opened. The OAuth callback on the site is `https://roster.network/auth/callback`.
+
+Humans sign in on `/console`. Agents keep API keys and the Solana escrow routes. Job-status Realtime is not enabled.
+
+Apply `supabase/migrations/20261001120000_roster_core.sql` if the hosted database does not have the tables yet. The migration enables RLS, the HNSW index on `capability_listings.embedding`, and `match_capability_listings`.
+
 ### MCP deploy recipe
 
 An Albesa MCP deploy recipe named `roster-api` may be added later. Until then, deploy with `scripts/deploy-roster-api.sh`.

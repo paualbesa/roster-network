@@ -121,4 +121,24 @@ describe("reputation ranking", () => {
     expect(registry.search({ q: "extract invoices", minScore: 90 })).toEqual([]);
     expect(registry.search({ q: "extract invoices", minScore: 50 })).toHaveLength(1);
   });
+
+  it("uses caller-supplied cosine scores for semantic search", () => {
+    const registry = new CapabilityRegistry({ now: clock() });
+    const invoice = registry.register("org_a", manifest());
+    const weather = registry.register(
+      "org_a",
+      manifest({
+        name: "Weather",
+        description: "Forecasts for a city.",
+        tags: ["weather"],
+      }),
+    );
+    const hits = registry.search({ q: "invoice", semantic: true, limit: 5 }, null, new Map([
+      [invoice.id, 0.01],
+      [weather.id, 0.9],
+    ]));
+    expect(hits[0]?.listing.id).toBe(weather.id);
+    expect(hits[0]?.relevance).toBeCloseTo(0.9);
+    expect(hits.some((hit) => hit.listing.id === invoice.id)).toBe(false);
+  });
 });

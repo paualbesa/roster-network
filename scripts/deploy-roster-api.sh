@@ -65,6 +65,16 @@ export ROSTER_REPUTATION_FILE="$DATA_DIR/reputation.json"
 export REGISTRY_INDEX_PATH="$DATA_DIR/registry.json"
 export ROSTER_JOBS_FILE="$DATA_DIR/jobs.json"
 
+if [ -n "${SUPABASE_URL:-}${SUPABASE_ANON_KEY:-}${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+  if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+    echo "FATAL: SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY must all be set, or all left unset." >&2
+    exit 1
+  fi
+  echo "note: Supabase persistence is enabled (keys are not printed)"
+else
+  echo "note: Supabase env is unset; roster-api keeps the JSON files"
+fi
+
 echo "== pm2 =="
 if pm2 describe roster-api >/dev/null 2>&1; then
   pm2 restart "$ROOT/ecosystem.config.cjs" --only roster-api --update-env

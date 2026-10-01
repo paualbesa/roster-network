@@ -25,6 +25,8 @@ export interface ReputationLedger {
 export class MemoryReputationLedger implements ReputationLedger {
   protected readonly totals = new Map<string, ReputationTotals>();
   protected readonly events: ReputationEventRecord[] = [];
+  /** Set by the Supabase mirror. JSON writes do not use it. */
+  onAppend: (() => void) | null = null;
 
   readTotals(agentId: string): ReputationTotals | null {
     const found = this.totals.get(agentId);
@@ -49,6 +51,15 @@ export class MemoryReputationLedger implements ReputationLedger {
     }
     this.totals.set(totals.agentId, cloneTotals(totals));
     this.events.push(cloneEvent(event));
+    this.onAppend?.();
+  }
+
+  /** Hydrate from Postgres without marking the ledger dirty. */
+  replaceAll(totals: readonly ReputationTotals[], events: readonly ReputationEventRecord[]): void {
+    this.totals.clear();
+    this.events.length = 0;
+    for (const entry of totals) this.totals.set(entry.agentId, cloneTotals(entry));
+    for (const event of events) this.events.push(cloneEvent(event));
   }
 }
 

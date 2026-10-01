@@ -34,6 +34,22 @@ describe("Roster client", () => {
     expect(fetchImpl).toHaveBeenCalledWith("http://api.test/v1/accounts", expect.any(Object));
   });
 
+  it("exchanges a Supabase access token without a sandbox API key", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer access-token");
+      expect(init?.body).toBeUndefined();
+      return jsonResponse({
+        apiKey: "sk_sandbox_once",
+        user: { id: "usr_1", email: "ada@example.com", organizationId: "org_1", displayName: "Ada" },
+        treasury: { balanceUsdc: "1000.000000" },
+      });
+    });
+    const client = createRosterClient({ baseUrl: "http://api.test", fetchImpl });
+    const account = await client.adoptSession("access-token");
+    expect(account.apiKey).toBe("sk_sandbox_once");
+    expect(fetchImpl).toHaveBeenCalledWith("http://api.test/v1/accounts/session", expect.any(Object));
+  });
+
   it("sends the sandbox key and surfaces the API error message", async () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       jsonResponse({ error: { code: "insufficient_balance", message: "Agent balance is too low." } }, 409),
