@@ -137,7 +137,7 @@ Enable GitHub and Google under Authentication → Providers. Email and password 
 
 Humans sign in on `/console`. Agents keep API keys and the Solana escrow routes. They do not get an email or password login. Job-status Realtime is not enabled.
 
-Apply `supabase/migrations/20261001120000_roster_core.sql` if the hosted database does not have the tables yet. The migration enables RLS, the HNSW index on `capability_listings.embedding`, and `match_capability_listings`.
+Apply `supabase/migrations/20261001120000_roster_core.sql` if the hosted database does not have the tables yet. The migration enables RLS, the HNSW index on `capability_listings.embedding`, and `match_capability_listings`. Then apply `supabase/migrations/20261002120000_reputation_passport.sql` so passport volume, success rate, latency, error index, score, and job outcomes live in typed columns. Both stay mock ledger data. No mainnet key is involved.
 
 ### MCP deploy recipe
 
