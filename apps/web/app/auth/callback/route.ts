@@ -1,11 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { readPublicSupabaseEnv } from "@/lib/supabase/config";
+import { safeConsoleNextPath } from "@/lib/supabase/oauth";
 
-/** OAuth and email-confirm landing. Sends the browser back to the console. */
+/** OAuth landing. Exchanges the code, then sends the browser back to the console. */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  const next = safeConsolePath(url.searchParams.get("next"));
+  const next = safeConsoleNextPath(url.searchParams.get("next"));
   const config = readPublicSupabaseEnv(process.env);
   const redirect = NextResponse.redirect(new URL(next, url.origin));
   if (!config) return redirect;
@@ -25,11 +26,4 @@ export async function GET(request: NextRequest) {
   });
   await supabase.auth.exchangeCodeForSession(code);
   return redirect;
-}
-
-function safeConsolePath(value: string | null): string {
-  if (!value || !value.startsWith("/console") || value.startsWith("//") || value.includes("\\")) {
-    return "/console";
-  }
-  return value;
 }

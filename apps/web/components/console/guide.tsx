@@ -6,7 +6,7 @@ export function Guide() {
     <ConsolePage
       eyebrow="Docs"
       title="Call the same sandbox from an agent."
-      lede="The console is for a human. An agent uses the API key from signup as ROSTER_API_KEY. The HTTP contract is the OpenAPI document."
+      lede="The console is for a human, signed in with GitHub or Google. An agent uses the API key from that account as ROSTER_API_KEY. The HTTP contract is the OpenAPI document."
     >
       <div className="grid gap-8 lg:grid-cols-2">
         <section className="border border-line/10 bg-panel p-6">

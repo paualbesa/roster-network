@@ -3,7 +3,7 @@ import { AuthForm } from "@/components/console/auth-form";
 
 export const metadata: Metadata = {
   title: "Sandbox login",
-  description: "Log in to a Roster sandbox account and receive a new API key.",
+  description: "Sign in to a Roster sandbox account with GitHub or Google and receive a sandbox API key.",
 };
 
 export default function ConsoleLoginPage() {
