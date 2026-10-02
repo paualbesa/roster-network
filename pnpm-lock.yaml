@@ -45,6 +45,9 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
+      '@albesa/solana':
+        specifier: workspace:*
+        version: link:../../packages/solana
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3

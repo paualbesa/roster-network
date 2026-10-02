@@ -1,4 +1,5 @@
 import { ROSTER_BROWSER_API_BASE } from "./api-base";
+import type { RosterFeeQuote } from "./roster-fee";
 
 export class RosterApiError extends Error {
   readonly status: number;
@@ -77,6 +78,30 @@ export interface ConsoleJob {
   validationErrors: string[] | null;
   buyerAgentId: string;
   sellerAgentId: string;
+}
+
+export interface SolanaLockReceipt {
+  cluster: string;
+  broadcast: boolean;
+  escrowId: string;
+  jobId: string | null;
+  feePayer: string;
+  buyerPubkey: string;
+  amountUsdc: string;
+  quote: RosterFeeQuote;
+  transaction: string;
+}
+
+export interface SolanaSettleReceipt {
+  cluster: string;
+  broadcast: boolean;
+  broadcastNote: string | null;
+  submitted: boolean;
+  signature: string | null;
+  escrowId: string;
+  quote: RosterFeeQuote;
+  treasuryUsdcAta: string;
+  transaction: string;
 }
 
 export interface RegistrySearchInput {
@@ -228,6 +253,38 @@ export function createRosterClient(options: RosterClientOptions = {}) {
     },
     submitResult(jobId: string, result: unknown): Promise<ConsoleJob> {
       return request<unknown>("POST", `/v1/jobs/${encodeURIComponent(jobId)}/result`, { result }).then(readJobPayload);
+    },
+    prepareLock(input: {
+      buyerPubkey: string;
+      amountUsdc: string;
+      escrowId?: string;
+      jobId?: string;
+    }): Promise<SolanaLockReceipt> {
+      const body: Record<string, string> = {
+        buyerPubkey: input.buyerPubkey,
+        amountUsdc: input.amountUsdc.trim(),
+      };
+      if (input.escrowId) body.escrowId = input.escrowId;
+      if (input.jobId) body.jobId = input.jobId;
+      return request<unknown>("POST", "/v1/escrow/prepare-lock", body).then(readLock);
+    },
+    settleEscrow(input: {
+      escrowId: string;
+      buyerPubkey: string;
+      providerPubkey: string;
+      amountUsdc: string;
+      jobId?: string;
+      verified: true;
+    }): Promise<SolanaSettleReceipt> {
+      const body: Record<string, string | boolean> = {
+        escrowId: input.escrowId,
+        buyerPubkey: input.buyerPubkey,
+        providerPubkey: input.providerPubkey,
+        amountUsdc: input.amountUsdc.trim(),
+        verified: true,
+      };
+      if (input.jobId) body.jobId = input.jobId;
+      return request<unknown>("POST", "/v1/escrow/settle", body).then(readSettle);
     },
   };
 }
@@ -400,6 +457,66 @@ function readJob(payload: unknown): ConsoleJob {
       : null,
     buyerAgentId: typeof payload.buyerAgentId === "string" ? payload.buyerAgentId : "",
     sellerAgentId: typeof payload.sellerAgentId === "string" ? payload.sellerAgentId : "",
+  };
+}
+
+function readLock(payload: unknown): SolanaLockReceipt {
+  if (!isRecord(payload) || typeof payload.cluster !== "string" || typeof payload.broadcast !== "boolean") {
+    throw invalidResponse("Prepare-lock response was incomplete.");
+  }
+  if (typeof payload.escrowId !== "string" || typeof payload.transaction !== "string") {
+    throw invalidResponse("Prepare-lock response was incomplete.");
+  }
+  return {
+    cluster: payload.cluster,
+    broadcast: payload.broadcast,
+    escrowId: payload.escrowId,
+    jobId: typeof payload.jobId === "string" ? payload.jobId : null,
+    feePayer: typeof payload.feePayer === "string" ? payload.feePayer : "",
+    buyerPubkey: typeof payload.buyerPubkey === "string" ? payload.buyerPubkey : "",
+    amountUsdc: typeof payload.amountUsdc === "string" ? payload.amountUsdc : "",
+    quote: readFeeQuote(payload.quote),
+    transaction: payload.transaction,
+  };
+}
+
+function readSettle(payload: unknown): SolanaSettleReceipt {
+  if (!isRecord(payload) || typeof payload.cluster !== "string" || typeof payload.broadcast !== "boolean") {
+    throw invalidResponse("Settle response was incomplete.");
+  }
+  if (typeof payload.escrowId !== "string" || typeof payload.transaction !== "string") {
+    throw invalidResponse("Settle response was incomplete.");
+  }
+  return {
+    cluster: payload.cluster,
+    broadcast: payload.broadcast,
+    broadcastNote: typeof payload.broadcastNote === "string" ? payload.broadcastNote : null,
+    submitted: payload.submitted === true,
+    signature: typeof payload.signature === "string" ? payload.signature : null,
+    escrowId: payload.escrowId,
+    quote: readFeeQuote(payload.quote),
+    treasuryUsdcAta: typeof payload.treasuryUsdcAta === "string" ? payload.treasuryUsdcAta : "",
+    transaction: payload.transaction,
+  };
+}
+
+function readFeeQuote(payload: unknown): RosterFeeQuote {
+  if (
+    !isRecord(payload) ||
+    typeof payload.jobPriceUsdc !== "string" ||
+    typeof payload.percentFee !== "number" ||
+    typeof payload.baseFeeUsdc !== "string" ||
+    typeof payload.rosterFeeUsdc !== "string" ||
+    typeof payload.providerPayoutUsdc !== "string"
+  ) {
+    throw invalidResponse("Fee quote was incomplete.");
+  }
+  return {
+    jobPriceUsdc: payload.jobPriceUsdc,
+    percentFee: payload.percentFee,
+    baseFeeUsdc: payload.baseFeeUsdc,
+    rosterFeeUsdc: payload.rosterFeeUsdc,
+    providerPayoutUsdc: payload.providerPayoutUsdc,
   };
 }
 
