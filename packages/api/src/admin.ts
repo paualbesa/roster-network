@@ -208,6 +208,11 @@ export function summarizeJobs(jobs: readonly JobView[]): { counts: AdminJobCount
   };
 }
 
+/** Agents with status `active`. Suspended agents stay in the total count. */
+export function countOnlineAgents(agents: readonly { status: string }[]): number {
+  return agents.reduce((total, agent) => total + (agent.status === "active" ? 1 : 0), 0);
+}
+
 export function escrowStateForJob(status: JobStatus): AdminEscrowState {
   if (status === "held") return "locked";
   if (status === "released") return "released";
@@ -286,6 +291,7 @@ export function registerAdminRoutes<E extends Env>(app: Hono<E>, deps: AdminDeps
         accounts: directory.accounts.filter((account) => account.userId !== null).length,
         organizations: directory.accounts.length,
         agents: directory.agents.length,
+        agentsOnline: countOnlineAgents(directory.agents),
         listings: listed.length,
         jobs: summary.counts,
       },

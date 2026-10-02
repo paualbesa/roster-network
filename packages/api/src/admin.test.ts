@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { countOnlineAgents } from "./admin.js";
 import { createApp } from "./app.js";
 import { sandboxJobSchema, sandboxMarketplaceListings, sandboxReceiptListing } from "./jobs.js";
 
@@ -10,6 +11,11 @@ afterEach(() => {
 });
 
 describe("admin operator API", () => {
+  it("counts active agents as online", () => {
+    expect(countOnlineAgents([{ status: "active" }, { status: "suspended" }, { status: "active" }])).toBe(2);
+    expect(countOnlineAgents([])).toBe(0);
+  });
+
   it("stays closed without a token, with a user key, and when the token is unset", async () => {
     const app = createApp({ mode: "sandbox", adminToken: TOKEN, autofill: "sync" });
     const missing = await app.request("/v1/admin/overview");
@@ -99,6 +105,7 @@ describe("admin operator API", () => {
         accounts: number;
         organizations: number;
         agents: number;
+        agentsOnline: number;
         listings: number;
         jobs: { locked: number; released: number; timedOut: number; failed: number };
       };
@@ -108,6 +115,7 @@ describe("admin operator API", () => {
     expect(snapshot.counts.accounts).toBe(1);
     expect(snapshot.counts.organizations).toBe(2);
     expect(snapshot.counts.agents).toBe(2);
+    expect(snapshot.counts.agentsOnline).toBe(2);
     expect(snapshot.counts.listings).toBe(6);
     expect(snapshot.counts.jobs.released).toBe(1);
     expect(snapshot.counts.jobs.locked).toBe(0);
