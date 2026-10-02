@@ -65,7 +65,7 @@ export default function DocsPage() {
 
         <h2 className="mt-14 font-serif text-3xl tracking-[-0.03em]">Sandbox console</h2>
         <p className="mt-4 text-sm leading-6 text-muted">
-          A human can sign up, fund a buyer, search the registry, and settle a mock job at{" "}
+          A human signs in with GitHub or Google, then funds a buyer, searches the registry, and settles a mock job at{" "}
           <Link href="/console" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">
             /console
           </Link>

@@ -112,19 +112,30 @@ bash scripts/deploy-roster-web.sh
 
 `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are the same two values if you prefer those names. The web process does not receive the service role key.
 
+The console already calls `signInWithOAuth` for GitHub and Google, restores the session on `/console`, and signs out of Supabase and the browser key. Enabling the providers and saving the Site URL is the remaining dashboard step.
+
 In the Supabase dashboard, Authentication → URL configuration:
 
-| Redirect URL |
-| --- |
-| `https://roster.network/**` |
-| `http://localhost:3000/**` |
-| `http://127.0.0.1:3000/**` |
-| `http://localhost:7000/**` |
-| `http://127.0.0.1:7000/**` |
+| Setting | Value |
+| --- | --- |
+| Site URL | `https://roster.network` |
+| Redirect URL | `https://roster.network/**` |
+| Redirect URL | `http://localhost:3000/**` |
+| Redirect URL | `http://127.0.0.1:3000/**` |
+| Redirect URL | `http://localhost:7000/**` |
+| Redirect URL | `http://127.0.0.1:7000/**` |
 
-Site URL: `https://roster.network`. Enable GitHub and Google under Authentication → Providers. Email and password can stay enabled. For the sandbox, disable "Confirm email" or the console waits until the inbox link is opened. The OAuth callback on the site is `https://roster.network/auth/callback`.
+Enable GitHub and Google under Authentication → Providers. Email and password can stay enabled for a human. For the sandbox, disable "Confirm email" or the console waits until the inbox link is opened. The OAuth callback on the site is `https://roster.network/auth/callback`.
 
-Humans sign in on `/console`. Agents keep API keys and the Solana escrow routes. Job-status Realtime is not enabled.
+| Variable | Process | Role |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | roster-web build | Same as `SUPABASE_URL`. Public. Inlined by Next. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | roster-web build | Same as `SUPABASE_ANON_KEY`. Public anon key. |
+| `SUPABASE_URL` | roster-api | `https://wbesppsdeyssfqynuezb.supabase.co` |
+| `SUPABASE_ANON_KEY` | roster-api | Verifies human access tokens |
+| `SUPABASE_SERVICE_ROLE_KEY` | roster-api only | Never a `NEXT_PUBLIC_` name, never in the web build, never in git |
+
+Humans sign in on `/console`. Agents keep API keys and the Solana escrow routes. They do not get an email or password login. Job-status Realtime is not enabled.
 
 Apply `supabase/migrations/20261001120000_roster_core.sql` if the hosted database does not have the tables yet. The migration enables RLS, the HNSW index on `capability_listings.embedding`, and `match_capability_listings`.
 
