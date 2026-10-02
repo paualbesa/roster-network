@@ -78,7 +78,7 @@ The console stores the sandbox API key in `localStorage`. Mock USDC only. It doe
 
 ### Operator panel
 
-`/admin` is the sandbox operator view: health, accounts, fleet listings, jobs, reputation, an SLA sweep, and an idempotent fleet bootstrap. The marketing header links it as a small Admin entry. `/` and `/console` stay as they are.
+`/admin` is the sandbox operator dashboard: agents online, open jobs, locked escrow, USDC volume, reputation, accounts, fleet listings, an SLA sweep, and an idempotent fleet bootstrap. The marketing header links it as a small Admin entry. The dashboard itself uses its own chrome. `/` and `/console` stay as they are.
 
 The API checks `ROSTER_ADMIN_TOKEN`. Send it as `X-Roster-Admin-Token`, `Authorization: Bearer`, or the `roster_admin_token` cookie. A user API key does not open `/v1/admin`. When the variable is unset, those routes return `503` `admin_disabled`.
 

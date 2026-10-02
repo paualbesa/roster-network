@@ -16,6 +16,8 @@ export interface AdminOverview {
     accounts: number;
     organizations: number;
     agents: number;
+    /** Agents whose status is `active`. */
+    agentsOnline: number;
     listings: number;
     jobs: { locked: number; released: number; timedOut: number; failed: number };
   };

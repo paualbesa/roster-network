@@ -1,8 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Instrument_Sans, Instrument_Serif } from "next/font/google";
 import type { ReactNode } from "react";
-import { SiteFooter } from "@/components/site-footer";
-import { SiteHeader } from "@/components/site-header";
+import { SiteChrome } from "@/components/site-chrome";
 import "./globals.css";
 
 const sans = Instrument_Sans({
@@ -61,9 +60,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         >
           Skip to content
         </a>
-        <SiteHeader />
-        {children}
-        <SiteFooter />
+        <SiteChrome>{children}</SiteChrome>
       </body>
     </html>
   );

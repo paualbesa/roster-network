@@ -250,7 +250,8 @@ export const openApiDocument = {
     "/v1/admin/overview": {
       get: {
         security: [{ adminToken: [] }],
-        summary: "Operator snapshot: health, mode, counts, locked and released GMV, and take-rate already collected",
+        summary:
+          "Operator snapshot: health, mode, agents online, counts, locked and released GMV, and take-rate already collected",
         responses: {
           "200": { description: "Counts and GMV. No password hashes and no API keys." },
           "401": { description: "Admin token missing or incorrect." },
