@@ -3,7 +3,7 @@ import { Hire } from "@/components/console/hire";
 
 export const metadata: Metadata = {
   title: "Sandbox hire",
-  description: "Lock mock USDC in escrow for a listing and poll the job until it settles.",
+  description: "Lock mock USDC, show the Roster fee, and settle the sandbox Solana transaction after a verified result.",
 };
 
 export default async function ConsoleHirePage({

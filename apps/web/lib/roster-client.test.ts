@@ -92,6 +92,88 @@ describe("Roster client", () => {
     expect(job.sellerNetUsdc).toBe("0.990000");
     expect(job.status).toBe("released");
   });
+
+  it("prepares a mock lock and settles only with verified true", async () => {
+    const quote = {
+      jobPriceUsdc: "1.000000",
+      percentFee: 0.01,
+      baseFeeUsdc: "0.003000",
+      rosterFeeUsdc: "0.013000",
+      providerPayoutUsdc: "0.987000",
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sk_sandbox_once");
+      if (url.endsWith("/v1/escrow/prepare-lock")) {
+        expect(body).toEqual({
+          buyerPubkey: "buyer-key",
+          amountUsdc: "1.00",
+          escrowId: "esc_1",
+          jobId: "job_1",
+        });
+        expect(body).not.toHaveProperty("cluster");
+        return jsonResponse(
+          {
+            cluster: "mock",
+            broadcast: false,
+            escrowId: "esc_1",
+            jobId: "job_1",
+            feePayer: "fee-payer",
+            buyerPubkey: "buyer-key",
+            amountUsdc: "1.000000",
+            quote,
+            transaction: "lock-tx",
+          },
+          201,
+        );
+      }
+      expect(url.endsWith("/v1/escrow/settle")).toBe(true);
+      expect(body).toEqual({
+        escrowId: "esc_1",
+        buyerPubkey: "buyer-key",
+        providerPubkey: "provider-key",
+        amountUsdc: "1.000000",
+        jobId: "job_1",
+        verified: true,
+      });
+      expect(body).not.toHaveProperty("send");
+      return jsonResponse({
+        cluster: "mock",
+        broadcast: false,
+        broadcastNote: null,
+        submitted: false,
+        signature: "sandbox-sig",
+        escrowId: "esc_1",
+        quote,
+        treasuryUsdcAta: "treasury",
+        transaction: "settle-tx",
+      });
+    });
+    const client = createRosterClient({ baseUrl: "http://api.test", apiKey: "sk_sandbox_once", fetchImpl });
+    const locked = await client.prepareLock({
+      buyerPubkey: "buyer-key",
+      amountUsdc: "1.00",
+      escrowId: "esc_1",
+      jobId: "job_1",
+    });
+    expect(locked.broadcast).toBe(false);
+    expect(locked.cluster).toBe("mock");
+    expect(locked.quote.rosterFeeUsdc).toBe("0.013000");
+    expect(locked.quote.providerPayoutUsdc).toBe("0.987000");
+    const settled = await client.settleEscrow({
+      escrowId: locked.escrowId,
+      buyerPubkey: "buyer-key",
+      providerPubkey: "provider-key",
+      amountUsdc: locked.amountUsdc,
+      jobId: "job_1",
+      verified: true,
+    });
+    expect(settled.broadcast).toBe(false);
+    expect(settled.submitted).toBe(false);
+    expect(settled.quote).toEqual(locked.quote);
+    expect(settled.signature).toBe("sandbox-sig");
+  });
 });
 
 describe("readError", () => {

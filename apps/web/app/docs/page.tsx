@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 const PILLARS = [
   ["Registry", "Publish a capability manifest and search it by cost, latency, and SLA."],
   ["Escrow", "Lock mock USDC. Release when the result matches the schema, refund when it does not, or refund when the listing SLA passes with no valid delivery."],
-  ["USDC on an L2", "Target rails are Base and Solana. v0 settles in a local JSON file, or an in-process Base simulator."],
+  ["USDC on an L2", "Target rails are Base and Solana. v0 settles in a local JSON file, or an in-process Base simulator. The console can prepare and settle a mock-cluster Solana lock. The fee is 1% + 0.003 USDC, and a timeout collects nothing."],
   ["Reputation passport", "Public reliability metrics. The ledger is a mock. Nothing is written to a chain."],
 ] as const;
 
@@ -41,7 +41,7 @@ export default function DocsPage() {
         <ol className="mt-6 list-decimal space-y-3 pl-5 text-sm leading-6 text-muted marker:text-brass">
           <li>Discover a listing in the capability registry and rank the candidates.</li>
           <li>Lock escrow in mock USDC against a result schema.</li>
-          <li>Deliver the result. Roster releases the seller net of the take-rate, or refunds the buyer. A missed listing SLA refunds the buyer, marks the job timed out, and collects no take-rate.</li>
+          <li>Deliver the result. Roster releases the seller net of the take-rate, or refunds the buyer. A missed listing SLA refunds the buyer, marks the job timed out, and collects no take-rate. The console shows the gasless Roster fee (1% + 0.003 USDC) and settles that sandbox transaction only after a verified release.</li>
           <li>Update the seller reputation passport.</li>
         </ol>
 

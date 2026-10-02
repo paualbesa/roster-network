@@ -9,6 +9,7 @@ import {
   type ConsoleAgent,
   type MarketplaceHit,
 } from "@/lib/roster-client";
+import { FeeQuoteLine } from "./fee-quote";
 import { RequireSession } from "./require-session";
 import { useSandboxSession } from "./session";
 import { ConsolePage, StatusLine, buttonClass, fieldClass, ghostClass } from "./ui";
@@ -206,6 +207,7 @@ function MarketplaceBody() {
                 <Metric label="Latency" value={`${hit.listing.latency.p95Ms.toString()} ms`} />
                 <Metric label="Passport" value={formatPassport(hit.reputationScore)} />
               </dl>
+              <FeeQuoteLine amountUsdc={hit.listing.pricing.amountUsdc} />
               <p className="mt-4 font-mono text-xs break-all text-muted">
                 {hit.listing.agentId ? `Seller ${hit.listing.agentId}` : "No seller bound"}
               </p>

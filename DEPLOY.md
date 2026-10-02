@@ -74,6 +74,8 @@ The API also allows direct browser calls from `https://roster.network` and from 
 
 The console stores the sandbox API key in `localStorage`. Mock USDC only. It does not settle real payments.
 
+`/console/hire` calls `POST /v1/escrow/prepare-lock` and, after a verified release, `POST /v1/escrow/settle` through the same proxy. Leave `ROSTER_SOLANA_CLUSTER` at its default (`mock`). Do not set `ROSTER_SOLANA_SEND` or `ROSTER_SOLANA_ALLOW_MAINNET` for the console. Those switches stay documented under [Solana fee payer](#solana-fee-payer-sandbox) and stay unset in a sandbox deploy. A listing SLA timeout refunds the buyer. The hire receipt shows the Roster fee collected as zero and does not call settle.
+
 ### Operator panel
 
 `/admin` is the sandbox operator view: health, accounts, fleet listings, jobs, reputation, an SLA sweep, and an idempotent fleet bootstrap. The marketing header links it as a small Admin entry. `/` and `/console` stay as they are.

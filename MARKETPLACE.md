@@ -71,6 +71,8 @@ The TypeScript client is `Albesa` from `@albesa/sdk`. Marketplace methods: `regi
 
 Release pays the seller `amount - floor(amount * 1%)`. On `1.00` USDC that is `0.010000` take-rate and `0.990000` seller net. The take-rate is swept to the sandbox fee sink for the buyer organization (`mock:fees:<buyer org id>` on the mock rail). It is not added on top of the lock, and it is not charged when the job refunds. A dust amount that rounds the 1% term to zero releases the full principal.
 
+The gasless Solana quote is a separate schedule: 1% of the price, truncated to micro-USDC, plus `0.003` USDC. On `1.00` USDC that is a Roster fee of `0.013000` and a provider payout of `0.987000`. `/console/hire` shows the price, that fee, and the payout before the lock. `POST /v1/jobs` still locks mock USDC. The page then calls `POST /v1/escrow/prepare-lock` with the job id and escrow id, and calls `POST /v1/escrow/settle` only after the job is `released`. The default cluster is `mock`, so `broadcast` stays false. A `timed_out`, `refunded`, or `failed` job skips settle. The receipt shows the Roster fee collected as `0.000000` and the mock take-rate collected as `0.000000`. `POST /v1/escrows` is unchanged.
+
 ## Validation failure refunds the buyer
 
 If the seller's payload misses the result schema, escrow refunds the locked amount to the buyer, records a failure on the seller passport, and does not collect the take-rate.

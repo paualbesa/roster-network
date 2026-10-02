@@ -9,9 +9,21 @@ import {
   type ConsoleAgent,
   type ConsoleJob,
   type MarketplaceListing,
+  type SolanaLockReceipt,
+  type SolanaSettleReceipt,
 } from "@/lib/roster-client";
+import {
+  collectedOnRelease,
+  describeRosterFee,
+  quoteRosterFee,
+  sandboxRailProblem,
+  solanaJobPhase,
+  type SolanaJobPhase,
+} from "@/lib/roster-fee";
 import { sampleResult } from "@/lib/sample-result";
+import { sandboxParticipantPubkey } from "@/lib/sandbox-pubkey";
 import { defaultHireAmount, isPositiveUsdc } from "@/lib/usdc";
+import { FeeQuote } from "./fee-quote";
 import { RequireSession } from "./require-session";
 import { useSandboxSession } from "./session";
 import { ConsolePage, StatusLine, buttonClass, fieldClass, ghostClass } from "./ui";
@@ -24,7 +36,7 @@ export function Hire({ listingId }: { listingId: string }) {
     <ConsolePage
       eyebrow="Hire"
       title="Lock escrow, then settle."
-      lede="Creates a job against the registry, polls until it is released, timed out, failed, or refunded, and shows the receipt. If this account owns the seller, you can deliver a sandbox result without curl."
+      lede="Shows the job price, the Roster fee (1% + 0.003 USDC), and the provider payout. Creating a job locks mock USDC, then prepares a sandbox Solana lock. Settle runs after a verified release. The mock cluster does not broadcast. A listing SLA timeout refunds the buyer and collects no fee."
     >
       <RequireSession>
         <HireBody listingId={listingId} />
@@ -43,6 +55,12 @@ function HireBody({ listingId }: { listingId: string }) {
   const [schemaText, setSchemaText] = useState('{\n  "type": "object",\n  "properties": { "total": { "type": "string" } },\n  "required": ["total"]\n}');
   const [tags, setTags] = useState<string[]>([]);
   const [job, setJob] = useState<ConsoleJob | null>(null);
+  const [lock, setLock] = useState<SolanaLockReceipt | null>(null);
+  const [settlement, setSettlement] = useState<SolanaSettleReceipt | null>(null);
+  const [solanaNotice, setSolanaNotice] = useState("");
+  const [settleAttempt, setSettleAttempt] = useState(0);
+  const [settleFailed, setSettleFailed] = useState(false);
+  const settleStarted = useRef<string | null>(null);
   const [resultText, setResultText] = useState("");
   const [polling, setPolling] = useState(false);
   const [pollToken, setPollToken] = useState(0);
@@ -114,6 +132,87 @@ function HireBody({ listingId }: { listingId: string }) {
     };
   }, [job?.id, pollToken, session]);
 
+  const quoted = quoteRosterFee(job?.amountUsdc || amount);
+  const phase: SolanaJobPhase = solanaJobPhase({
+    quoteOk: quoted.ok,
+    hasLock: lock !== null,
+    hasSettlement: settlement !== null,
+    status: job?.status ?? "held",
+  });
+
+  useEffect(() => {
+    if (phase !== "refund-without-fee" || !job) return;
+    setSolanaNotice("The buyer is refunded in full. Settle was skipped, so the Roster fee was not collected.");
+  }, [phase, job]);
+
+  const settleJobId = job?.id ?? "";
+  const settleStatus = job?.status ?? "";
+  const settleAmount = job?.amountUsdc ?? "";
+  const settleBuyerId = job?.buyerAgentId ?? "";
+  const settleSellerId = job?.sellerAgentId ?? "";
+  const settleEscrowId = lock?.escrowId ?? "";
+  const settleCluster = lock?.cluster ?? "";
+  const settleBroadcast = lock?.broadcast ?? true;
+
+  useEffect(() => {
+    if (!session || phase !== "settle" || !settleJobId || !settleEscrowId) return;
+    const railProblem = sandboxRailProblem({ cluster: settleCluster, broadcast: settleBroadcast });
+    if (railProblem) return;
+    const attemptKey = `${settleJobId}:${settleAttempt.toString()}`;
+    if (settleStarted.current === attemptKey) return;
+    settleStarted.current = attemptKey;
+    let cancelled = false;
+    const client = createRosterClient({ apiKey: session.apiKey });
+    void (async () => {
+      try {
+        const [buyerPubkey, providerPubkey] = await Promise.all([
+          sandboxParticipantPubkey(`buyer:${settleBuyerId}`),
+          sandboxParticipantPubkey(`provider:${settleSellerId}`),
+        ]);
+        const settled = await client.settleEscrow({
+          escrowId: settleEscrowId,
+          jobId: settleJobId,
+          buyerPubkey,
+          providerPubkey,
+          amountUsdc: settleAmount,
+          verified: true,
+        });
+        if (cancelled) return;
+        const settledRail = sandboxRailProblem(settled);
+        if (settledRail) {
+          settleStarted.current = null;
+          setSettleFailed(true);
+          setError(settledRail);
+          return;
+        }
+        setSettleFailed(false);
+        setSettlement(settled);
+        setSolanaNotice("Settle signed on the mock cluster. The Roster fee is collected. Nothing was broadcast.");
+      } catch (cause) {
+        if (cancelled) return;
+        settleStarted.current = null;
+        setSettleFailed(true);
+        setError(rosterErrorMessage(cause));
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (settleStarted.current === attemptKey) settleStarted.current = null;
+    };
+  }, [
+    phase,
+    session,
+    settleAmount,
+    settleAttempt,
+    settleBroadcast,
+    settleBuyerId,
+    settleCluster,
+    settleEscrowId,
+    settleJobId,
+    settleSellerId,
+    settleStatus,
+  ]);
+
   async function onCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session) return;
@@ -150,10 +249,39 @@ function HireBody({ listingId }: { listingId: string }) {
         memo: listing ? `Sandbox console hire ${listing.id}` : "Sandbox console hire",
         ...(listing ? { listingId: listing.id } : {}),
       });
+      settleStarted.current = null;
+      setSettleAttempt(0);
+      setSettleFailed(false);
+      setLock(null);
+      setSettlement(null);
+      setSolanaNotice("");
       setJob(created);
       setResultText(JSON.stringify(sampleResult(schema), null, 2));
-      setNotice("Escrow is held. Polling for release, timeout, or failure.");
+      setNotice("Mock escrow is held. Polling for release, timeout, or failure.");
       setPollToken((value) => value + 1);
+      const preview = quoteRosterFee(created.amountUsdc);
+      if (!preview.ok) {
+        setSolanaNotice(`${preview.message} Prepare-lock was skipped. Mock escrow is still held.`);
+      } else {
+        try {
+          const buyerPubkey = await sandboxParticipantPubkey(`buyer:${created.buyerAgentId}`);
+          const prepared = await client.prepareLock({
+            buyerPubkey,
+            amountUsdc: created.amountUsdc,
+            escrowId: created.escrowId,
+            jobId: created.id,
+          });
+          const preparedRail = sandboxRailProblem(prepared);
+          if (preparedRail) {
+            setError(preparedRail);
+          } else {
+            setLock(prepared);
+            setSolanaNotice("Prepare-lock signed on the mock cluster. Nothing was broadcast.");
+          }
+        } catch (cause) {
+          setError(rosterErrorMessage(cause));
+        }
+      }
     } catch (cause) {
       setError(rosterErrorMessage(cause));
     } finally {
@@ -242,6 +370,10 @@ function HireBody({ listingId }: { listingId: string }) {
             className={fieldClass}
           />
         </div>
+        <FeeQuote amountUsdc={amount} />
+        <p className="text-xs leading-5 text-muted">
+          The Roster fee is 1% of the price plus 0.003 USDC. Provider payout is the price minus that fee. Timeout and refund collect nothing.
+        </p>
         <div className="flex flex-col gap-2">
           <label htmlFor="hire-schema" className="text-sm text-paper">
             Result schema
@@ -257,6 +389,9 @@ function HireBody({ listingId }: { listingId: string }) {
         <button type="submit" className={buttonClass} disabled={pending || polling}>
           {pending ? "Locking escrow…" : "Create job"}
         </button>
+        <p className="text-xs leading-5 text-muted">
+          This locks mock USDC with the existing job route, then calls prepare-lock on the mock cluster.
+        </p>
         {agents.length === 0 ? (
           <p className="text-sm text-muted">
             <Link href="/console/dashboard" className="text-brass underline decoration-brass/40 underline-offset-4">
@@ -270,8 +405,14 @@ function HireBody({ listingId }: { listingId: string }) {
       <div className="flex flex-col gap-4">
         {error ? <StatusLine tone="error">{error}</StatusLine> : null}
         {notice ? <StatusLine tone="ok">{notice}</StatusLine> : null}
+        {solanaNotice ? <StatusLine tone="muted">{solanaNotice}</StatusLine> : null}
         {polling ? <p className="text-sm text-muted">Polling job status…</p> : null}
-        {job ? <Receipt job={job} /> : null}
+        {job ? <Receipt job={job} lock={lock} settlement={settlement} phase={phase} /> : null}
+        {job && settleFailed && phase === "settle" && !settlement ? (
+          <button type="button" className={ghostClass} onClick={() => setSettleAttempt((value) => value + 1)}>
+            Retry sandbox settle
+          </button>
+        ) : null}
         {job && !isTerminalJobStatus(job.status) ? (
           <div className="flex flex-col gap-3 border border-line/10 bg-panel p-5">
             <h2 className="font-serif text-2xl tracking-[-0.03em]">Deliver a sandbox result</h2>
@@ -308,24 +449,60 @@ function HireBody({ listingId }: { listingId: string }) {
   );
 }
 
-function Receipt({ job }: { job: ConsoleJob }) {
-  const rows = [
+function Receipt({
+  job,
+  lock,
+  settlement,
+  phase,
+}: {
+  job: ConsoleJob;
+  lock: SolanaLockReceipt | null;
+  settlement: SolanaSettleReceipt | null;
+  phase: SolanaJobPhase;
+}) {
+  const parsed = quoteRosterFee(job.amountUsdc);
+  const quote = lock?.quote ?? (parsed.ok ? parsed.quote : null);
+  const view = quote ? describeRosterFee(quote, job.status) : null;
+  const solanaRows = [
+    ["Price", view ? `${view.priceUsdc} USDC` : job.amountUsdc],
+    ["Roster fee", view ? `${view.quotedFeeUsdc} USDC` : "—"],
+    ["Fee schedule", view?.schedule ?? "1% + 0.003 USDC"],
+    ["Roster fee collected", view ? `${view.collectedFeeUsdc} USDC` : "0.000000 USDC"],
+    ["Provider payout", view ? `${view.providerPayoutUsdc} USDC` : "—"],
+    ["Buyer refund", view ? `${view.buyerRefundUsdc} USDC` : "0.000000 USDC"],
+    ["Solana cluster", settlement?.cluster ?? lock?.cluster ?? "mock"],
+    ["Broadcast", settlement ? String(settlement.broadcast) : lock ? String(lock.broadcast) : "false"],
+    ["Prepare-lock", lock ? "Signed" : phase === "skip-fee" ? "Skipped" : "Pending"],
+    ["Settle", settlement ? "Signed" : phase === "refund-without-fee" ? "Skipped" : phase === "settle" ? "Signing" : "Waiting"],
+  ] as const;
+  const ledgerRows = [
     ["Status", jobStatusLabel(job.status)],
     ["Listing", job.listingName || job.listingId],
-    ["Locked", `${job.amountUsdc} USDC`],
-    ["Take-rate", job.takeRateUsdc],
-    ["Seller net", job.sellerNetUsdc],
+    ["Mock take-rate quoted", job.takeRateUsdc],
+    ["Mock take-rate collected", collectedOnRelease(job.status, job.takeRateUsdc)],
     ["Buyer balance", job.buyerBalanceUsdc],
     ["Seller balance", job.sellerBalanceUsdc],
   ] as const;
   return (
     <section className="border border-line/15 bg-panel" aria-label="Job receipt">
       <div className="border-b border-line/10 px-5 py-4">
-        <p className="font-mono text-[11px] tracking-[0.18em] text-muted uppercase">Receipt</p>
+        <p className="font-mono text-[11px] tracking-[0.18em] text-muted uppercase">Roster fee</p>
         <p className="mt-2 font-mono text-xs break-all text-paper">{job.id}</p>
       </div>
       <dl className="divide-y divide-line/10">
-        {rows.map(([label, value]) => (
+        {solanaRows.map(([label, value]) => (
+          <div key={label} className="flex items-baseline justify-between gap-6 px-5 py-3">
+            <dt className="font-mono text-[11px] tracking-[0.14em] text-muted uppercase">{label}</dt>
+            <dd className="text-right font-mono text-sm text-paper">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {view ? <p className="border-t border-line/10 px-5 py-4 text-sm leading-6 text-muted">{view.note}</p> : null}
+      <div className="border-t border-line/10 px-5 py-4">
+        <p className="font-mono text-[11px] tracking-[0.18em] text-muted uppercase">Mock USDC ledger</p>
+      </div>
+      <dl className="divide-y divide-line/10 border-t border-line/10">
+        {ledgerRows.map(([label, value]) => (
           <div key={label} className="flex items-baseline justify-between gap-6 px-5 py-3">
             <dt className="font-mono text-[11px] tracking-[0.14em] text-muted uppercase">{label}</dt>
             <dd className="text-right font-mono text-sm text-paper">{value}</dd>
