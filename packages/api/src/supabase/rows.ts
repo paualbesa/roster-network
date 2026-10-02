@@ -15,7 +15,12 @@ import {
   type CapabilityListing,
   type CapabilityRegistry,
 } from "@albesa/registry";
-import type { ReputationEventRecord, ReputationLedger, ReputationTotals } from "@albesa/reputation";
+import {
+  projectPassport,
+  type ReputationEventRecord,
+  type ReputationLedger,
+  type ReputationTotals,
+} from "@albesa/reputation";
 import type { ListingSellerBinding, MemoryJobStore, StoredJob } from "../jobs.js";
 import type { MemoryStore } from "../store.js";
 import { toVectorLiteral } from "./vector.js";
@@ -237,17 +242,8 @@ export function snapshotToRows(snapshot: RosterSnapshot): Record<string, Record<
       autofill: seller.autofill,
       created_at: seller.createdAt,
     })),
-    [ROSTER_TABLES.reputationTotals]: snapshot.reputationTotals.map((totals) => ({
-      agent_id: totals.agentId,
-      organization_id: totals.organizationId,
-      body: totals,
-    })),
-    [ROSTER_TABLES.reputationEvents]: snapshot.reputationEvents.map((event) => ({
-      id: event.id,
-      organization_id: event.organizationId,
-      agent_id: event.agentId,
-      body: event,
-    })),
+    [ROSTER_TABLES.reputationTotals]: snapshot.reputationTotals.map(reputationTotalsRow),
+    [ROSTER_TABLES.reputationEvents]: snapshot.reputationEvents.map(reputationEventRow),
   };
 }
 
@@ -370,10 +366,10 @@ export function rowsToSnapshot(tables: Record<string, Record<string, unknown>[]>
     });
   }
   for (const row of tables[ROSTER_TABLES.reputationTotals] ?? []) {
-    snapshot.reputationTotals.push(parseBody<ReputationTotals>(row.body, "reputation_totals"));
+    snapshot.reputationTotals.push(reputationTotalsFromRow(row));
   }
   for (const row of tables[ROSTER_TABLES.reputationEvents] ?? []) {
-    snapshot.reputationEvents.push(parseBody<ReputationEventRecord>(row.body, "reputation_events"));
+    snapshot.reputationEvents.push(reputationEventFromRow(row));
   }
   return snapshot;
 }
@@ -458,6 +454,101 @@ export const DELETE_ORDER: { table: string; column: string }[] = [
   { table: ROSTER_TABLES.organizations, column: "id" },
   { table: ROSTER_TABLES.walletState, column: "id" },
 ];
+
+function reputationTotalsRow(totals: ReputationTotals): Record<string, unknown> {
+  const passport = projectPassport(totals);
+  return {
+    agent_id: totals.agentId,
+    organization_id: totals.organizationId,
+    event_count: totals.eventCount,
+    success_count: totals.successCount,
+    failure_count: totals.failureCount,
+    error_count: totals.errorCount,
+    hallucination_count: totals.hallucinationCount,
+    latency_total_ms: totals.latencyTotalMs,
+    volume_settled_usdc: totals.volumeSettledUsdc,
+    success_rate: passport.metrics.successRate,
+    avg_latency_ms: passport.metrics.avgLatencyMs,
+    error_index: passport.metrics.errorIndex,
+    score: passport.score,
+    updated_at: totals.updatedAt,
+    body: totals,
+  };
+}
+
+function reputationEventRow(event: ReputationEventRecord): Record<string, unknown> {
+  return {
+    id: event.id,
+    organization_id: event.organizationId,
+    agent_id: event.agentId,
+    outcome: event.outcome,
+    latency_ms: event.latencyMs,
+    volume_usdc: event.volumeUsdc,
+    is_error: event.error,
+    hallucination: event.hallucination,
+    source_ref: event.sourceRef,
+    created_at: event.createdAt,
+    body: event,
+  };
+}
+
+/** Columns win when the passport migration is present. Older rows still use body. */
+function reputationTotalsFromRow(row: Record<string, unknown>): ReputationTotals {
+  if (!("event_count" in row)) return parseBody<ReputationTotals>(row.body, "reputation_totals");
+  const updatedAt = row.updated_at;
+  if (updatedAt !== null && updatedAt !== undefined && typeof updatedAt !== "string") {
+    throw new Error("reputation_totals.updated_at must be a string or null.");
+  }
+  return {
+    agentId: requiredString(row, "agent_id", "reputation_totals"),
+    organizationId: requiredString(row, "organization_id", "reputation_totals"),
+    eventCount: countField(row.event_count, "reputation_totals.event_count"),
+    successCount: countField(row.success_count, "reputation_totals.success_count"),
+    failureCount: countField(row.failure_count, "reputation_totals.failure_count"),
+    errorCount: countField(row.error_count, "reputation_totals.error_count"),
+    hallucinationCount: countField(row.hallucination_count, "reputation_totals.hallucination_count"),
+    latencyTotalMs: countField(row.latency_total_ms, "reputation_totals.latency_total_ms"),
+    volumeSettledUsdc: requiredString(row, "volume_settled_usdc", "reputation_totals"),
+    updatedAt: typeof updatedAt === "string" ? updatedAt : null,
+  };
+}
+
+function reputationEventFromRow(row: Record<string, unknown>): ReputationEventRecord {
+  if (!("outcome" in row)) return parseBody<ReputationEventRecord>(row.body, "reputation_events");
+  const outcome = row.outcome;
+  if (outcome !== "success" && outcome !== "failure") {
+    throw new Error("reputation_events.outcome is invalid.");
+  }
+  const sourceRef = row.source_ref;
+  if (sourceRef !== null && sourceRef !== undefined && typeof sourceRef !== "string") {
+    throw new Error("reputation_events.source_ref must be a string or null.");
+  }
+  if (typeof row.is_error !== "boolean") throw new Error("reputation_events.is_error must be a boolean.");
+  if (typeof row.hallucination !== "boolean") {
+    throw new Error("reputation_events.hallucination must be a boolean.");
+  }
+  return {
+    id: requiredString(row, "id", "reputation_events"),
+    agentId: requiredString(row, "agent_id", "reputation_events"),
+    organizationId: requiredString(row, "organization_id", "reputation_events"),
+    outcome,
+    latencyMs: countField(row.latency_ms, "reputation_events.latency_ms"),
+    volumeUsdc: requiredString(row, "volume_usdc", "reputation_events"),
+    error: row.is_error,
+    hallucination: row.hallucination,
+    sourceRef: typeof sourceRef === "string" ? sourceRef : null,
+    createdAt: requiredString(row, "created_at", "reputation_events"),
+  };
+}
+
+function countField(value: unknown, label: string): number {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  throw new Error(`${label} must be a non-negative integer.`);
+}
 
 function cloneWallet(snapshot: MockWalletSnapshot): MockWalletSnapshot {
   return {

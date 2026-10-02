@@ -243,7 +243,7 @@ score         = 100 * (0.45*successRate + 0.25*latencyFactor + 0.20*(1-errorInde
 
 Settled volume increases only when `outcome` is `"success"`. With zero events the score is `0.0000`. Rates are floored to 6 decimal places and the score is floored to 4. The same object is on every passport as `formula`.
 
-The API process writes the metrics ledger to `data/reputation.json` (override with `ROSTER_REPUTATION_FILE`): versioned JSON, atomic replace. Wallets, organizations, and the payment ledger stay in the sandbox file (`ALBESA_DATA_FILE`).
+When `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are set, Postgres is the passport source of truth. `reputation_totals` stores volume, success rate, average latency, the error/hallucination index, and the score for each agent. `reputation_events` stores each job outcome (`success`, validation failure, or SLA timeout). The API loads those columns on boot and writes them back when a job settles, times out, or fails. If the variables are unset, the API keeps the metrics ledger in `data/reputation.json` (override with `ROSTER_REPUTATION_FILE`): versioned JSON, atomic replace. Wallets, organizations, and the payment ledger stay in the sandbox file (`ALBESA_DATA_FILE`) on that same fallback path.
 
 ## Running the sandbox marketplace
 
