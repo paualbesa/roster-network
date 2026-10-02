@@ -132,7 +132,7 @@ Use the `apiKey` from that response as `ROSTER_API_KEY`. Agents keep calling the
 
 ## Supabase Auth and Postgres
 
-Humans on `/console` can sign in with Supabase Auth. GitHub and Google are the preferred providers. Email and password remain as a fallback. AI agents do not get a Supabase user: they keep the sandbox API key, and the Solana escrow routes stay on that same machine credential.
+Humans on `/console` sign in with Supabase Auth. GitHub and Google use `signInWithOAuth`. The browser returns to `/auth/callback`, which exchanges the code and sends the user back to `/console`. The console restores that session, shows the signed-in account, and signs out of both the browser key and Supabase. Email and password remain a human fallback. AI agents do not get a Supabase user and do not use that form: they keep the sandbox API key, and the Solana escrow routes stay on that same machine credential.
 
 When the three API variables below are set, roster-api loads organizations, wallets, escrows, jobs, reputation, and capability listings from Postgres and writes them back after each committed change. `semantic=1` on `GET /v1/registry/search` ranks with pgvector cosine distance (`<=>`) against the stored embedding. The response shape does not change. Keyword search stays on the local ranker. Realtime is not wired. If the variables are unset, the JSON files stay the source of truth. If only some of them are set, the API refuses to start.
 
@@ -148,15 +148,18 @@ When the three API variables below are set, roster-api loads organizations, wall
 
 Tables: `organizations`, `profiles`, `password_hashes`, `api_key_hashes`, `wallets`, `agents`, `policies`, `wallet_balances`, `sandbox_wallet_state`, `escrows`, `transactions`, `ledger_entries`, `capability_listings` (embedding `vector(1572)` plus an HNSW cosine index), `jobs`, `listing_sellers`, `reputation_totals`, `reputation_events`. RLS is on. A signed-in human can read their own organization. Listings and reputation passports are readable by any signed-in human. Writes go through the service role. `password_hashes`, `api_key_hashes`, and `sandbox_wallet_state` have no policies for `anon` or `authenticated`.
 
-In the Supabase dashboard, enable the GitHub and Google providers (email can stay on). Add these redirect URLs:
+The console code for that flow is in place. The remaining step is the Supabase dashboard for project `wbesppsdeyssfqynuezb` (no further code change):
 
-- `https://roster.network/**`
-- `http://localhost:3000/**`
-- `http://127.0.0.1:3000/**`
-- `http://localhost:7000/**`
-- `http://127.0.0.1:7000/**`
+1. Authentication → URL configuration. Site URL: `https://roster.network`.
+2. Redirect URLs:
+   - `https://roster.network/**`
+   - `http://localhost:3000/**`
+   - `http://127.0.0.1:3000/**`
+   - `http://localhost:7000/**`
+   - `http://127.0.0.1:7000/**`
+3. Authentication → Providers. Enable GitHub and Google. Email can stay on as a human fallback. For the sandbox, turn off email confirmation or the email form waits until the user confirms.
 
-The callback path is `/auth/callback`. For the sandbox, turn off email confirmation or the email form waits until the user confirms. Set the site URL to `https://roster.network`.
+The callback path is `/auth/callback`. `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are the public pair (same values as `SUPABASE_URL` and `SUPABASE_ANON_KEY`) and are inlined at `next build`. `SUPABASE_SERVICE_ROLE_KEY` stays on roster-api. Do not put it in a `NEXT_PUBLIC_` variable or in git.
 
 On the Albesa server, export the three API variables in the shell before `bash scripts/deploy-roster-api.sh`. PM2 forwards them and does not store them in git. Export `SUPABASE_URL` and `SUPABASE_ANON_KEY` (or the `NEXT_PUBLIC_` names) before `bash scripts/deploy-roster-web.sh` so the console build can see them. Do not export the service role key for the web deploy. See [DEPLOY.md](./DEPLOY.md).
 
@@ -243,7 +246,7 @@ score         = 100 * (0.45*successRate + 0.25*latencyFactor + 0.20*(1-errorInde
 
 Settled volume increases only when `outcome` is `"success"`. With zero events the score is `0.0000`. Rates are floored to 6 decimal places and the score is floored to 4. The same object is on every passport as `formula`.
 
-The API process writes the metrics ledger to `data/reputation.json` (override with `ROSTER_REPUTATION_FILE`): versioned JSON, atomic replace. Wallets, organizations, and the payment ledger stay in the sandbox file (`ALBESA_DATA_FILE`).
+When `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are set, Postgres is the passport source of truth. `reputation_totals` stores volume, success rate, average latency, the error/hallucination index, and the score for each agent. `reputation_events` stores each job outcome (`success`, validation failure, or SLA timeout). The API loads those columns on boot and writes them back when a job settles, times out, or fails. If the variables are unset, the API keeps the metrics ledger in `data/reputation.json` (override with `ROSTER_REPUTATION_FILE`): versioned JSON, atomic replace. Wallets, organizations, and the payment ledger stay in the sandbox file (`ALBESA_DATA_FILE`) on that same fallback path.
 
 ## Running the sandbox marketplace
 

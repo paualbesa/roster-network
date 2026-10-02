@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   clearBrowserSession,
   readBrowserSession,
@@ -12,9 +12,12 @@ import { beginSupabaseSignOut } from "@/lib/supabase/browser";
 interface SessionValue {
   session: SandboxSession | null;
   ready: boolean;
+  /** True while a Supabase cookie session is being restored into the sandbox key. */
+  linking: boolean;
   save: (session: SandboxSession) => void;
   acknowledge: () => void;
   clear: () => void;
+  setLinking: (linking: boolean) => void;
 }
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -22,35 +25,49 @@ const SessionContext = createContext<SessionValue | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SandboxSession | null>(null);
   const [ready, setReady] = useState(false);
+  const [linking, setLinkingState] = useState(true);
 
   useEffect(() => {
     setSession(readBrowserSession());
     setReady(true);
   }, []);
 
+  const save = useCallback((next: SandboxSession) => {
+    writeBrowserSession(next);
+    setSession(next);
+  }, []);
+
+  const acknowledge = useCallback(() => {
+    setSession((current) => {
+      if (!current) return current;
+      const next = { ...current, revealed: true };
+      writeBrowserSession(next);
+      return next;
+    });
+  }, []);
+
+  const setLinking = useCallback((next: boolean) => {
+    setLinkingState(next);
+  }, []);
+
+  const clear = useCallback(() => {
+    beginSupabaseSignOut();
+    clearBrowserSession();
+    setLinkingState(true);
+    setSession(null);
+  }, []);
+
   const value = useMemo<SessionValue>(
     () => ({
       session,
       ready,
-      save(next) {
-        writeBrowserSession(next);
-        setSession(next);
-      },
-      acknowledge() {
-        setSession((current) => {
-          if (!current) return current;
-          const next = { ...current, revealed: true };
-          writeBrowserSession(next);
-          return next;
-        });
-      },
-      clear() {
-        beginSupabaseSignOut();
-        clearBrowserSession();
-        setSession(null);
-      },
+      linking,
+      save,
+      acknowledge,
+      clear,
+      setLinking,
     }),
-    [ready, session],
+    [acknowledge, clear, linking, ready, save, session, setLinking],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

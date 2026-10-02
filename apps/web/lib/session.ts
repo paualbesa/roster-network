@@ -1,3 +1,5 @@
+import { readStoredAuthProvider, type HumanAuthProvider } from "./supabase/oauth";
+
 export const SANDBOX_SESSION_STORAGE_KEY = "roster.sandbox.session";
 
 /** Sandbox API key kept in localStorage. Not a wallet and not valid for real payments. */
@@ -6,6 +8,8 @@ export interface SandboxSession {
   email: string;
   /** False until the human dismisses the one-time key panel. */
   revealed: boolean;
+  /** How the human signed in. Absent on older browser sessions. Display only. */
+  provider?: HumanAuthProvider;
 }
 
 export function parseSandboxSession(raw: string | null): SandboxSession | null {
@@ -14,10 +18,12 @@ export function parseSandboxSession(raw: string | null): SandboxSession | null {
     const value: unknown = JSON.parse(raw);
     if (!isRecord(value) || typeof value.apiKey !== "string" || value.apiKey.trim() === "") return null;
     if (typeof value.email !== "string") return null;
+    const provider = readStoredAuthProvider(value.provider);
     return {
       apiKey: value.apiKey.trim(),
       email: value.email,
       revealed: value.revealed === true,
+      ...(provider ? { provider } : {}),
     };
   } catch {
     return null;
@@ -29,6 +35,7 @@ export function serializeSandboxSession(session: SandboxSession): string {
     apiKey: session.apiKey.trim(),
     email: session.email,
     revealed: session.revealed,
+    ...(session.provider ? { provider: session.provider } : {}),
   });
 }
 

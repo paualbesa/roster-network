@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { SANDBOX_DISCLAIMER } from "@/lib/site";
+import { describeSignedInAccount } from "@/lib/supabase/oauth";
 import { SessionProvider, useSandboxSession } from "./session";
 import { SupabaseSessionBridge } from "./supabase-bridge";
 
@@ -35,6 +36,7 @@ function ConsoleNav() {
   const pathname = usePathname();
   const { session, clear } = useSandboxSession();
   const [open, setOpen] = useState(false);
+  const account = session ? describeSignedInAccount(session) : null;
 
   return (
     <div className="border-b border-line/10">
@@ -60,13 +62,18 @@ function ConsoleNav() {
               {item.label}
             </Link>
           ))}
-          {session ? (
-            <button type="button" className="text-sm text-paper hover:text-brass" onClick={clear}>
-              Log out
-            </button>
+          {account ? (
+            <>
+              <span className="max-w-48 truncate text-sm text-muted" title={account.headline}>
+                {account.email || "Signed in"}
+              </span>
+              <button type="button" className="text-sm text-paper hover:text-brass" onClick={clear}>
+                Sign out
+              </button>
+            </>
           ) : (
             <Link href="/console/login" className="text-sm text-paper hover:text-brass">
-              Log in
+              Sign in
             </Link>
           )}
         </nav>
@@ -87,20 +94,25 @@ function ConsoleNav() {
               </li>
             ))}
             <li>
-              {session ? (
-                <button
-                  type="button"
-                  className="py-3 text-base text-paper"
-                  onClick={() => {
-                    clear();
-                    setOpen(false);
-                  }}
-                >
-                  Log out
-                </button>
+              {account ? (
+                <div className="py-3">
+                  <p className="truncate text-sm text-muted" title={account.headline}>
+                    {account.headline}
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 text-base text-paper"
+                    onClick={() => {
+                      clear();
+                      setOpen(false);
+                    }}
+                  >
+                    Sign out
+                  </button>
+                </div>
               ) : (
                 <Link href="/console/login" className="block py-3 text-base text-paper" onClick={() => setOpen(false)}>
-                  Log in
+                  Sign in
                 </Link>
               )}
             </li>
