@@ -18,6 +18,7 @@ import {
 } from "@/lib/roster-client";
 import { isPositiveUsdc } from "@/lib/usdc";
 import { ApiKeyPanel } from "./api-key-panel";
+import { NeedSearch } from "@/components/need-search";
 import { RequireSession } from "./require-session";
 import { useSandboxSession } from "./session";
 import { ConsolePage, StatusLine, buttonClass, fieldClass } from "./ui";
@@ -30,6 +31,9 @@ export function Dashboard() {
       lede="Sandbox mode grants mock USDC to the organization treasury. Move some of it onto a buyer before you hire. Create a second agent if you want to bind a seller on your own listings."
     >
       <RequireSession>
+        <div className="mb-10">
+          <NeedSearch variant="console" />
+        </div>
         <DashboardBody />
       </RequireSession>
     </ConsolePage>

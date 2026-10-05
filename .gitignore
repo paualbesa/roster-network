@@ -5,6 +5,9 @@ dist/
 *.tsbuildinfo
 coverage/
 data/
+# Source folders that happen to be named data.
+!packages/api/src/data/
+!apps/web/app/data/
 .env
 .env.*
 !.env.example

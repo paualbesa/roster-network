@@ -262,3 +262,64 @@ function readCode(payload: unknown): string | null {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+export interface AdminUnmetNeed {
+  id: string;
+  need: string;
+  normalized: string;
+  count: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  bestScore: number;
+  bestListingName: string | null;
+  budgetUsdc: string | null;
+  kind: string | null;
+  organizationId: string | null;
+}
+
+export interface AdminDemand {
+  totals: { entries: number; requests: number };
+  entries: AdminUnmetNeed[];
+}
+
+export interface AdminDataProduct {
+  slug: string;
+  name: string;
+  kind: string;
+  priceUsdc: string;
+  refreshCadence: string;
+  live: boolean;
+  status: string;
+  lastRefreshedAt: string | null;
+  nextRefreshAt: string | null;
+  rowCount: number;
+  bytes: number;
+  lastError: string | null;
+  source: string | null;
+  license: string | null;
+  listingId?: string | null;
+}
+
+export interface AdminDataCatalog {
+  store: string | null;
+  products: AdminDataProduct[];
+}
+
+/** Unmet needs as CSV for planning the next data products. */
+export function demandCsv(entries: readonly AdminUnmetNeed[]): string {
+  const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+  const lines = ["need,count,last_seen_at,best_match,best_score,budget_usdc"];
+  for (const entry of entries) {
+    lines.push(
+      [
+        quote(entry.need),
+        entry.count.toString(),
+        entry.lastSeenAt,
+        quote(entry.bestListingName ?? ""),
+        entry.bestScore.toFixed(2),
+        entry.budgetUsdc ?? "",
+      ].join(","),
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}

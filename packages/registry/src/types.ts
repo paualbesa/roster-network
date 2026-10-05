@@ -2,6 +2,37 @@ export type PricingModel = "per_call" | "per_1k_tokens" | "free";
 
 export type ListingStatus = "active" | "paused";
 
+/** `service` runs work on the buyer's input. The other kinds sell data Roster gathers. */
+export type ListingKind = "service" | "dataset" | "feed" | "lookup";
+
+export const LISTING_KINDS: readonly ListingKind[] = ["service", "dataset", "feed", "lookup"];
+
+/** Where the data comes from and the terms it is resold under. */
+export interface DataSourceAttribution {
+  name: string;
+  url: string;
+  /** SPDX-style or plain-text license, e.g. "CC0-1.0", "CC-BY-4.0", "Public domain (US Government)". */
+  license: string;
+  licenseUrl: string;
+  /** Text buyers must carry when they republish the data. */
+  attribution: string;
+}
+
+/** Static description of a data product. Live freshness and row counts come from the data catalog. */
+export interface DataProductInfo {
+  slug: string;
+  sources: DataSourceAttribution[];
+  /** Human cadence, e.g. "hourly", "every 6 hours", "daily", "weekly". */
+  refreshCadence: string;
+  refreshIntervalS: number;
+  /** Delivery formats, e.g. ["json", "csv"]. */
+  formats: string[];
+  /** `signed_url` for downloads, `inline` for query results. */
+  delivery: "signed_url" | "inline";
+  /** Column names and types buyers receive. */
+  columns: { name: string; type: string; description: string }[];
+}
+
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 /** JSON Schema document stored with the listing. Validated as JSON, not executed. */
@@ -71,6 +102,10 @@ export interface CapabilityListing {
    * organization's only agent. It never guesses among several agents.
    */
   agentId: string | null;
+  /** Absent on listings published before data products existed; read as "service". */
+  kind?: ListingKind;
+  /** Data product metadata. Null or absent for services. */
+  data?: DataProductInfo | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -94,6 +129,8 @@ export interface CapabilitySearchQuery {
    * When false, relevance stays on the keyword path.
    */
   semantic: boolean;
+  /** Only these kinds. Empty keeps every kind. */
+  kinds?: ListingKind[];
 }
 
 export interface CapabilitySearchHit {
@@ -136,4 +173,6 @@ export interface RawSearchParams {
   withReputation: string | undefined;
   /** "1" or "true" ranks by stored cosine similarity. "0" or "false" keeps keyword search. */
   semantic: string | undefined;
+  /** Comma-separated kinds: service, dataset, feed, lookup. */
+  kind?: string | undefined;
 }

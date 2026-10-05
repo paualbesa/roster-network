@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { addUsdc, type RuntimeMode, type WalletRail } from "@albesa/core";
 import type { CapabilityListing, CapabilityRegistry } from "@albesa/registry";
 import type { Context, Env, Hono } from "hono";
-import { bootstrapSandboxFleet, SANDBOX_FLEET_ORG_NAME } from "./fleet.js";
+import { appDataCatalog, bootstrapDataProducts, bootstrapSandboxFleet, SANDBOX_FLEET_ORG_NAME } from "./fleet.js";
 import type { JobOrchestrator, JobStatus, JobView, ListingSellerBinding } from "./jobs.js";
 import {
   AgentFinanceService,
@@ -386,7 +386,8 @@ export function registerAdminRoutes<E extends Env>(app: Hono<E>, deps: AdminDeps
   app.post("/v1/admin/fleet/bootstrap", async (c) => {
     assertSandboxOps(deps.mode);
     const fleet = await bootstrapSandboxFleet(deps.appHandle);
-    return c.json({ fleet });
+    const data = appDataCatalog(deps.appHandle) ? await bootstrapDataProducts(deps.appHandle) : null;
+    return c.json({ fleet, data });
   });
 }
 

@@ -5,6 +5,15 @@ export { DEFAULT_RATE_LIMITS, IdempotencyCache, RateLimiter, resolveRateLimitCon
 export type { RateLimitConfig, RateLimitRule } from "./http.js";
 export { hashPassword, verifyPassword } from "./password.js";
 export { startExpirySweeper, resolveExpireIntervalMs } from "./sweeper.js";
+export { appDataCatalog, bootstrapDataProducts, DATA_AGENT_NAME, DATA_ORG_NAME } from "./fleet.js";
+export { DataCatalog, dataProductDraft } from "./data/catalog.js";
+export type { DataProductPublic } from "./data/catalog.js";
+export { DATA_PRODUCTS } from "./data/products/index.js";
+export { LocalDataStore, SupabaseDataStore, DATA_BUCKET } from "./data/store.js";
+export type { DataStore, DataProductMeta } from "./data/store.js";
+export type { DataProductSpec } from "./data/types.js";
+export { DemandLog, normalizeNeed } from "./demand.js";
+export { matchNeed, buyListing, NEED_MATCH_THRESHOLD } from "./need.js";
 export {
   bootstrapSandboxFleet,
   sweepExpiredJobs,

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LedgerCard } from "@/components/ledger-card";
 import { LiveMarketplace } from "@/components/live-marketplace";
+import { NeedSearch } from "@/components/need-search";
 import { SITE_URL } from "@/lib/site";
 import { SdkSample } from "@/components/sdk-sample";
 import { WaitlistForm } from "@/components/waitlist-form";
@@ -108,6 +109,22 @@ export default function HomePage() {
         // Static object defined above. No user input reaches it.
         dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA).replace(/</g, "\\u003c") }}
       />
+      <section id="need" className="relative border-b border-line/10" aria-label="What do you need?">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(196,163,106,0.16),transparent_60%)]"
+        />
+        <div className="relative mx-auto max-w-5xl px-6 pt-14 pb-12 lg:pt-20">
+          <NeedSearch variant="hero" />
+          <p className="mt-6 text-sm text-muted">
+            Data products with license and freshness on every result.{" "}
+            <Link href="/data" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">
+              Browse Roster Data
+            </Link>
+          </p>
+        </div>
+      </section>
+
       <section className="relative overflow-hidden border-b border-line/10">
         <div
           aria-hidden="true"

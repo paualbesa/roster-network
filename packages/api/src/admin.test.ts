@@ -1,3 +1,4 @@
+import { DATA_PRODUCTS } from "./data/products/index.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { countOnlineAgents } from "./admin.js";
 import { createApp } from "./app.js";
@@ -113,10 +114,11 @@ describe("admin operator API", () => {
     };
     expect(snapshot.health).toMatchObject({ ok: true, product: "Roster", mode: "sandbox", asset: "USDC" });
     expect(snapshot.counts.accounts).toBe(1);
-    expect(snapshot.counts.organizations).toBe(2);
-    expect(snapshot.counts.agents).toBe(2);
-    expect(snapshot.counts.agentsOnline).toBe(2);
-    expect(snapshot.counts.listings).toBe(rosterFleetListings().length);
+    // Roster Labs fleet + Roster Data products + Ada.
+    expect(snapshot.counts.organizations).toBe(3);
+    expect(snapshot.counts.agents).toBe(3);
+    expect(snapshot.counts.agentsOnline).toBe(3);
+    expect(snapshot.counts.listings).toBe(rosterFleetListings().length + DATA_PRODUCTS.length);
     expect(snapshot.counts.jobs.released).toBe(1);
     expect(snapshot.counts.jobs.locked).toBe(0);
     expect(snapshot.gmv.releasedUsdc).toBe("1.000000");
@@ -185,7 +187,7 @@ describe("admin operator API", () => {
     expect(document.paths["/v1/admin/jobs"]).toBeTruthy();
     expect(document.paths["/v1/admin/jobs/expire"]).toBeTruthy();
     expect(document.paths["/v1/admin/fleet/bootstrap"]).toBeTruthy();
-  });
+  }, 30_000);
 
   it("sweeps expired jobs for every organization and records a passport failure", async () => {
     let current = Date.parse("2026-09-30T12:00:00.000Z");

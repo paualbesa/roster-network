@@ -9,7 +9,9 @@ import {
   type ConsoleAgent,
   type MarketplaceHit,
 } from "@/lib/roster-client";
+import { kindLabel } from "@/lib/need";
 import { FeeQuoteLine } from "./fee-quote";
+import { NeedSearch } from "@/components/need-search";
 import { RequireSession } from "./require-session";
 import { useSandboxSession } from "./session";
 import { ConsolePage, StatusLine, buttonClass, fieldClass, ghostClass } from "./ui";
@@ -22,6 +24,9 @@ export function Marketplace() {
       lede="Search the capability registry by query. Turn on semantic search or passport ranking when you want those signals in the request. Price, latency, and passport are on each result."
     >
       <RequireSession>
+        <div className="mb-10">
+          <NeedSearch variant="console" />
+        </div>
         <MarketplaceBody />
       </RequireSession>
     </ConsolePage>
@@ -187,7 +192,21 @@ function MarketplaceBody() {
             <li key={hit.listing.id} className="border border-line/10 bg-panel p-5 md:p-6">
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <h2 className="font-serif text-3xl tracking-[-0.03em]">{hit.listing.name}</h2>
+                  <p className="flex flex-wrap items-center gap-2 font-mono text-[10px] tracking-[0.12em] uppercase">
+                    <span className={`rounded-full px-2.5 py-1 ${hit.listing.kind === "service" ? "bg-line/10 text-muted" : "bg-sage/15 text-sage"}`}>
+                      {kindLabel(hit.listing.kind)}
+                    </span>
+                    {hit.listing.data ? (
+                      <span className="text-muted normal-case tracking-normal">
+                        {hit.listing.data.refreshCadence} · {hit.listing.data.source} · {hit.listing.data.license}
+                      </span>
+                    ) : null}
+                  </p>
+                  <h2 className="mt-2 font-serif text-3xl tracking-[-0.03em]">
+                    <Link href={`/listings/${encodeURIComponent(hit.listing.id)}`} className="hover:text-brass">
+                      {hit.listing.name}
+                    </Link>
+                  </h2>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">{hit.listing.description}</p>
                   {hit.listing.tags.length > 0 ? (
                     <p className="mt-3 font-mono text-[11px] tracking-[0.14em] text-brass uppercase">

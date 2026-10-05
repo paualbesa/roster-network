@@ -17,6 +17,8 @@ import { createAnonClient, createServiceClient } from "./client.js";
 import type { SupabaseConfig } from "./env.js";
 import { SupabaseMirror, createSupabaseTableClient } from "./mirror.js";
 import { KYC_BUCKET, SupabaseKycDocumentStore } from "../kyc.js";
+import { DATA_BUCKET, SupabaseDataStore, type SupabaseDataClientLike } from "../data/store.js";
+import { DemandLog, SupabaseDemandPersistence, type SupabaseDemandClientLike } from "../demand.js";
 import { UPSERT_ORDER, applySnapshot, rowsToSnapshot } from "./rows.js";
 
 export interface SupabaseApp {
@@ -71,6 +73,11 @@ export async function openSupabaseApp(options: {
     ...(options.autofill ? { autofill: options.autofill } : {}),
     ...(options.solana ? { solana: options.solana } : {}),
     kycDocuments: new SupabaseKycDocumentStore(serviceClient.storage, process.env.ROSTER_KYC_BUCKET?.trim() || KYC_BUCKET),
+    dataStore:
+      process.env.ROSTER_DATA_PRODUCTS?.trim() === "0"
+        ? null
+        : new SupabaseDataStore(serviceClient as unknown as SupabaseDataClientLike, process.env.ROSTER_DATA_BUCKET?.trim() || DATA_BUCKET),
+    demandLog: new DemandLog(new SupabaseDemandPersistence(serviceClient as unknown as SupabaseDemandClientLike)),
     supabase: {
       verifyAccessToken: (accessToken) => verifySupabaseAccessToken(anonClient, accessToken),
       matchCapabilities: (query, limit) => mirror.matchCapabilities(query, limit),
