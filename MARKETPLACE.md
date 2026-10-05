@@ -18,7 +18,7 @@ The process prints a released receipt job of `1.000000` USDC. The seller receive
 5. Drift publishes the same receipt parser at a lower price and a faster SLA, then records a failed job so its passport score is `20`.
 6. Northwind searches `parse receipts` with `withReputation=1`. Harbor ranks first. A new seller with no events is neutral (`50`), not zero, and that still beats Drift's failed passport.
 7. Northwind opens `POST /v1/jobs` for `1.00` USDC. Roster locks escrow from the buyer agent to Harbor's seller. Drift cannot read the job.
-8. Harbor delivers `{ "total": "12.50" }`. The result matches the schema, so escrow releases the seller net of the 1% take-rate and writes the passport.
+8. Harbor delivers `{ "total": "12.50" }`. The result matches the schema, so escrow releases the seller net of the 1% take-rate. The seller passport records the settled volume. The buyer passport records the same success with zero volume, so the hire shows up on both passports without counting GMV twice.
 9. Northwind searches `compute arb` with tag `arb`, locks `0.50` USDC against Compute arb, and Harbor delivers the fixture from `sandboxExecute`. The result schema is `sandboxJobSchema("Compute arb")`, the same object stored as the listing `outputSchema`. Escrow releases `0.495000` to the seller.
 
 `pnpm demo:job` is the same settlement inside one organization. Use `demo:marketplace` when you want the two-organization story.

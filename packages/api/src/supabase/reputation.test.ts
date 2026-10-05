@@ -191,17 +191,22 @@ describe("reputation passport postgres", () => {
 
     const totals = await io.selectAll("reputation_totals");
     const events = await io.selectAll("reputation_events");
-    expect(totals).toHaveLength(1);
-    expect(events.map((event) => event.outcome)).toEqual(["success", "failure", "failure"]);
-    expect(events.map((event) => event.is_error)).toEqual([false, true, true]);
-    expect(events.map((event) => event.latency_ms)).toEqual([500, 900, 400]);
-    expect(events.map((event) => event.volume_usdc)).toEqual(["1.000000", "1.000000", "1.000000"]);
+    expect(totals).toHaveLength(2);
+    const sellerEvents = events.filter((event) => event.agent_id === sellerId);
+    const buyerEvents = events.filter((event) => event.agent_id === buyerId);
+    expect(sellerEvents.map((event) => event.outcome)).toEqual(["success", "failure", "failure"]);
+    expect(sellerEvents.map((event) => event.is_error)).toEqual([false, true, true]);
+    expect(sellerEvents.map((event) => event.latency_ms)).toEqual([500, 900, 400]);
+    expect(sellerEvents.map((event) => event.volume_usdc)).toEqual(["1.000000", "1.000000", "1.000000"]);
+    expect(buyerEvents.map((event) => event.outcome)).toEqual(["success"]);
+    expect(buyerEvents.map((event) => event.is_error)).toEqual([false]);
+    expect(buyerEvents.map((event) => event.latency_ms)).toEqual([500]);
+    expect(buyerEvents.map((event) => event.volume_usdc)).toEqual(["0.000000"]);
     expect(events.every((event) => event.hallucination === false)).toBe(true);
-    expect(events.every((event) => event.agent_id === sellerId && event.organization_id === org.organizationId)).toBe(
-      true,
-    );
+    expect(events.every((event) => event.organization_id === org.organizationId)).toBe(true);
 
-    const row = totals[0];
+    const row = totals.find((entry) => entry.agent_id === sellerId);
+    const buyerRow = totals.find((entry) => entry.agent_id === buyerId);
     expect(row).toMatchObject({
       agent_id: sellerId,
       organization_id: org.organizationId,
@@ -212,6 +217,15 @@ describe("reputation passport postgres", () => {
       hallucination_count: 0,
       volume_settled_usdc: "1.000000",
     });
+    expect(buyerRow).toMatchObject({
+      agent_id: buyerId,
+      organization_id: org.organizationId,
+      event_count: 1,
+      success_count: 1,
+      failure_count: 0,
+      error_count: 0,
+      volume_settled_usdc: "0.000000",
+    });
 
     const restored = rowsToSnapshot({
       reputation_totals: totals,
@@ -219,7 +233,7 @@ describe("reputation passport postgres", () => {
     });
     const ledger = new MemoryReputationLedger();
     ledger.replaceAll(restored.reputationTotals, restored.reputationEvents);
-    const totalsRow = restored.reputationTotals[0];
+    const totalsRow = restored.reputationTotals.find((entry) => entry.agentId === sellerId);
     expect(totalsRow).toBeTruthy();
     const passport = projectPassport(totalsRow!);
     expect(row?.success_rate).toBe(passport.metrics.successRate);
