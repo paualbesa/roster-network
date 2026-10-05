@@ -40,6 +40,10 @@ else
   echo "note: Supabase env is unset; the console keeps email and password against the API"
 fi
 
+# Canonical links, the sitemap, and Open Graph images use this origin.
+export NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://roster.network}"
+echo "note: site URL $NEXT_PUBLIC_SITE_URL"
+
 echo "== build apps/web =="
 pnpm --filter web build
 

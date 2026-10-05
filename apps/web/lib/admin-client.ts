@@ -11,7 +11,18 @@ export class AdminClientError extends Error {
 }
 
 export interface AdminOverview {
-  health: { ok: boolean; product: string; mode: string; rail: string; asset: string };
+  health: {
+    ok: boolean;
+    product: string;
+    mode: string;
+    rail: string;
+    asset: string;
+    /** Commit the API runs. Older APIs omit it. */
+    version?: string;
+    uptimeS?: number;
+  };
+  /** Developer waitlist counts. Older APIs omit it. */
+  waitlist?: { total: number; last7d: number };
   counts: {
     accounts: number;
     organizations: number;
@@ -109,6 +120,34 @@ export interface AdminReputation {
     error: boolean;
     sourceRef: string | null;
   }[];
+}
+
+export interface AdminWaitlistEntry {
+  email: string;
+  source: string | null;
+  createdAt: string;
+}
+
+/** CSV for the waitlist export. Quotes every field and neutralises spreadsheet formulas. */
+export function waitlistCsv(entries: readonly AdminWaitlistEntry[]): string {
+  const cell = (value: string) => {
+    const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+  const lines = [["email", "source", "created_at"].map(cell).join(",")];
+  for (const entry of entries) lines.push([entry.email, entry.source ?? "", entry.createdAt].map(cell).join(","));
+  return `${lines.join("\n")}\n`;
+}
+
+/** `93784` → `1d 2h`. */
+export function formatUptime(seconds: number | undefined): string {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return "—";
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  if (days > 0) return `${days.toString()}d ${hours.toString()}h`;
+  if (hours > 0) return `${hours.toString()}h ${minutes.toString()}m`;
+  return `${minutes.toString()}m`;
 }
 
 export type JobFilter = "all" | "locked" | "released" | "timed_out" | "failed";

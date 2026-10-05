@@ -3,8 +3,16 @@ import { parseWaitlist } from "./waitlist";
 
 describe("parseWaitlist", () => {
   it("accepts a developer or operator address and drops it", () => {
-    expect(parseWaitlist({ email: "ada@example.com", role: "developer" })).toEqual({ ok: true });
-    expect(parseWaitlist({ email: "  ops@example.com  ", role: "operator" })).toEqual({ ok: true });
+    expect(parseWaitlist({ email: "ada@example.com", role: "developer" })).toEqual({
+      ok: true,
+      email: "ada@example.com",
+      role: "developer",
+    });
+    expect(parseWaitlist({ email: "  ops@example.com  ", role: "operator" })).toEqual({
+      ok: true,
+      email: "ops@example.com",
+      role: "operator",
+    });
   });
 
   it("rejects malformed payloads", () => {

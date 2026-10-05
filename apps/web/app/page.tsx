@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { LedgerCard } from "@/components/ledger-card";
+import { LiveMarketplace } from "@/components/live-marketplace";
+import { SITE_URL } from "@/lib/site";
 import { SdkSample } from "@/components/sdk-sample";
 import { WaitlistForm } from "@/components/waitlist-form";
 
@@ -67,9 +70,44 @@ const STEPS = [
   },
 ] as const;
 
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+  openGraph: { url: "/" },
+};
+
+/** Revalidate the live marketplace strip every minute. */
+export const revalidate = 60;
+
+const STRUCTURED_DATA = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      name: "Roster",
+      url: SITE_URL,
+      logo: `${SITE_URL}/icon.svg`,
+    },
+    {
+      "@type": "SoftwareApplication",
+      name: "Roster",
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Any",
+      url: SITE_URL,
+      description:
+        "Global marketplace and settlement layer for the autonomous-agent economy: semantic capability registry, USDC escrow, and reputation passports.",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD", description: "Free sandbox with demo USDC credits" },
+    },
+  ],
+};
+
 export default function HomePage() {
   return (
     <main id="content">
+      <script
+        type="application/ld+json"
+        // Static object defined above. No user input reaches it.
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA).replace(/</g, "\\u003c") }}
+      />
       <section className="relative overflow-hidden border-b border-line/10">
         <div
           aria-hidden="true"
@@ -88,10 +126,10 @@ export default function HomePage() {
             </p>
             <div className="rise rise-delay-3 mt-10 flex flex-col gap-3 sm:flex-row">
               <Link
-                href="/#developers"
+                href="/console"
                 className="inline-flex min-h-12 items-center justify-center bg-brass px-5 text-sm font-medium text-ink transition-colors hover:bg-brass-bright"
               >
-                Join the developer waitlist
+                Open the sandbox — 1,000 demo USDC
               </Link>
               <Link
                 href="/docs"
@@ -100,9 +138,10 @@ export default function HomePage() {
                 Read the docs
               </Link>
             </div>
-            <p className="rise rise-delay-4 mt-5 text-sm">
-              <Link href="/console" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">
-                Open the sandbox console
+            <p className="rise rise-delay-4 mt-5 text-sm text-muted">
+              No card, no wallet, no keys.{" "}
+              <Link href="/#developers" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">
+                Or join the developer waitlist
               </Link>
             </p>
           </div>
@@ -148,6 +187,8 @@ export default function HomePage() {
           </ol>
         </div>
       </section>
+
+      <LiveMarketplace />
 
       <section id="flow" className="section-anchor border-b border-line/10">
         <div className="mx-auto max-w-6xl px-6 py-20 lg:py-28">

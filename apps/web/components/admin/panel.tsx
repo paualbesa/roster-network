@@ -12,8 +12,11 @@ import {
   type AdminListing,
   type AdminOverview,
   type AdminReputation,
+  type AdminWaitlistEntry,
   type JobFilter,
   AdminClientError,
+  formatUptime,
+  waitlistCsv,
 } from "@/lib/admin-client";
 import {
   formatOperatorTime,
@@ -39,8 +42,11 @@ const SECTIONS = [
   { id: "fleet", label: "Fleet" },
   { id: "jobs", label: "Jobs" },
   { id: "reputation", label: "Reputation" },
+  { id: "waitlist", label: "Waitlist" },
   { id: "ops", label: "Ops" },
 ] as const;
+
+const AUTO_REFRESH_MS = 30_000;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
 
@@ -196,6 +202,8 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [listings, setListings] = useState<AdminListing[]>([]);
   const [jobs, setJobs] = useState<AdminJob[]>([]);
   const [reputation, setReputation] = useState<AdminReputation | null>(null);
+  const [waitlist, setWaitlist] = useState<AdminWaitlistEntry[]>([]);
+  const [autoRefresh, setAutoRefresh] = useState(false);
   const [filter, setFilter] = useState<JobFilter>("all");
   const [section, setSection] = useState<SectionId>("overview");
   const [detail, setDetail] = useState<AdminJobDetail | null>(null);
@@ -207,13 +215,19 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
 
   const load = useCallback(async () => {
     setError("");
-    const [nextOverview, nextAccounts, nextListings, nextJobs, nextReputation] = await Promise.all([
+    const [nextOverview, nextAccounts, nextListings, nextJobs, nextReputation, nextWaitlist] = await Promise.all([
       adminRequest<AdminOverview>("/v1/admin/overview"),
       adminRequest<{ accounts: AdminAccount[] }>("/v1/admin/accounts"),
       adminRequest<{ listings: AdminListing[] }>("/v1/admin/listings"),
       adminRequest<{ jobs: AdminJob[] }>("/v1/admin/jobs"),
       adminRequest<AdminReputation>("/v1/admin/reputation"),
+      // Older APIs have no waitlist route. Keep the rest of the panel working.
+      adminRequest<{ entries: AdminWaitlistEntry[] }>("/v1/admin/waitlist").catch((caught: unknown) => {
+        if (caught instanceof AdminClientError && caught.status === 401) throw caught;
+        return { entries: [] as AdminWaitlistEntry[] };
+      }),
     ]);
+    setWaitlist(nextWaitlist.entries);
     setOverview(nextOverview);
     setAccounts(nextAccounts.accounts);
     setListings(nextListings.listings);
@@ -256,6 +270,17 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [detail]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void load().catch((caught: unknown) => {
+        if (caught instanceof AdminClientError && caught.status === 401) onUnauthorized();
+      });
+    }, AUTO_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [autoRefresh, load, onUnauthorized]);
 
   function selectSection(next: SectionId) {
     setSection(next);
@@ -344,9 +369,20 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-muted">Sandbox only. Mock USDC. This panel does not settle mainnet payments.</p>
-            <button type="button" className={ghostClass} onClick={() => void refresh()} disabled={refreshing || loading}>
-              {refreshing ? "Refreshing" : "Refresh"}
-            </button>
+            <div className="flex items-center gap-4">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[#c4a36a]"
+                  checked={autoRefresh}
+                  onChange={(event) => setAutoRefresh(event.target.checked)}
+                />
+                Auto-refresh 30 s
+              </label>
+              <button type="button" className={ghostClass} onClick={() => void refresh()} disabled={refreshing || loading}>
+                {refreshing ? "Refreshing" : "Refresh"}
+              </button>
+            </div>
           </div>
           {error ? (
             <div className="mb-4">
@@ -368,6 +404,7 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
               jobs={jobs}
               visibleJobs={visibleJobs}
               reputation={reputation}
+              waitlist={waitlist}
               filter={filter}
               busy={busy}
               onFilter={(next) => {
@@ -436,6 +473,7 @@ function SectionBody({
   jobs,
   visibleJobs,
   reputation,
+  waitlist,
   filter,
   busy,
   onFilter,
@@ -450,6 +488,7 @@ function SectionBody({
   jobs: AdminJob[];
   visibleJobs: AdminJob[];
   reputation: AdminReputation | null;
+  waitlist: AdminWaitlistEntry[];
   filter: JobFilter;
   busy: string;
   onFilter: (filter: JobFilter) => void;
@@ -463,7 +502,8 @@ function SectionBody({
     return <JobsSection jobs={jobs} visibleJobs={visibleJobs} filter={filter} onFilter={onFilter} onOpenJob={onOpenJob} />;
   }
   if (section === "reputation") return <ReputationSection reputation={reputation} />;
-  if (section === "ops") return <OpsSection busy={busy} onAction={onAction} />;
+  if (section === "waitlist") return <WaitlistSection entries={waitlist} />;
+  if (section === "ops") return <OpsSection overview={overview} busy={busy} onAction={onAction} />;
   return <OverviewSection overview={overview} jobs={jobs} reputation={reputation} onSection={onSection} />;
 }
 
@@ -524,11 +564,20 @@ function OverviewSection({
           }
         />
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <MiniStat label="Accounts" value={overview.counts.accounts.toString()} hint={`${overview.counts.organizations.toString()} organizations`} />
         <MiniStat label="Listings" value={overview.counts.listings.toString()} hint="Published capabilities" />
+        <MiniStat
+          label="Waitlist"
+          value={(overview.waitlist?.total ?? 0).toString()}
+          hint={`+${(overview.waitlist?.last7d ?? 0).toString()} in the last 7 days`}
+        />
         <MiniStat label="Rail" value={overview.health.rail} hint={`${overview.health.asset} · ${overview.health.mode}`} />
-        <MiniStat label="Health" value={overview.health.ok ? "Healthy" : "Check"} hint={overview.health.product} />
+        <MiniStat
+          label="Health"
+          value={overview.health.ok ? "Healthy" : "Check"}
+          hint={`${overview.health.version ? `API ${overview.health.version}` : overview.health.product} · up ${formatUptime(overview.health.uptimeS)}`}
+        />
       </div>
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <ActivityChart points={activity} />
@@ -752,16 +801,91 @@ function ReputationSection({ reputation }: { reputation: AdminReputation | null 
   );
 }
 
-function OpsSection({ busy, onAction }: { busy: string; onAction: (path: string, label: string) => void }) {
+function WaitlistSection({ entries }: { entries: AdminWaitlistEntry[] }) {
+  const [copied, setCopied] = useState(false);
+  async function copyEmails() {
+    try {
+      await navigator.clipboard.writeText(entries.map((entry) => entry.email).join("\n"));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+  function downloadCsv() {
+    const blob = new Blob([waitlistCsv(entries)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `roster-waitlist-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+  const bySource = new Map<string, number>();
+  for (const entry of entries) bySource.set(entry.source ?? "unknown", (bySource.get(entry.source ?? "unknown") ?? 0) + 1);
+  return (
+    <section aria-labelledby="waitlist-title">
+      <SectionIntro
+        id="waitlist-title"
+        eyebrow="Growth"
+        title="Waitlist"
+        lede="Developer and operator sign-ups from the landing page, newest first."
+      />
+      <div className="mt-8 flex flex-wrap items-center gap-3">
+        <button type="button" className={ghostClass} onClick={() => void copyEmails()} disabled={entries.length === 0}>
+          {copied ? "Copied" : "Copy emails"}
+        </button>
+        <button type="button" className={ghostClass} onClick={downloadCsv} disabled={entries.length === 0}>
+          Download CSV
+        </button>
+        {[...bySource.entries()].map(([source, count]) => (
+          <Pill key={source} tone="muted">
+            {source} · {count.toString()}
+          </Pill>
+        ))}
+      </div>
+      <div className="mt-6">
+        <DataTable
+          caption="Waitlist"
+          columns={["Email", "Source", "Joined"]}
+          rows={entries.map((entry) => ({
+            key: entry.email,
+            cells: [
+              entry.email,
+              <span key="source" className="text-muted">{entry.source ?? "—"}</span>,
+              <span key="joined" className="text-muted">{formatOperatorTime(entry.createdAt)}</span>,
+            ],
+          }))}
+          empty={{ title: "No sign-ups yet", body: "Emails from the landing page waitlist show up here." }}
+        />
+      </div>
+    </section>
+  );
+}
+
+function OpsSection({
+  overview,
+  busy,
+  onAction,
+}: {
+  overview: AdminOverview;
+  busy: string;
+  onAction: (path: string, label: string) => void;
+}) {
   return (
     <section aria-labelledby="ops-title">
       <SectionIntro
         id="ops-title"
         eyebrow="Sandbox"
         title="Ops"
-        lede="The SLA sweep refunds held jobs whose listing deadline has passed. Fleet bootstrap is idempotent and republishes the Roster Labs catalog."
+        lede="The API sweeps expired jobs every 15 seconds on its own. The manual sweep and fleet bootstrap stay here for operators. Both are idempotent."
       />
-      <div className="mt-8 grid gap-3 lg:grid-cols-2">
+      <div className="mt-8 grid gap-3 sm:grid-cols-3">
+        <MiniStat label="API version" value={overview.health.version ?? "—"} hint="Commit deployed on roster-api" />
+        <MiniStat label="Uptime" value={formatUptime(overview.health.uptimeS)} hint="Since the last restart" />
+        <MiniStat label="Mode" value={overview.health.mode} hint={`${overview.health.rail} rail · ${overview.health.asset}`} />
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <article className="border border-line/10 bg-panel p-6">
           <h3 className="font-serif text-3xl tracking-[-0.03em] text-paper">Sweep SLA</h3>
           <p className="mt-3 max-w-md text-sm leading-6 text-muted">

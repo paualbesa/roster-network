@@ -3,6 +3,7 @@ import { Hire } from "@/components/console/hire";
 
 export const metadata: Metadata = {
   title: "Sandbox hire",
+  robots: { index: false, follow: false },
   description: "Lock mock USDC, show the Roster fee, and settle the sandbox Solana transaction after a verified result.",
 };
 
