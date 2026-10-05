@@ -166,7 +166,7 @@ export function joinApiUrl(baseUrl: string, path: string): string {
 export function openLiveWorld(baseUrl: string): SimWorld {
   return {
     name: "live",
-    request: (path, init) => fetch(joinApiUrl(baseUrl, path), init),
+    request: (path, init) => fetchRespectingRateLimit(joinApiUrl(baseUrl, path), init),
     advance: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     walletSum: async () => null,
     bootstrapFleet: async () => {
@@ -184,4 +184,15 @@ export function openLiveWorld(baseUrl: string): SimWorld {
       return body.fleet;
     },
   };
+}
+
+/** The live API rate-limits sign-ups. Wait out a 429 (up to 3 times) instead of failing the suite. */
+async function fetchRespectingRateLimit(url: string, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(url, init);
+    if (response.status !== 429 || attempt >= 3) return response;
+    const retryAfter = Number(response.headers.get("retry-after") ?? "1");
+    const waitMs = Math.min(65, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1) * 1000;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
 }

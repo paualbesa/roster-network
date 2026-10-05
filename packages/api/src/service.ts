@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import {
   addUsdc,
   compareUsdc,
@@ -49,7 +48,8 @@ import {
   type ReputationLedger,
   type ReputationPassport,
 } from "@albesa/reputation";
-import { MemoryStore } from "./store.js";
+import { burnPasswordCheck, hashPassword, verifyPassword } from "./password.js";
+import { MemoryStore, type WaitlistEntry } from "./store.js";
 
 export type ErrorStatus = 400 | 401 | 403 | 404 | 409;
 
@@ -173,6 +173,7 @@ export interface CreateEscrowResult extends EscrowResult {
 
 const NAME_MAX = 80;
 const PASSWORD_MIN = 8;
+const WAITLIST_MAX = 50_000;
 const AUTH_USER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PASSWORD_MAX = 128;
 const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
@@ -275,6 +276,43 @@ export class AgentFinanceService implements ReputationHook {
 
   authenticate(apiKey: string): string | null {
     return this.store.apiKeys.get(hashSandboxApiKey(apiKey)) ?? null;
+  }
+
+  /** Revoke one API key (logout). Other keys for the organization keep working. */
+  revokeApiKey(apiKey: string): Promise<{ revoked: boolean }> {
+    return this.enqueue(async () => {
+      const revoked = this.store.apiKeys.delete(hashSandboxApiKey(apiKey));
+      if (revoked) this.commit();
+      return { revoked };
+    });
+  }
+
+  /**
+   * Developer waitlist. Re-submitting an email keeps the first entry and
+   * returns `created: false`, so the landing form never leaks who signed up.
+   */
+  joinWaitlist(input: { email: string; source: string | null }): Promise<{ created: boolean }> {
+    return this.enqueue(async () => {
+      const email = canonicalEmail(input.email);
+      if (!email) throw new ServiceError(400, "invalid_request", "email must be an address like ada@example.com.");
+      const source = input.source?.trim().slice(0, 64) || null;
+      if (this.store.waitlist.has(email)) return { created: false };
+      if (this.store.waitlist.size >= WAITLIST_MAX) {
+        throw new ServiceError(409, "waitlist_full", "The sandbox waitlist is full. Try again later.");
+      }
+      this.store.waitlist.set(email, { email, source, createdAt: this.now().toISOString() });
+      this.commit();
+      return { created: true };
+    });
+  }
+
+  /** Operator view of the waitlist, newest first. */
+  listWaitlist(): Promise<WaitlistEntry[]> {
+    return this.enqueue(async () =>
+      [...this.store.waitlist.values()]
+        .map((entry) => ({ ...entry }))
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.email.localeCompare(right.email)),
+    );
   }
 
   createOrganization(name: string): Promise<CreateOrganizationResult> {
@@ -383,8 +421,13 @@ export class AgentFinanceService implements ReputationHook {
     );
   }
 
-  createAccount(input: CreateAccountInput): Promise<CreateAccountResult> {
-    return this.enqueue(() => this.createAccountUnlocked(input));
+  async createAccount(input: CreateAccountInput): Promise<CreateAccountResult> {
+    // Hash outside the queue so scrypt does not hold up other writers.
+    const passwordHash =
+      input.password.length >= PASSWORD_MIN && input.password.length <= PASSWORD_MAX
+        ? await hashPassword(input.password)
+        : "";
+    return this.enqueue(() => this.createAccountUnlocked(input, passwordHash));
   }
 
   loginAccount(email: string, password: string): Promise<LoginAccountResult> {
@@ -572,7 +615,7 @@ export class AgentFinanceService implements ReputationHook {
     });
   }
 
-  private async createAccountUnlocked(input: CreateAccountInput): Promise<CreateAccountResult> {
+  private async createAccountUnlocked(input: CreateAccountInput, passwordHash: string): Promise<CreateAccountResult> {
     const email = canonicalEmail(input.email);
     if (!email) {
       throw new ServiceError(400, "invalid_request", "email must be an address like ada@example.com.");
@@ -598,7 +641,7 @@ export class AgentFinanceService implements ReputationHook {
     };
     this.store.users.set(user.id, user);
     this.store.usersByEmail.set(email, user.id);
-    this.store.passwordHashes.set(user.id, hashSandboxApiKey(input.password));
+    this.store.passwordHashes.set(user.id, passwordHash);
     this.commit();
     return {
       user,
@@ -662,13 +705,21 @@ export class AgentFinanceService implements ReputationHook {
   }
 
   private async loginAccountUnlocked(emailRaw: string, password: string): Promise<LoginAccountResult> {
-    const presented = hashSandboxApiKey(password);
     const email = canonicalEmail(emailRaw);
     const userId = email ? this.store.usersByEmail.get(email) : undefined;
     const user = userId ? this.store.users.get(userId) : undefined;
     const stored = user ? this.store.passwordHashes.get(user.id) : undefined;
-    if (!user || !stored || !hashesEqual(stored, presented)) {
+    if (!user || !stored) {
+      await burnPasswordCheck(password);
       throw new ServiceError(401, "unauthorized", "Email or password is incorrect.");
+    }
+    const check = await verifyPassword(stored, password);
+    if (!check.ok) {
+      throw new ServiceError(401, "unauthorized", "Email or password is incorrect.");
+    }
+    if (check.needsRehash) {
+      // Upgrade legacy SHA-256 rows to scrypt on the first good login.
+      this.store.passwordHashes.set(user.id, await hashPassword(password));
     }
     const apiKey = createSandboxApiKey();
     this.store.apiKeys.set(hashSandboxApiKey(apiKey), user.organizationId);
@@ -1572,13 +1623,6 @@ function accountDisplayName(email: string, displayName: string | null): string {
     throw new ServiceError(400, "invalid_request", `name must be 1-${NAME_MAX.toString()} characters.`);
   }
   return name;
-}
-
-function hashesEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left, "utf8");
-  const b = Buffer.from(right, "utf8");
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
 }
 
 function normalizeMemo(memo: string | null): string | null {

@@ -3,6 +3,7 @@ import { resolveRosterApiOrigin, rosterProxyTarget } from "@/lib/api-base";
 import {
   ADMIN_COOKIE_MAX_AGE,
   ADMIN_COOKIE_NAME,
+  forwardClientAddress,
   parseAdminTokenInput,
   readAdminCookie,
   requestIsSecure,
@@ -50,9 +51,11 @@ export async function POST(request: Request) {
   let upstream: Response;
   try {
     const target = rosterProxyTarget(resolveRosterApiOrigin(), ["v1", "admin", "overview"], "");
+    const headers = new Headers({ accept: "application/json", "x-roster-admin-token": parsed.token });
+    forwardClientAddress(request.headers, headers);
     upstream = await fetch(target, {
       method: "GET",
-      headers: { accept: "application/json", "x-roster-admin-token": parsed.token },
+      headers,
       cache: "no-store",
       redirect: "manual",
     });
@@ -67,6 +70,12 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { ok: false, error: "unauthorized", message: "That operator token was rejected." },
       { status: 401 },
+    );
+  }
+  if (upstream.status === 429) {
+    return NextResponse.json(
+      { ok: false, error: "rate_limited", message: "Too many attempts. Wait a few minutes and try again." },
+      { status: 429, headers: { "retry-after": upstream.headers.get("retry-after") ?? "60" } },
     );
   }
   if (upstream.status === 503) {

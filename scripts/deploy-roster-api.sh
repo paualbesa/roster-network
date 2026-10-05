@@ -64,6 +64,9 @@ export ALBESA_DATA_FILE="$DATA_DIR/sandbox.json"
 export ROSTER_REPUTATION_FILE="$DATA_DIR/reputation.json"
 export REGISTRY_INDEX_PATH="$DATA_DIR/registry.json"
 export ROSTER_JOBS_FILE="$DATA_DIR/jobs.json"
+ROSTER_GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+export ROSTER_GIT_SHA
+echo "note: releasing $ROSTER_GIT_SHA"
 
 if [ -n "${SUPABASE_URL:-}${SUPABASE_ANON_KEY:-}${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
   if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_ANON_KEY:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then

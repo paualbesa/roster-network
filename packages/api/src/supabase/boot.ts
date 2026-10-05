@@ -8,7 +8,7 @@ import {
 import { CapabilityRegistry } from "@albesa/registry";
 import { MemoryReputationLedger } from "@albesa/reputation";
 import type { SolanaEngineConfig } from "@albesa/solana";
-import { createApp } from "../app.js";
+import { createApp, type AppHttpOptions } from "../app.js";
 import { MemoryJobStore } from "../jobs.js";
 import { AgentFinanceService } from "../service.js";
 import { MemoryStore } from "../store.js";
@@ -32,6 +32,7 @@ export async function openSupabaseApp(options: {
   now?: () => Date;
   autofill?: "sync" | "async";
   solana?: SolanaEngineConfig;
+  http?: AppHttpOptions;
 }): Promise<SupabaseApp> {
   const serviceClient = createServiceClient(options.config);
   const anonClient = createAnonClient(options.config);
@@ -59,6 +60,7 @@ export async function openSupabaseApp(options: {
     ...(options.now ? { now: options.now } : {}),
   });
   const app = createApp({
+    ...(options.http ?? { storage: "supabase" }),
     mode: options.mode,
     walletRail: options.walletRail,
     service,

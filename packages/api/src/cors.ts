@@ -28,8 +28,16 @@ export function isRosterCorsOrigin(origin: string): boolean {
 export function rosterCors(): MiddlewareHandler {
   return cors({
     origin: (origin) => (isRosterCorsOrigin(origin) ? origin : null),
-    allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
-    allowHeaders: ["Authorization", "Content-Type"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "X-Request-Id"],
+    exposeHeaders: [
+      "X-Request-Id",
+      "Retry-After",
+      "RateLimit-Limit",
+      "RateLimit-Remaining",
+      "RateLimit-Reset",
+      "Idempotent-Replayed",
+    ],
     maxAge: 86400,
   });
 }

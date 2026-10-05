@@ -62,6 +62,12 @@ function supabaseWebEnv() {
   return env;
 }
 
+/** Commit reported by /health. Set by scripts/deploy-roster-api.sh. */
+function releaseEnv() {
+  const sha = trimmed(process.env.ROSTER_GIT_SHA);
+  return sha ? { ROSTER_GIT_SHA: sha } : {};
+}
+
 const dataDir = rosterDataDir();
 
 module.exports = {
@@ -122,6 +128,7 @@ module.exports = {
         ROSTER_JOBS_FILE: path.join(dataDir, "jobs.json"),
         ...adminTokenEnv(),
         ...supabaseServerEnv(),
+        ...releaseEnv(),
       },
     },
   ],

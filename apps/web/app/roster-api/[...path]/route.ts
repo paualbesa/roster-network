@@ -7,7 +7,15 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
-const FORWARD_RESPONSE = ["content-type"] as const;
+const FORWARD_RESPONSE = [
+  "content-type",
+  "x-request-id",
+  "retry-after",
+  "ratelimit-limit",
+  "ratelimit-remaining",
+  "ratelimit-reset",
+  "idempotent-replayed",
+] as const;
 
 async function proxy(request: Request, context: RouteContext): Promise<Response> {
   const { path } = await context.params;
