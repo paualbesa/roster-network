@@ -262,6 +262,22 @@ export async function buyListing(
   const listing = deps.registry.get(input.listingId);
   if (!listing || listing.status !== "active") throw new ServiceError(404, "not_found", "Listing not found or paused.");
   const price = listing.pricing.amountUsdc;
+  const examples = (listing.inputSchema as { examples?: unknown[] }).examples;
+  const example = Array.isArray(examples) && typeof examples[0] === "object" && examples[0] !== null ? examples[0] : {};
+  if (input.input && (listing.kind ?? "service") !== "service") {
+    // Catch a wrong field name before money moves: the buyer would only get a refund.
+    const required = (listing.inputSchema as { required?: unknown }).required;
+    const missing = Array.isArray(required)
+      ? required.filter((key): key is string => typeof key === "string" && (input.input?.[key] === undefined || input.input[key] === null))
+      : [];
+    if (missing.length > 0) {
+      throw new ServiceError(
+        400,
+        "invalid_input",
+        `Input is missing ${missing.join(", ")}. Example: ${JSON.stringify(example).slice(0, 300)}`,
+      );
+    }
+  }
   const buyerAgentId = input.buyerAgentId ?? (await ensureBuyerAgent(deps.service, organizationId, price));
   if (input.buyerAgentId) {
     await deps.service.assertOwnedAgent(organizationId, input.buyerAgentId);
@@ -270,8 +286,6 @@ export async function buyListing(
       throw new ServiceError(409, "insufficient_funds", `Agent balance ${balance.balanceUsdc} USDC is below the ${price} USDC price.`);
     }
   }
-  const examples = (listing.inputSchema as { examples?: unknown[] }).examples;
-  const example = Array.isArray(examples) && typeof examples[0] === "object" && examples[0] !== null ? examples[0] : {};
   const created = await deps.orchestrator.createJob(organizationId, {
     buyerAgentId,
     query: listing.name,

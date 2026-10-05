@@ -16,7 +16,7 @@ const ORDER: ListingKind[] = ["dataset", "feed", "lookup"];
 
 export default async function DataPage() {
   const products = await fetchDataProducts();
-  const rows = products.reduce((sum, product) => sum + product.rowCount, 0);
+  const rows = products.reduce((sum, product) => sum + (product.derivedFrom ? 0 : product.rowCount), 0);
   return (
     <main id="content">
       <section className="border-b border-line/10">
@@ -68,7 +68,7 @@ function ProductCard({ product }: { product: DataProductView }) {
       </h3>
       <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted">{product.description}</p>
       <p className="mt-auto pt-4 font-mono text-[11px] text-muted">
-        {product.live ? "Live lookup" : `${product.rowCount.toLocaleString("en-US")} rows`} · {product.refreshCadence}
+        {product.live ? "Live lookup" : product.derivedFrom ? `Answers from ${product.rowCount.toLocaleString("en-US")} rows` : `${product.rowCount.toLocaleString("en-US")} rows`} · {product.refreshCadence}
         {source ? ` · ${source.license}` : ""}
       </p>
     </li>

@@ -40,6 +40,8 @@ export interface DataProductPublic {
   example: Json | null;
   formats: string[];
   delivery: DataProductInfo["delivery"];
+  /** Set when a lookup answers from another product's rows (rowCount is that product's). */
+  derivedFrom: string | null;
 }
 
 export class DataCatalog {
@@ -137,6 +139,7 @@ export class DataCatalog {
       example: spec.example ?? null,
       formats: dataFormats(spec),
       delivery: spec.kind === "dataset" ? "signed_url" : "inline",
+      derivedFrom: spec.ingest ? null : (LOOKUP_PARENTS[spec.slug] ?? null),
     };
   }
 

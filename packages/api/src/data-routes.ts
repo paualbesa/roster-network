@@ -38,7 +38,8 @@ export function registerDataRoutes<E extends Env>(app: Hono<E>, deps: DataRouteD
     const summary = {
       products: products.length,
       fresh: products.filter((product) => product.status === "ok" || product.status === "live").length,
-      rows: products.reduce((sum, product) => sum + product.rowCount, 0),
+      // Derived lookups reuse their parent's rows; count them once.
+      rows: products.reduce((sum, product) => sum + (product.derivedFrom ? 0 : product.rowCount), 0),
     };
     return c.json({ seller: DATA_ORG_NAME, summary, products });
   });
