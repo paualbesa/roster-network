@@ -19,8 +19,12 @@ export interface AdminOverview {
     asset: string;
     /** Commit the API runs. Older APIs omit it. */
     version?: string;
+    /** custodial-mock or noncustodial-sim. Older APIs omit it. */
+    escrowMode?: string;
     uptimeS?: number;
   };
+  /** KYC review counts. Older APIs omit it. */
+  kyc?: { pending: number; approved: number; limits: { tier0Usdc: string; tier1Usdc: string } };
   /** Developer waitlist counts. Older APIs omit it. */
   waitlist?: { total: number; last7d: number };
   counts: {
@@ -120,6 +124,63 @@ export interface AdminReputation {
     error: boolean;
     sourceRef: string | null;
   }[];
+}
+
+export interface AdminKycEntry {
+  organizationId: string;
+  organizationName: string;
+  tier: 0 | 1;
+  status: "pending" | "approved" | "rejected";
+  usedUsdc: string;
+  limitUsdc: string;
+  submission: {
+    entityType: "individual" | "company";
+    legalName: string;
+    country: string;
+    dateOfBirth: string | null;
+    companyRegNo: string | null;
+    submittedAt: string;
+  } | null;
+  document: { mimeType: string; sizeBytes: number; uploadedAt: string; deleted: boolean } | null;
+  hasDocument: boolean;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  rejectionReason: string | null;
+  updatedAt: string;
+}
+
+export interface AdminKycAuditEntry {
+  id: string;
+  organizationId: string;
+  action: "submitted" | "approved" | "rejected" | "document_viewed" | "document_deleted";
+  actor: string;
+  reason: string | null;
+  at: string;
+}
+
+export interface AdminKycQueue {
+  limits: { tier0Usdc: string; tier1Usdc: string };
+  pending: number;
+  entries: AdminKycEntry[];
+  audit: AdminKycAuditEntry[];
+  storage: string;
+}
+
+/**
+ * Supabase hands out absolute signed URLs. The JSON sandbox returns an API path,
+ * which the browser reaches through the same-origin proxy.
+ */
+export function kycDocumentHref(url: string): string {
+  if (url.startsWith("/v1/")) return `/roster-api${url}`;
+  return url;
+}
+
+export function kycAuditLabel(action: AdminKycAuditEntry["action"]): string {
+  if (action === "submitted") return "Submitted";
+  if (action === "approved") return "Approved";
+  if (action === "rejected") return "Rejected";
+  if (action === "document_viewed") return "Document viewed";
+  return "Document deleted";
 }
 
 export interface AdminWaitlistEntry {

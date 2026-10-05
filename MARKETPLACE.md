@@ -113,7 +113,7 @@ Sandbox boot does not wait for a human seller. `pnpm dev` calls `bootstrapSandbo
 
 1. Ensure an organization named **Roster Labs**. Creating it mints the sandbox treasury grant (`1000` USDC).
 2. Ensure an active agent named **Roster Fleet**. While that wallet is still `0`, move `1.00` USDC from the Roster Labs treasury onto it so escrow can pay the seller.
-3. Publish the six first-party listings for that organization if any name is missing.
+3. Publish the first-party Roster Fleet catalog (`rosterFleetListings()`: the six classic listings plus 86 fleet tools in `packages/api/src/fleet/`, 92 total) for that organization if any name is missing. Every tool is deterministic and needs no paid API.
 4. Bind each listing to Roster Fleet with `autofill: true`.
 
 A buyer in another organization locks `POST /v1/jobs` as usual. When the top listing is one of those bindings, Roster delivers `sandboxExecute(listingName, input)` and settles escrow. Pass `input` on the lock when the fixture should use the buyer's payload. Omit it and the fixture still returns a schema-valid sample. No one calls `POST /v1/jobs/:id/result`.

@@ -6,8 +6,12 @@ import { jobStatusLabel } from "@/lib/job-status";
 import { onboardingSteps } from "@/lib/onboarding";
 import {
   createRosterClient,
+  describeEscrowMode,
+  kycUsagePercent,
   rosterErrorMessage,
   type AccountSnapshot,
+  type KycSnapshot,
+  type RosterHealth,
   type ConsoleAgent,
   type ConsoleJob,
   type TreasurySnapshot,
@@ -38,6 +42,8 @@ function DashboardBody() {
   const [treasury, setTreasury] = useState<TreasurySnapshot | null>(null);
   const [agents, setAgents] = useState<ConsoleAgent[]>([]);
   const [jobs, setJobs] = useState<ConsoleJob[]>([]);
+  const [kyc, setKyc] = useState<KycSnapshot | null>(null);
+  const [health, setHealth] = useState<RosterHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -57,6 +63,10 @@ function DashboardBody() {
     setTreasury(nextTreasury);
     setAgents(nextAgents);
     setJobs(nextJobs);
+    // KYC and escrow mode are informational; older APIs may not have them.
+    const [nextKyc, nextHealth] = await Promise.all([client.kyc().catch(() => null), client.health().catch(() => null)]);
+    setKyc(nextKyc);
+    setHealth(nextHealth);
   }, [session]);
 
   useEffect(() => {
@@ -144,6 +154,31 @@ function DashboardBody() {
             Mock USDC only. Funding an agent moves balance inside the sandbox ledger. It does not touch a bank or a chain.
           </p>
         </section>
+
+        {kyc || health ? (
+          <section className="grid gap-px border border-line/10 bg-line/10 sm:grid-cols-2" aria-label="Limits and custody">
+            {kyc ? (
+              <div className="bg-panel px-5 py-4">
+                <p className="font-mono text-[11px] tracking-[0.18em] text-muted uppercase">KYC · Tier {kyc.tier.toString()}</p>
+                <p className="mt-2 text-sm text-paper">
+                  {kyc.usedUsdc.replace(/\.?0+$/, "") || "0"} / {kyc.limitUsdc.replace(/\.?0+$/, "")} USDC in {kyc.windowDays.toString()} days
+                </p>
+                <div className="mt-2 h-1.5 w-full bg-panel-2" aria-hidden="true">
+                  <div className="h-full bg-brass" style={{ width: `${kycUsagePercent(kyc).toString()}%` }} />
+                </div>
+                <Link href="/console/kyc" className="mt-3 inline-block text-sm text-brass underline decoration-brass/40 underline-offset-4">
+                  {kyc.tier === 0 ? (kyc.status === "pending" ? "Review pending" : "Raise the cap") : "Verification"}
+                </Link>
+              </div>
+            ) : null}
+            {health ? (
+              <div className="bg-panel px-5 py-4">
+                <p className="font-mono text-[11px] tracking-[0.18em] text-muted uppercase">Escrow mode · {health.escrowMode}</p>
+                <p className="mt-2 text-sm leading-6 text-muted">{describeEscrowMode(health.escrowMode)}</p>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         {!loading ? <Onboarding agents={agents} jobs={jobs} /> : null}
 

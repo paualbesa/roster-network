@@ -54,7 +54,12 @@ export const openApiDocument = {
       get: {
         security: [],
         summary: "Process check",
-        responses: { "200": { description: "Roster is up. `rail` is mock unless ROSTER_WALLET selects a simulator." } },
+        responses: {
+          "200": {
+            description:
+              "Roster is up. `rail` is mock unless ROSTER_WALLET selects a simulator. `escrowMode` is custodial-mock or noncustodial-sim (ROSTER_ESCROW_MODE). `kyc` reports the Tier 0/1 rolling 30-day escrow caps.",
+          },
+        },
       },
     },
     "/openapi.json": {
@@ -244,6 +249,7 @@ export const openApiDocument = {
           "Discover, rank with reputation, and lock escrow for one job. Optional listingId pins that manifest instead of the top search hit. Seller may be another organization. Optional input is the buyer payload. A sandbox-fleet listing delivers that payload through sandboxExecute without a manual result.",
         responses: {
           "201": { description: "Job held, or already settled when fleet autofill is sync. Take-rate is quoted at 1% of the locked amount. deadlineAt is createdAt plus the listing p95 SLA." },
+          "403": { description: "kyc_limit_exceeded: the lock would exceed the organization's KYC tier cap (rolling 30 days)" },
           "404": { description: "no_candidates" },
           "409": { description: "seller_unbound or insufficient_balance" },
         },
@@ -386,10 +392,49 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/kyc": {
+      get: {
+        summary: "KYC tier, review status, and escrow volume used against the tier cap (rolling 30 days)",
+        responses: { "200": { description: "{ kyc: { tier, status, usedUsdc, limitUsdc, remainingUsdc, windowDays, limits, submission, document, rejectionReason, upgrade } }" } },
+      },
+    },
+    "/v1/kyc/submission": {
+      post: {
+        summary: "Submit Tier 1 verification for manual review. Multipart: entityType, legalName, country (ISO alpha-2), dateOfBirth (individual) or companyRegNo (company), and a `document` file (JPEG, PNG, WebP, or PDF, max 5 MB; type checked by magic bytes). Stored in a private bucket.",
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                required: ["legalName", "country", "document"],
+                properties: {
+                  entityType: { type: "string", enum: ["individual", "company"] },
+                  legalName: { type: "string", minLength: 2, maxLength: 160 },
+                  country: { type: "string", pattern: "^[A-Za-z]{2}$" },
+                  dateOfBirth: { type: "string", format: "date" },
+                  companyRegNo: { type: "string", maxLength: 40 },
+                  document: { type: "string", format: "binary" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "{ kyc } with status pending" },
+          "400": { description: "invalid_request" },
+          "409": { description: "kyc_pending or kyc_already_approved" },
+          "413": { description: "payload_too_large" },
+        },
+      },
+    },
     "/v1/escrows": {
       post: {
-        summary: "Lock mock USDC inside one organization. Cross-organization settlement goes through POST /v1/jobs.",
-        responses: { "201": { description: "Escrow held" } },
+        summary: "Lock mock USDC inside one organization. Cross-organization settlement goes through POST /v1/jobs. Locks count toward the KYC tier cap.",
+        responses: {
+          "201": { description: "Escrow held. `escrow.custody` records the custody model (custodial-mock or noncustodial-sim)." },
+          "403": { description: "kyc_limit_exceeded with tier, usedUsdc, requestedUsdc, limitUsdc, remainingUsdc, upgrade" },
+        },
       },
       get: {
         summary: "List escrows opened by this organization",

@@ -286,6 +286,7 @@ export function registerAdminRoutes<E extends Env>(app: Hono<E>, deps: AdminDeps
     const jobs = await deps.orchestrator.listAllJobs();
     const summary = summarizeJobs(jobs.jobs);
     const waitlist = await deps.service.listWaitlist();
+    const kycQueue = await deps.service.listKycQueue(null);
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return c.json({
       health: {
@@ -295,7 +296,13 @@ export function registerAdminRoutes<E extends Env>(app: Hono<E>, deps: AdminDeps
         rail: deps.rail,
         asset: "USDC",
         version: process.env.ROSTER_GIT_SHA?.trim() || "dev",
+        escrowMode: deps.service.escrowMode,
         uptimeS: Math.floor(process.uptime()),
+      },
+      kyc: {
+        pending: kycQueue.entries.filter((entry) => entry.status === "pending").length,
+        approved: kycQueue.entries.filter((entry) => entry.status === "approved").length,
+        limits: deps.service.kycLimits,
       },
       waitlist: {
         total: waitlist.length,

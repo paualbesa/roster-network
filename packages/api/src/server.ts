@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { resolveRuntimeMode, resolveWalletRail } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
 import { createApp, type AppHttpOptions } from "./app.js";
+import { LocalKycDocumentStore } from "./kyc.js";
 import { bootstrapSandboxFleet } from "./fleet.js";
 import { resolveRateLimitConfig } from "./http.js";
 import { readListenAddress } from "./listen.js";
@@ -50,6 +51,9 @@ async function main(): Promise<void> {
       reputationFile,
       jobsFile,
       registry: new CapabilityRegistry({ filePath: registryPath }),
+      kycDocuments: new LocalKycDocumentStore({
+        directory: process.env.ROSTER_KYC_DIR?.trim() || join(process.cwd(), "data", "kyc-documents"),
+      }),
     });
     app = jsonApp;
     if (mode === "sandbox") {

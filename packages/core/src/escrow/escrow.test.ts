@@ -85,3 +85,12 @@ describe("escrow state machine", () => {
     expect(() => decideSlaTimeout("refunded")).toThrow(/already refunded/);
   });
 });
+
+describe("resolveEscrowMode", () => {
+  it("defaults to custodial-mock and rejects unknown values", async () => {
+    const { resolveEscrowMode } = await import("./mode.js");
+    expect(resolveEscrowMode({})).toBe("custodial-mock");
+    expect(resolveEscrowMode({ ROSTER_ESCROW_MODE: "noncustodial-sim" })).toBe("noncustodial-sim");
+    expect(() => resolveEscrowMode({ ROSTER_ESCROW_MODE: "custodial-real" })).toThrow(/ROSTER_ESCROW_MODE/);
+  });
+});

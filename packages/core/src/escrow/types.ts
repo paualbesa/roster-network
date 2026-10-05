@@ -38,6 +38,44 @@ export interface SchemaHookResult {
 /** Pluggable check. The default hook is {@link validateResult}. A failure refunds the buyer. */
 export type SchemaValidationHook = (schema: ResultSchema, result: unknown) => SchemaHookResult;
 
+/**
+ * Who controls the locked funds.
+ * - `custodial-mock`: the sandbox default. The lock moves to a Roster-minted mock hold address.
+ * - `noncustodial-sim`: models the planned on-chain escrow. The buyer wallet signs a lock
+ *   intent, funds sit in a program-derived vault (PDA) that no Roster key can spend, and
+ *   release/refund follow program rules. Still the mock rail underneath; nothing is broadcast.
+ */
+export type EscrowMode = "custodial-mock" | "noncustodial-sim";
+
+export const ESCROW_MODES: readonly EscrowMode[] = ["custodial-mock", "noncustodial-sim"];
+
+/** Simulated program that would own non-custodial escrow vaults (never deployed). */
+export const SIM_ESCROW_PROGRAM_ID = "RosterEscrowSim111111111111111111111111111";
+
+export interface EscrowBuyerAuthorization {
+  /** Buyer wallet address that signed the lock intent. */
+  signer: string;
+  /** Canonical lock intent the buyer signs (escrow id, amount, seller, fee, schema hash, program). */
+  message: string;
+  /** Simulated ed25519 signature over `message`. Not a real signature. */
+  signature: string;
+  signedAt: string;
+}
+
+export interface EscrowCustody {
+  mode: EscrowMode;
+  /** `roster` for the custodial mock; `program` when a PDA vault holds the funds. */
+  custodian: "roster" | "program";
+  programId: string | null;
+  /** Program-derived vault address for the lock. */
+  vault: string | null;
+  buyerAuthorization: EscrowBuyerAuthorization | null;
+  /** Who may move the funds once held. */
+  releaseAuthority: "roster-operator" | "program-rules";
+  /** Fee the program would route to the Roster fee account at release (1% + flat). */
+  onChainFeeUsdc: string | null;
+}
+
 export interface EscrowSettlementQuote {
   takeRateBps: number;
   takeRateUsdc: string;
@@ -74,4 +112,6 @@ export interface Escrow {
   createdAt: string;
   notifiedAt: string;
   settledAt: string | null;
+  /** Custody model at lock time. Absent on escrows locked before escrow modes existed. */
+  custody?: EscrowCustody;
 }

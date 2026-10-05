@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { parseUsdc } from "@albesa/core";
+import type { KycAuditEntry, KycProfile } from "./kyc.js";
 import type {
   Agent,
   Escrow,
@@ -48,6 +49,10 @@ export class MemoryStore {
   readonly ledger: LedgerEntry[] = [];
   /** Developer waitlist keyed by lowercase email. */
   readonly waitlist = new Map<string, WaitlistEntry>();
+  /** KYC profile per organization (absent = tier 0, never submitted). */
+  readonly kycProfiles = new Map<string, KycProfile>();
+  /** Append-only KYC review trail. */
+  readonly kycAudit: KycAuditEntry[] = [];
   /** Supabase Auth user id (uuid) to Roster user id. Omitted from the JSON file. */
   readonly authUsersById = new Map<string, string>();
   /** Set by the Supabase mirror. The JSON store does not use it. */
@@ -77,6 +82,9 @@ interface FileDocument {
   wallet: MockWalletSnapshot;
   /** Optional on older files. */
   waitlist?: WaitlistEntry[];
+  /** Optional on older files. */
+  kycProfiles?: KycProfile[];
+  kycAudit?: KycAuditEntry[];
 }
 
 /**
@@ -147,6 +155,8 @@ export class JsonFileStore extends MemoryStore {
     this.transactions.push(...document.transactions);
     this.ledger.push(...document.ledger);
     for (const entry of document.waitlist ?? []) this.waitlist.set(entry.email, entry);
+    for (const profile of document.kycProfiles ?? []) this.kycProfiles.set(profile.organizationId, profile);
+    this.kycAudit.push(...(document.kycAudit ?? []));
     this.wallet = document.wallet;
   }
 
@@ -165,6 +175,8 @@ export class JsonFileStore extends MemoryStore {
       ledger: this.ledger.slice(),
       wallet: this.readWalletState(),
       waitlist: [...this.waitlist.values()],
+      kycProfiles: [...this.kycProfiles.values()],
+      kycAudit: this.kycAudit.slice(),
     };
     const json = `${JSON.stringify(document, null, 2)}\n`;
     mkdirSync(dirname(this.filePath), { recursive: true });
@@ -192,7 +204,19 @@ function parseDocument(value: unknown): FileDocument {
     ledger: asEntities<LedgerEntry>(value.ledger, "ledger"),
     wallet: parseWallet(value.wallet),
     waitlist: value.waitlist === undefined ? [] : parseWaitlist(value.waitlist),
+    kycProfiles: value.kycProfiles === undefined ? [] : parseKycProfiles(value.kycProfiles),
+    kycAudit: value.kycAudit === undefined ? [] : asEntities<KycAuditEntry>(value.kycAudit, "kycAudit"),
   };
+}
+
+function parseKycProfiles(value: unknown): KycProfile[] {
+  if (!Array.isArray(value)) throw new SandboxStoreError("kycProfiles must be an array.");
+  return value.map((item, index) => {
+    if (!isRecord(item) || typeof item.organizationId !== "string" || typeof item.status !== "string") {
+      throw new SandboxStoreError(`kycProfiles[${index.toString()}] is missing organizationId or status.`);
+    }
+    return item as unknown as KycProfile;
+  });
 }
 
 function parseWaitlist(value: unknown): WaitlistEntry[] {

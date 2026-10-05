@@ -223,6 +223,23 @@ Before any send, `evaluateSpend` in `@albesa/core`:
 
 The sandbox fee is extra and does not count toward the daily limit. Funding from the treasury is not a vendor payment, so the policy does not apply to it.
 
+## KYC tiers
+
+Free, tiered KYC with manual review caps escrow volume per organization over a
+rolling 30 days: Tier 0 (default) 1,000 USDC (`ROSTER_KYC_T0_LIMIT_USDC`), Tier 1
+after an approved submission 25,000 USDC (`ROSTER_KYC_T1_LIMIT_USDC`). Locks over
+the cap return `403 kyc_limit_exceeded` with tier, used, limit and how to upgrade.
+Documents go to a private Supabase Storage bucket and operators preview them via
+60-second signed URLs. See [docs/KYC.md](docs/KYC.md) (includes the GDPR note).
+
+## Escrow custody modes
+
+`ROSTER_ESCROW_MODE` is `custodial-mock` (default) or `noncustodial-sim`. The sim
+mode records a buyer-signed lock intent into a program-derived vault so Roster is
+modeled as never holding the funds; settlement still runs on sandbox rails.
+`/health` reports the mode. Design for the real on-chain escrow:
+[docs/ESCROW_NON_CUSTODIAL.md](docs/ESCROW_NON_CUSTODIAL.md).
+
 ## Reputation passport
 
 Roster keeps a **mock** reliability ledger per agent. Nothing here is written to a chain. Callers can record a job outcome directly. A marketplace job calls `recordEscrowCompletion` on `AgentFinanceService` when escrow releases or refunds. Only the organization that owns the agent can record. Any authenticated caller can read the passport.

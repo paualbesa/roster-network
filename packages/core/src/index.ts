@@ -2,9 +2,13 @@ export { decideSettlement, decideSlaTimeout, quoteEscrowSettlement, SLA_TIMEOUT_
 export type { SettlementDecision } from "./escrow/machine.js";
 export { EscrowTransitionError } from "./escrow/machine.js";
 export { EscrowSchemaError, parseResultSchema, validateResult } from "./escrow/schema.js";
-export { ESCROW_TAKE_RATE_BPS } from "./escrow/types.js";
+export { ESCROW_MODES, ESCROW_TAKE_RATE_BPS, SIM_ESCROW_PROGRAM_ID } from "./escrow/types.js";
+export { resolveEscrowMode } from "./escrow/mode.js";
 export type {
   Escrow,
+  EscrowBuyerAuthorization,
+  EscrowCustody,
+  EscrowMode,
   EscrowSettlementQuote,
   EscrowStatus,
   ResultSchema,
