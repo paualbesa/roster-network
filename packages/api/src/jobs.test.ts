@@ -217,6 +217,13 @@ describe("marketplace jobs", () => {
     expect(body.passport.metrics.successCount).toBe(1);
     expect(body.passport.metrics.volumeSettledUsdc).toBe("1.000000");
 
+    const buyerPassport = await app.request(`/v1/agents/${buyerId}/passport`, { headers: auth });
+    const buyerBody = (await buyerPassport.json()) as PassportBody;
+    expect(buyerBody.passport.score).toBe("85.0000");
+    expect(buyerBody.passport.metrics.successCount).toBe(1);
+    expect(buyerBody.passport.metrics.failureCount).toBe(0);
+    expect(buyerBody.passport.metrics.volumeSettledUsdc).toBe("0.000000");
+
     const again = await app.request(`/v1/jobs/${held.job.id}/result`, {
       method: "POST",
       headers: auth,
@@ -633,6 +640,12 @@ describe("marketplace jobs", () => {
     expect(body.passport.metrics.failureCount).toBe(1);
     expect(body.passport.metrics.volumeSettledUsdc).toBe("0.000000");
 
+    const buyerPassport = await app.request(`/v1/agents/${buyerId}/passport`, { headers: buyerOrg.auth });
+    const buyerBody = (await buyerPassport.json()) as PassportBody;
+    expect(buyerBody.passport.score).toBe("0.0000");
+    expect(buyerBody.passport.metrics.successCount).toBe(0);
+    expect(buyerBody.passport.metrics.failureCount).toBe(0);
+
     const history = await app.request(`/v1/agents/${buyerId}/transactions`, { headers: buyerOrg.auth });
     const types = ((await history.json()) as { transactions: { type: string }[] }).transactions.map((tx) => tx.type);
     expect(types).toContain("escrow_refund");
@@ -825,6 +838,12 @@ describe("marketplace jobs", () => {
     expect(passportBody.passport.metrics.errorCount).toBe(1);
     expect(passportBody.passport.metrics.successCount).toBe(0);
     expect(passportBody.passport.metrics.volumeSettledUsdc).toBe("0.000000");
+
+    const buyerPassport = await app.request(`/v1/agents/${buyerId}/passport`, { headers: buyerOrg.auth });
+    const buyerPassportBody = (await buyerPassport.json()) as PassportBody;
+    expect(buyerPassportBody.passport.score).toBe("0.0000");
+    expect(buyerPassportBody.passport.metrics.successCount).toBe(0);
+    expect(buyerPassportBody.passport.metrics.failureCount).toBe(0);
 
     const again = await app.request("/v1/jobs/expire", { method: "POST", headers: sellerOrg.auth });
     expect(((await again.json()) as { jobs: unknown[] }).jobs).toEqual([]);

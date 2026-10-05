@@ -140,10 +140,31 @@ export function createSupabaseTableClient(client: {
 }): RosterTableClient {
   return {
     async selectAll(table) {
-      const { data, error } = await client.from(table).select("*");
-      if (error) throw new Error(`Supabase ${table} read failed: ${error.message}`);
-      if (!Array.isArray(data)) return [];
-      return data.filter(isRecord);
+      // PostgREST caps a bare select at 1000 rows. A short page would make the
+      // next flush treat the missing rows as orphans and delete them.
+      const column = orderColumn(table);
+      const pageSize = 1000;
+      const rows: Record<string, unknown>[] = [];
+      const source = client.from(table) as unknown as {
+        select: (columns: string) => {
+          order: (column: string) => {
+            range: (
+              from: number,
+              to: number,
+            ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+          };
+        };
+      };
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await source.select("*").order(column).range(from, from + pageSize - 1);
+        if (error) throw new Error(`Supabase ${table} read failed: ${error.message}`);
+        if (!Array.isArray(data) || data.length === 0) break;
+        for (const row of data) {
+          if (isRecord(row)) rows.push(row);
+        }
+        if (data.length < pageSize) break;
+      }
+      return rows;
     },
     async upsert(table, rows) {
       for (let index = 0; index < rows.length; index += CHUNK) {
@@ -186,6 +207,12 @@ function cloneWallet(snapshot: MockWalletSnapshot): MockWalletSnapshot {
       ? { networkFeesCollectedUsdc: snapshot.networkFeesCollectedUsdc }
       : {}),
   };
+}
+
+function orderColumn(table: string): string {
+  const found = DELETE_ORDER.find((entry) => entry.table === table);
+  if (!found) throw new Error(`No primary key for ${table}.`);
+  return found.column;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

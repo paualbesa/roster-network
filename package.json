@@ -18,6 +18,7 @@
     "demo:job": "pnpm build && pnpm --filter @albesa/sdk demo:job",
     "demo:marketplace": "pnpm build && pnpm --filter @albesa/sdk demo:marketplace",
     "demo:sla": "pnpm build && pnpm --filter @albesa/sdk demo:sla",
+    "simulate": "turbo run build --filter=@albesa/api && tsx packages/api/src/simulate/run.ts",
     "start": "pnpm --filter @albesa/api start"
   },
   "pnpm": {

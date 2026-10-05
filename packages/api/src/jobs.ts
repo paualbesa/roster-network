@@ -583,6 +583,17 @@ export class JobOrchestrator {
       error: !released,
       escrowId: settled.escrow.id,
     });
+    if (released) {
+      // Buyer passport records the hire. Volume stays on the seller so GMV is not counted twice.
+      await this.service.recordEscrowCompletion({
+        organizationId: job.organizationId,
+        agentId: job.buyerAgentId,
+        outcome: "success",
+        latencyMs,
+        volumeUsdc: "0.000000",
+        escrowId: settled.escrow.id,
+      });
+    }
     const next: StoredJob = {
       ...job,
       status: settled.escrow.status,

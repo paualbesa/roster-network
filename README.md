@@ -265,7 +265,7 @@ pnpm demo:sla
 
 Listings do not carry a wallet. The sandbox mapping is a binding stored in `data/jobs.json` (`ROSTER_JOBS_FILE`): the organization that published the listing calls `PUT /v1/jobs/listings/:id/seller` with `{ "sellerAgentId" }`. That agent has to belong to the listing organization. Binding also stores the agent on the listing so search can read its passport. A listing with no binding returns `seller_unbound` and does not lock funds. Direct `POST /v1/escrows` still requires both agents to share one organization.
 
-`POST /v1/jobs/:id/result` is called by the seller organization. Escrow validates the payload, releases the seller net of the 1% take-rate or refunds the buyer in full, then `recordEscrowCompletion` updates the seller passport. Observed latency defaults to the listing `p95Ms` when the body omits `latencyMs`. Settled volume is the locked amount (GMV), not the net after the take-rate. The buyer and the seller can both read the job. Jobs and bindings reload from the jobs file when the API process restarts. A jobs file written before `sellerOrganizationId` existed still loads; that field defaults to the buyer organization. A jobs file written before `deadlineAt` existed still loads; those jobs have no SLA and do not time out.
+`POST /v1/jobs/:id/result` is called by the seller organization. Escrow validates the payload, releases the seller net of the 1% take-rate or refunds the buyer in full, then `recordEscrowCompletion` updates the seller passport. A release also records a success on the buyer passport with zero settled volume, so both passports move and GMV is not counted twice. A schema failure or SLA timeout records a seller failure only. Observed latency defaults to the listing `p95Ms` when the body omits `latencyMs`. Settled volume is the locked amount (GMV), not the net after the take-rate. The buyer and the seller can both read the job. Jobs and bindings reload from the jobs file when the API process restarts. A jobs file written before `sellerOrganizationId` existed still loads; that field defaults to the buyer organization. A jobs file written before `deadlineAt` existed still loads; those jobs have no SLA and do not time out.
 
 The listing `latency.p95Ms` is the job SLA, stored as `slaMs` and `deadlineAt` (`createdAt` plus that window). `POST /v1/jobs/expire` refunds every held job visible to the caller whose deadline has passed. The job status becomes `timed_out`. The buyer receives the locked principal, the take-rate is not collected, and the seller passport records a failure. A delivery that arrives after the deadline settles the same way and does not release, even when the payload matches the schema. The sandbox evaluates the deadline on that call. It does not run a background timer.
 
@@ -305,6 +305,29 @@ Production is [https://roster.network](https://roster.network), a Cloudflare tun
 
 ## Scripts
 
+## Sandbox simulation
+
+`pnpm simulate` runs the four pillars in one sandbox process: semantic discovery, escrow, mock USDC settlement (including the escrow take-rate and the gasless Roster fee), and both reputation passports. It does not use mainnet, seed phrases, or real funds.
+
+The suite always runs twice: once in memory, then again on a temporary JSON store that is reloaded before the conservation check. When `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are all set, the same scenarios run against Postgres. When they are all unset, that variant is skipped. A partial set fails the Postgres section instead of writing a mixed store.
+
+Scenarios:
+
+- Happy path. A buyer finds a seller with `semantic=1`, hires that listing, funds escrow, and the seller delivers. Mock USDC releases the seller net of the 1% escrow take-rate. `POST /v1/escrow/settle` quotes the gasless fee (1% + 0.003 USDC) on the mock cluster and does not broadcast. The seller passport records the volume. The buyer passport records the hire with zero volume.
+- Failed delivery. A schema miss refunds the buyer, leaves the fee uncollected, and records a seller failure.
+- SLA timeout. Advancing the sandbox clock refunds the principal, skips the take-rate, and records a seller failure. A second sweep is a no-op.
+- Insufficient balance. The lock is rejected and no job or balance change is stored.
+- Replayed settlement. A second settle returns the same sandbox signature and fee. A second delivery, including two in-flight deliveries, does not pay or score the job twice.
+- Fleet load. 24 concurrent jobs across the first-party catalog. Balances stay equal to the sandbox grants (nothing is minted or lost outside those grants). Passport scores match the metrics.
+
+```bash
+pnpm simulate
+pnpm simulate -- --base-url https://roster.network/roster-api
+pnpm simulate -- --base-url https://roster.network/roster-api --execute
+```
+
+`--base-url` is read-only: it checks `/health` is sandbox, checks the OpenAPI paths for the four pillars, and checks that unauthenticated job and search calls are rejected. `--execute` runs the full suite against that API and refuses a mainnet mode or a rail other than `mock` or `base-sim`. It still will not call settle unless prepare-lock reports the mock cluster.
+
 ```bash
 pnpm lint
 pnpm typecheck
@@ -317,6 +340,7 @@ pnpm demo:registry
 pnpm demo:job
 pnpm demo:marketplace
 pnpm demo:sla
+pnpm simulate
 pnpm --filter @albesa/mcp build
 node packages/mcp/dist/stdio.js
 pnpm --filter web dev
