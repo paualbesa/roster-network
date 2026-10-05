@@ -57,4 +57,24 @@ describe("admin proxy headers", () => {
     expect(isAdminProxyPath(["v1", "admin", "jobs", "expire"])).toBe(true);
     expect(isAdminProxyPath(["health"])).toBe(false);
   });
+
+  it("forwards the client address, Idempotency-Key, and request id upstream", () => {
+    const headers = new Headers({
+      "cf-connecting-ip": "203.0.113.7",
+      "x-forwarded-for": "203.0.113.7, 172.68.0.1",
+      "idempotency-key": "job-1",
+      "x-request-id": "trace-12345678",
+      cookie: "other=1",
+    });
+    const forwarded = buildProxyHeaders(headers, ["v1", "jobs"]);
+    expect(forwarded.get("cf-connecting-ip")).toBe("203.0.113.7");
+    expect(forwarded.get("x-forwarded-for")).toBe("203.0.113.7");
+    expect(forwarded.get("idempotency-key")).toBe("job-1");
+    expect(forwarded.get("x-request-id")).toBe("trace-12345678");
+    expect(forwarded.get("cookie")).toBeNull();
+
+    const bare = buildProxyHeaders(new Headers({ "x-forwarded-for": "198.51.100.4, 10.0.0.1" }), ["v1", "jobs"]);
+    expect(bare.get("x-forwarded-for")).toBe("198.51.100.4");
+    expect(bare.get("cf-connecting-ip")).toBeNull();
+  });
 });

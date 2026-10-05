@@ -1,5 +1,7 @@
 import { SolanaFeeError, resolveSolanaEngineConfig, type SolanaEngineConfig } from "@albesa/solana";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { secureHeaders } from "hono/secure-headers";
 import {
   createWalletProvider,
   isPersistentSandboxWallet,
@@ -33,6 +35,17 @@ import {
 import { adminGateFor, adminGateResponse, isAdminPath, registerAdminRoutes } from "./admin.js";
 import { rosterCors } from "./cors.js";
 import { attachAppRuntime } from "./fleet.js";
+import {
+  clientAddress,
+  IDEMPOTENCY_HEADER,
+  IdempotencyCache,
+  isValidIdempotencyKey,
+  RateLimiter,
+  readOrCreateRequestId,
+  type RateLimitConfig,
+  type RateLimitDecision,
+  type RateLimitRule,
+} from "./http.js";
 import { openApiDocument } from "./openapi.js";
 import { registerSolanaEscrowRoutes } from "./solana-routes.js";
 import {
@@ -48,10 +61,30 @@ import { JsonFileStore } from "./store.js";
 type AppEnv = {
   Variables: {
     orgId: string;
+    requestId: string;
   };
 };
 
-export interface AppOptions {
+/** Largest JSON body the API reads. Larger bodies get 413 payload_too_large. */
+export const MAX_BODY_BYTES = 256 * 1024;
+
+const STARTED_AT = new Date();
+
+/** Transport options. server.ts turns them on; tests opt in. */
+export interface AppHttpOptions {
+  /** Rate limits. Omit or pass null to turn them off (tests, scripts). */
+  rateLimit?: RateLimitConfig | null;
+  /** One JSON line per request on stdout. */
+  accessLog?: boolean;
+  /** Reported by /health. Omit it to read `ROSTER_GIT_SHA`. */
+  version?: string;
+  /** Reported by /health: `memory`, `json`, or `supabase`. */
+  storage?: string;
+  /** Clock for the rate limiter and idempotency cache. */
+  clock?: () => number;
+}
+
+export interface AppOptions extends AppHttpOptions {
   mode?: RuntimeMode;
   now?: () => Date;
   service?: AgentFinanceService;
@@ -133,6 +166,36 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   });
   const app = new Hono<AppEnv>();
   attachAppRuntime(app, { mode, service, registry, jobs, orchestrator });
+  const clock = options.clock ?? Date.now;
+  const limits = options.rateLimit ?? null;
+  const limiter = new RateLimiter(clock);
+  const idempotency = new IdempotencyCache(clock);
+  const version = options.version ?? (process.env.ROSTER_GIT_SHA?.trim() || "dev");
+  const storage = options.storage ?? (options.dataFile ? "json" : "memory");
+  const accessLog = options.accessLog === true;
+
+  // Request id and access log wrap everything, including errors and 404s.
+  app.use("*", async (c, next) => {
+    const started = performance.now();
+    const requestId = readOrCreateRequestId(c.req.header("x-request-id"));
+    c.set("requestId", requestId);
+    await next();
+    c.res.headers.set("x-request-id", requestId);
+    if (accessLog) {
+      console.log(
+        JSON.stringify({
+          t: new Date().toISOString(),
+          msg: "request",
+          requestId,
+          method: c.req.method,
+          path: c.req.path,
+          status: c.res.status,
+          ms: Math.round((performance.now() - started) * 10) / 10,
+          org: c.get("orgId") ?? null,
+        }),
+      );
+    }
+  });
 
   const flush = options.supabase?.flush;
   if (flush) {
@@ -156,10 +219,47 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   // Direct browser calls from https://roster.network and localhost.
   // A same-origin Next.js proxy on the marketing site is the preferred path.
   app.use("*", rosterCors());
+  app.use(
+    "*",
+    secureHeaders({
+      crossOriginResourcePolicy: false,
+      crossOriginEmbedderPolicy: false,
+      crossOriginOpenerPolicy: false,
+    }),
+  );
+  app.use(
+    "/v1/*",
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (c) =>
+        c.json(
+          {
+            error: {
+              code: "payload_too_large",
+              message: `Request body must be at most ${(MAX_BODY_BYTES / 1024).toString()} KB.`,
+            },
+          },
+          413,
+        ),
+    }),
+  );
 
-  app.get("/health", (c) => c.json({ ok: true, product: "Roster", mode, rail: walletRail, asset: "USDC" }));
+  app.get("/health", (c) =>
+    c.json({
+      ok: true,
+      product: "Roster",
+      mode,
+      rail: walletRail,
+      asset: "USDC",
+      version,
+      storage,
+      startedAt: STARTED_AT.toISOString(),
+      uptimeS: Math.floor((Date.now() - STARTED_AT.getTime()) / 1000),
+    }),
+  );
 
   app.get("/openapi.json", (c) => c.json(openApiDocument));
+  app.get("/v1/openapi.json", (c) => c.json(openApiDocument));
 
   const adminDeps = {
     mode,
@@ -171,14 +271,52 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     ...(options.adminToken !== undefined ? { adminToken: options.adminToken } : {}),
   };
 
+  const limit = (c: Context<AppEnv>, key: string, rule: RateLimitRule): Response | null => {
+    if (!limits) return null;
+    const decision = limiter.hit(key, rule);
+    setRateLimitHeaders(c, decision);
+    if (decision.allowed) return null;
+    return rateLimitedResponse(c, decision);
+  };
+  const failureKey = (c: Context<AppEnv>) => `fail:${clientAddress(c.req.raw.headers)}`;
+  const tooManyFailures = (c: Context<AppEnv>): Response | null => {
+    if (!limits) return null;
+    const decision = limiter.peek(failureKey(c), limits.authFailures);
+    if (decision.allowed) return null;
+    return rateLimitedResponse(c, decision);
+  };
+  const recordFailure = (c: Context<AppEnv>): void => {
+    if (limits) limiter.hit(failureKey(c), limits.authFailures);
+  };
+
   app.use("/v1/*", async (c, next) => {
+    if (c.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+    const address = clientAddress(c.req.raw.headers);
     if (isAdminPath(c.req.path)) {
+      const blocked = tooManyFailures(c);
+      if (blocked) return blocked;
       const gate = adminGateFor(c.req.raw.headers, adminDeps);
-      if (!gate.ok) return adminGateResponse(c, gate);
+      if (!gate.ok) {
+        if (gate.status === 401) recordFailure(c);
+        return adminGateResponse(c, gate);
+      }
       await next();
       return;
     }
     if (isPublicRoute(c.req.method, c.req.path)) {
+      if (limits) {
+        const rule = isAuthRoute(c.req.method, c.req.path)
+          ? limits.auth
+          : c.req.path === "/v1/waitlist"
+            ? limits.waitlist
+            : limits.publicRead;
+        const bucket = isAuthRoute(c.req.method, c.req.path) ? "auth" : c.req.path === "/v1/waitlist" ? "waitlist" : "public";
+        const blocked = limit(c, `${bucket}:${address}`, rule);
+        if (blocked) return blocked;
+      }
       await next();
       return;
     }
@@ -188,22 +326,92 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     if (!apiKey) {
       return c.json({ error: { code: "unauthorized", message: "Send Authorization: Bearer <api key>." } }, 401);
     }
+    const blocked = tooManyFailures(c);
+    if (blocked) return blocked;
+    let orgId: string | null;
     if (looksLikeJwt(apiKey)) {
-      const orgId = await organizationForSupabaseToken(service, options.supabase, apiKey);
-      if (typeof orgId !== "string") {
-        return c.json({ error: { code: orgId.code, message: orgId.message } }, orgId.status);
+      const resolved = await organizationForSupabaseToken(service, options.supabase, apiKey);
+      if (typeof resolved !== "string") {
+        if (resolved.status === 401) recordFailure(c);
+        return c.json({ error: { code: resolved.code, message: resolved.message } }, resolved.status);
       }
-      c.set("orgId", orgId);
-      await next();
-      return;
+      orgId = resolved;
+    } else {
+      orgId = service.authenticate(apiKey);
     }
-    const orgId = service.authenticate(apiKey);
     if (!orgId) {
+      recordFailure(c);
       return c.json({ error: { code: "unauthorized", message: "Unknown API key." } }, 401);
     }
     c.set("orgId", orgId);
+    if (limits) {
+      const limited = limit(c, `org:${orgId}`, limits.organization);
+      if (limited) return limited;
+    }
     await next();
     return;
+  });
+
+  // Idempotency-Key on authenticated writes. The first response is replayed for 24 hours.
+  app.use("/v1/*", async (c, next) => {
+    const method = c.req.method;
+    const key = c.req.header(IDEMPOTENCY_HEADER)?.trim();
+    const orgId = c.get("orgId");
+    if ((method !== "POST" && method !== "PUT" && method !== "DELETE") || !key || !orgId) {
+      await next();
+      return;
+    }
+    if (!isValidIdempotencyKey(key)) {
+      return c.json(
+        { error: { code: "invalid_request", message: "Idempotency-Key must be 1-255 printable ASCII characters." } },
+        400,
+      );
+    }
+    const body = await c.req.text();
+    const fingerprint = IdempotencyCache.fingerprint(body);
+    const scope = IdempotencyCache.scope(orgId, method, c.req.path, key);
+    const existing = idempotency.lookup(scope);
+    if (existing === "pending") {
+      return c.json(
+        { error: { code: "idempotency_in_progress", message: "A request with this Idempotency-Key is still running." } },
+        409,
+      );
+    }
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        return c.json(
+          {
+            error: {
+              code: "idempotency_conflict",
+              message: "This Idempotency-Key was already used with a different request body.",
+            },
+          },
+          409,
+        );
+      }
+      const headers = new Headers({ "idempotent-replayed": "true" });
+      if (existing.contentType) headers.set("content-type", existing.contentType);
+      return new Response(existing.body, { status: existing.status, headers });
+    }
+    idempotency.begin(scope);
+    try {
+      await next();
+    } catch (error) {
+      idempotency.abort(scope);
+      throw error;
+    }
+    const status = c.res.status;
+    if (status >= 500) {
+      idempotency.abort(scope);
+      return;
+    }
+    const text = await c.res.clone().text();
+    idempotency.finish(scope, {
+      fingerprint,
+      status,
+      body: text,
+      contentType: c.res.headers.get("content-type"),
+    });
   });
 
   app.post("/v1/organizations", async (c) => {
@@ -263,6 +471,25 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   app.get("/v1/account", async (c) => {
     const result = await service.getAccount(c.get("orgId"));
     return c.json(result);
+  });
+
+  app.delete("/v1/account/api-key", async (c) => {
+    const token = /^Bearer\s+(\S+)$/.exec(c.req.header("authorization") ?? "")?.[1] ?? "";
+    if (looksLikeJwt(token)) {
+      throw new ServiceError(400, "invalid_request", "Only Roster API keys can be revoked. Sign out of Supabase instead.");
+    }
+    const result = await service.revokeApiKey(token);
+    return c.json(result);
+  });
+
+  app.post("/v1/waitlist", async (c) => {
+    const body = await readJson(c);
+    const email = readString(body, "email");
+    if (!email) throw new ServiceError(400, "invalid_request", "email is required.");
+    const source = readString(body, "source");
+    await service.joinWaitlist({ email, source });
+    // Same answer for new and repeated emails, so the form does not reveal who signed up.
+    return c.json({ ok: true }, 202);
   });
 
   app.get("/v1/agents", async (c) => {
@@ -462,9 +689,14 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     if (error instanceof RegistryError) {
       return c.json({ error: { code: error.code, message: error.message } }, error.status);
     }
-    console.error(error);
-    return c.json({ error: { code: "internal", message: "Internal error." } }, 500);
+    const requestId = c.get("requestId");
+    console.error(JSON.stringify({ t: new Date().toISOString(), msg: "unhandled", requestId, path: c.req.path }), error);
+    return c.json({ error: { code: "internal", message: "Internal error.", requestId } }, 500);
   });
+
+  app.notFound((c) =>
+    c.json({ error: { code: "not_found", message: `No route for ${c.req.method} ${c.req.path}.` } }, 404),
+  );
 
   return app;
 }
@@ -614,13 +846,53 @@ function parseEscrowResult(body: unknown): unknown {
   return body.result;
 }
 
-function isPublicRoute(method: string, path: string): boolean {
+const PASSPORT_PATH_RE = /^\/v1\/agents\/[^/]+\/passport$/;
+const LISTING_PATH_RE = /^\/v1\/registry\/listings\/[^/]+$/;
+
+function isAuthRoute(method: string, path: string): boolean {
   return (
     method === "POST" &&
     (path === "/v1/organizations" ||
       path === "/v1/accounts" ||
       path === "/v1/accounts/login" ||
       path === "/v1/accounts/session")
+  );
+}
+
+/**
+ * Routes that do not need an API key. Discovery and the reputation passport are
+ * public reads, as the product brief asks for public reliability metrics.
+ */
+export function isPublicRoute(method: string, path: string): boolean {
+  if (isAuthRoute(method, path)) return true;
+  if (method === "POST" && path === "/v1/waitlist") return true;
+  if (method !== "GET" && method !== "HEAD") return false;
+  return (
+    path === "/v1/openapi.json" ||
+    path === "/v1/registry/listings" ||
+    path === "/v1/registry/search" ||
+    LISTING_PATH_RE.test(path) ||
+    PASSPORT_PATH_RE.test(path)
+  );
+}
+
+function setRateLimitHeaders(c: Context<AppEnv>, decision: RateLimitDecision): void {
+  c.header("ratelimit-limit", decision.limit.toString());
+  c.header("ratelimit-remaining", decision.remaining.toString());
+  c.header("ratelimit-reset", decision.resetS.toString());
+}
+
+function rateLimitedResponse(c: Context<AppEnv>, decision: RateLimitDecision): Response {
+  setRateLimitHeaders(c, decision);
+  c.header("retry-after", decision.resetS.toString());
+  return c.json(
+    {
+      error: {
+        code: "rate_limited",
+        message: `Too many requests. Retry in ${decision.resetS.toString()} s.`,
+      },
+    },
+    429,
   );
 }
 

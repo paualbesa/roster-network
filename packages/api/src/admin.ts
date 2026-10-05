@@ -285,8 +285,22 @@ export function registerAdminRoutes<E extends Env>(app: Hono<E>, deps: AdminDeps
     const listed = deps.registry.list();
     const jobs = await deps.orchestrator.listAllJobs();
     const summary = summarizeJobs(jobs.jobs);
+    const waitlist = await deps.service.listWaitlist();
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return c.json({
-      health: { ok: true, product: "Roster", mode: deps.mode, rail: deps.rail, asset: "USDC" },
+      health: {
+        ok: true,
+        product: "Roster",
+        mode: deps.mode,
+        rail: deps.rail,
+        asset: "USDC",
+        version: process.env.ROSTER_GIT_SHA?.trim() || "dev",
+        uptimeS: Math.floor(process.uptime()),
+      },
+      waitlist: {
+        total: waitlist.length,
+        last7d: waitlist.filter((entry) => Date.parse(entry.createdAt) >= weekAgo).length,
+      },
       counts: {
         accounts: directory.accounts.filter((account) => account.userId !== null).length,
         organizations: directory.accounts.length,
@@ -297,6 +311,11 @@ export function registerAdminRoutes<E extends Env>(app: Hono<E>, deps: AdminDeps
       },
       gmv: summary.gmv,
     });
+  });
+
+  app.get("/v1/admin/waitlist", async (c) => {
+    const entries = await deps.service.listWaitlist();
+    return c.json({ total: entries.length, entries });
   });
 
   app.get("/v1/admin/accounts", async (c) => {

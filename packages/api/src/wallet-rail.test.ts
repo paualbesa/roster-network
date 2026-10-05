@@ -28,12 +28,13 @@ describe("simulated Base rail", () => {
 
   it("funds and settles on base-sim without changing the sandbox fee or principal", async () => {
     const app = createApp({ mode: "sandbox", walletRail: "base-sim" });
-    expect(await (await app.request("/health")).json()).toEqual({
+    expect(await (await app.request("/health")).json()).toMatchObject({
       ok: true,
       product: "Roster",
       mode: "sandbox",
       rail: "base-sim",
       asset: "USDC",
+    storage: "memory",
     });
 
     const created = await app.request("/v1/organizations", {

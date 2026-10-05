@@ -48,10 +48,16 @@ async function organization(app: ReturnType<typeof createApp>, name: string) {
 }
 
 describe("capability registry routes", () => {
-  it("requires an organization API key, then registers and ranks listings", async () => {
+  it("serves discovery publicly, requires an organization API key to register, and ranks listings", async () => {
     const app = createApp({ mode: "sandbox" });
     const anonymous = await app.request("/v1/registry/search");
-    expect(anonymous.status).toBe(401);
+    expect(anonymous.status).toBe(200);
+    const anonymousWrite = await app.request("/v1/registry/listings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(invoice),
+    });
+    expect(anonymousWrite.status).toBe(401);
 
     const auth = await organization(app, "Acme");
     const other = await organization(app, "Other");

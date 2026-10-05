@@ -55,7 +55,20 @@ export function adminUpstreamToken(headers: Headers): string | null {
   return readAdminCookie(headers.get("cookie"));
 }
 
-const FORWARD_REQUEST = ["authorization", "content-type", "accept"] as const;
+const FORWARD_REQUEST = ["authorization", "content-type", "accept", "idempotency-key", "x-request-id"] as const;
+
+/**
+ * Client address headers for the API rate limiter. roster-api only listens on
+ * 127.0.0.1, so it trusts what this proxy sends. Cloudflare sets cf-connecting-ip.
+ */
+export function forwardClientAddress(requestHeaders: Headers, headers: Headers): void {
+  const cf = requestHeaders.get("cf-connecting-ip")?.trim();
+  const forwarded = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const real = requestHeaders.get("x-real-ip")?.trim();
+  const address = cf || forwarded || real;
+  if (cf) headers.set("cf-connecting-ip", cf);
+  if (address) headers.set("x-forwarded-for", address);
+}
 
 export function buildProxyHeaders(requestHeaders: Headers, segments: readonly string[]): Headers {
   const headers = new Headers();
@@ -63,6 +76,7 @@ export function buildProxyHeaders(requestHeaders: Headers, segments: readonly st
     const value = requestHeaders.get(name);
     if (value) headers.set(name, value);
   }
+  forwardClientAddress(requestHeaders, headers);
   if (isAdminProxyPath(segments)) {
     const token = adminUpstreamToken(requestHeaders);
     if (token) headers.set("x-roster-admin-token", token);

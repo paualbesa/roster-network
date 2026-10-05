@@ -44,6 +44,17 @@ export function attachAppRuntime(app: object, runtime: Omit<AppRuntime, "infligh
 }
 
 /**
+ * Refund every held job whose listing SLA has passed, across organizations.
+ * server.ts calls it on a timer so a buyer never has to poll `POST /v1/jobs/expire`.
+ */
+export async function sweepExpiredJobs(app: object): Promise<number> {
+  const runtime = runtimes.get(app);
+  if (!runtime) throw new Error("sweepExpiredJobs requires the Hono app returned by createApp.");
+  const expired = await runtime.orchestrator.expireAllDue();
+  return expired.jobs.length;
+}
+
+/**
  * Idempotent sandbox boot: Roster Labs, the six first-party listings, a bound
  * seller agent, and a treasury transfer so that agent can be paid.
  * A second call keeps the same organization, agent, and listing ids.

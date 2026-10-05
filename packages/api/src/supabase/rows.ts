@@ -22,7 +22,7 @@ import {
   type ReputationTotals,
 } from "@albesa/reputation";
 import type { ListingSellerBinding, MemoryJobStore, StoredJob } from "../jobs.js";
-import type { MemoryStore } from "../store.js";
+import type { MemoryStore, WaitlistEntry } from "../store.js";
 import { toVectorLiteral } from "./vector.js";
 
 export const ROSTER_TABLES = {
@@ -43,6 +43,7 @@ export const ROSTER_TABLES = {
   sellers: "listing_sellers",
   reputationTotals: "reputation_totals",
   reputationEvents: "reputation_events",
+  waitlist: "waitlist_entries",
 } as const;
 
 const WALLET_STATE_ID = "sandbox";
@@ -67,6 +68,7 @@ export interface RosterSnapshot {
   sellers: ListingSellerBinding[];
   reputationTotals: ReputationTotals[];
   reputationEvents: ReputationEventRecord[];
+  waitlist: WaitlistEntry[];
 }
 
 export function emptySnapshot(): RosterSnapshot {
@@ -90,6 +92,7 @@ export function emptySnapshot(): RosterSnapshot {
     sellers: [],
     reputationTotals: [],
     reputationEvents: [],
+    waitlist: [],
   };
 }
 
@@ -134,6 +137,7 @@ export function captureSnapshot(input: {
     sellers: input.jobs.listSellerBindings(),
     reputationTotals: input.reputation.listTotals(),
     reputationEvents: input.reputation.listEvents(),
+    waitlist: [...input.store.waitlist.values()].map((entry) => ({ ...entry })),
   };
 }
 
@@ -244,6 +248,11 @@ export function snapshotToRows(snapshot: RosterSnapshot): Record<string, Record<
     })),
     [ROSTER_TABLES.reputationTotals]: snapshot.reputationTotals.map(reputationTotalsRow),
     [ROSTER_TABLES.reputationEvents]: snapshot.reputationEvents.map(reputationEventRow),
+    [ROSTER_TABLES.waitlist]: snapshot.waitlist.map((entry) => ({
+      email: entry.email,
+      source: entry.source,
+      created_at: entry.createdAt,
+    })),
   };
 }
 
@@ -371,6 +380,14 @@ export function rowsToSnapshot(tables: Record<string, Record<string, unknown>[]>
   for (const row of tables[ROSTER_TABLES.reputationEvents] ?? []) {
     snapshot.reputationEvents.push(reputationEventFromRow(row));
   }
+  for (const row of tables[ROSTER_TABLES.waitlist] ?? []) {
+    const source = row.source;
+    snapshot.waitlist.push({
+      email: requiredString(row, "email", "waitlist_entries"),
+      source: typeof source === "string" ? source : null,
+      createdAt: normalizeTimestamp(requiredString(row, "created_at", "waitlist_entries")),
+    });
+  }
   return snapshot;
 }
 
@@ -394,6 +411,7 @@ export function applySnapshot(input: {
   store.escrows.clear();
   store.transactions.length = 0;
   store.ledger.length = 0;
+  store.waitlist.clear();
   for (const organization of snapshot.organizations) store.organizations.set(organization.id, organization);
   for (const user of snapshot.users) {
     const email = user.email.toLowerCase();
@@ -410,6 +428,7 @@ export function applySnapshot(input: {
   for (const escrow of snapshot.escrows) store.escrows.set(escrow.id, escrow);
   store.transactions.push(...snapshot.transactions);
   store.ledger.push(...snapshot.ledger);
+  for (const entry of snapshot.waitlist) store.waitlist.set(entry.email, entry);
   input.jobs.replaceAll(snapshot.jobs, snapshot.sellers);
   input.reputation.replaceAll(snapshot.reputationTotals, snapshot.reputationEvents);
   input.registry.replaceAll(snapshot.listings);
@@ -433,9 +452,11 @@ export const UPSERT_ORDER = [
   ROSTER_TABLES.sellers,
   ROSTER_TABLES.reputationTotals,
   ROSTER_TABLES.reputationEvents,
+  ROSTER_TABLES.waitlist,
 ] as const;
 
 export const DELETE_ORDER: { table: string; column: string }[] = [
+  { table: ROSTER_TABLES.waitlist, column: "email" },
   { table: ROSTER_TABLES.reputationEvents, column: "id" },
   { table: ROSTER_TABLES.reputationTotals, column: "agent_id" },
   { table: ROSTER_TABLES.sellers, column: "listing_id" },
@@ -614,4 +635,10 @@ function parseBody<T>(value: unknown, table: string): T {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Postgres returns `2026-10-05T10:00:00+00:00`. Keep the ISO form the API writes. */
+function normalizeTimestamp(value: string): string {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? value : new Date(parsed).toISOString();
 }

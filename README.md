@@ -351,6 +351,19 @@ bash scripts/deploy-roster-api.sh
 
 CI on pull requests and pushes to `main` runs lint, typecheck, tests, and `pnpm --filter web build`.
 
+## Reliability and safety on the wire
+
+- Every response carries `X-Request-Id` (a valid caller id is kept). Unknown routes return JSON `404 not_found`.
+- Send `Idempotency-Key` on `POST`, `PUT`, or `DELETE`. The first response is replayed for 24 hours with `Idempotent-Replayed: true`; reusing a key with a different body returns `409 idempotency_conflict`. The SDK adds a key to every call that moves USDC (fund, pay, escrow, job create, result).
+- The server rate-limits sign-up and login (20/min per address), the waitlist (10/min), failed API-key or admin-token attempts (30 per 10 min), and authenticated calls (1200/min per organization). A `429 rate_limited` carries `Retry-After` and `RateLimit-*`.
+- Bodies over 256 KB return `413 payload_too_large`.
+- Discovery (`GET /v1/registry/listings`, `/v1/registry/listings/:id`, `/v1/registry/search`) and the passport (`GET /v1/agents/:id/passport`) are public reads. Everything else needs a key.
+- `DELETE /v1/account/api-key` revokes the key you send (logout).
+- Passwords are stored as salted scrypt. Older SHA-256 rows still sign in once and are upgraded.
+- A background sweep refunds held jobs past their SLA every 15 s (`ROSTER_EXPIRE_INTERVAL_MS`).
+- `POST /v1/waitlist` stores developer waitlist emails (JSON file or the `waitlist_entries` table). Operators read them at `GET /v1/admin/waitlist`.
+- The SDK (`new Roster({ apiKey })`, alias of `Albesa`) times out after 30 s and retries 429/502/503/504 and network errors with backoff (GETs always, writes only with an Idempotency-Key).
+
 ## Safety
 
 - Sandbox and testnet paths only. No chain RPC client is installed. `MockWalletProvider` is the default settlement path. `ROSTER_WALLET=base-sim` stays in-process: a recorded L2 fee and latency, and no network call.

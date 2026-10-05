@@ -31,6 +31,14 @@ export class SupabaseMirror {
   private reputationDirty = false;
   private registryDirty = false;
   private tail: Promise<void> = Promise.resolve();
+  /**
+   * Fingerprint of every row this process last wrote, per table and key.
+   * `null` until the first successful write, and again after a failed one,
+   * so the next flush falls back to a full upsert and a full orphan scan.
+   */
+  private written: Map<string, Map<string, string>> | null = null;
+  /** Rows sent by the last flush. Tests and logs read it. */
+  lastWriteStats: { upserted: number; deleted: number; full: boolean } = { upserted: 0, deleted: 0, full: true };
 
   constructor(
     private readonly io: RosterTableClient,
@@ -111,19 +119,44 @@ export class SupabaseMirror {
 
   private async writeSnapshot(snapshot: RosterSnapshot): Promise<void> {
     const rows = snapshotToRows(snapshot);
+    const previous = this.written;
+    this.written = null;
+    const next = new Map<string, Map<string, string>>();
+    let upserted = 0;
+    let deleted = 0;
     for (const table of UPSERT_ORDER) {
-      await this.io.upsert(table, rows[table] ?? []);
+      const column = KEY_COLUMN.get(table);
+      const before = previous?.get(table);
+      const current = new Map<string, string>();
+      const changed: Record<string, unknown>[] = [];
+      for (const row of rows[table] ?? []) {
+        const fingerprint = JSON.stringify(row);
+        const key = column ? String(row[column] ?? "") : fingerprint;
+        current.set(key, fingerprint);
+        if (!before || before.get(key) !== fingerprint) changed.push(row);
+      }
+      if (changed.length > 0) await this.io.upsert(table, changed);
+      upserted += changed.length;
+      next.set(table, current);
     }
     for (const target of DELETE_ORDER) {
-      const keep = new Set((rows[target.table] ?? []).map((row) => String(row[target.column] ?? "")));
-      const existing = await this.io.selectAll(target.table);
-      const orphans = existing
-        .map((row) => row[target.column])
-        .filter((id): id is string => typeof id === "string" && !keep.has(id));
-      await this.io.deleteIds(target.table, target.column, orphans);
+      const keep = next.get(target.table) ?? new Map<string, string>();
+      const known = previous?.get(target.table);
+      const existing = known
+        ? [...known.keys()]
+        : (await this.io.selectAll(target.table))
+            .map((row) => row[target.column])
+            .filter((id): id is string => typeof id === "string");
+      const orphans = existing.filter((id) => !keep.has(id));
+      if (orphans.length > 0) await this.io.deleteIds(target.table, target.column, orphans);
+      deleted += orphans.length;
     }
+    this.written = next;
+    this.lastWriteStats = { upserted, deleted, full: previous === null };
   }
 }
+
+const KEY_COLUMN = new Map(DELETE_ORDER.map((target) => [target.table, target.column]));
 
 export function createSupabaseTableClient(client: {
   from: (table: string) => {

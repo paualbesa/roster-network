@@ -46,12 +46,13 @@ describe("Roster API", () => {
     const app = createApp({ mode: "sandbox" });
     const health = await app.request("/health");
     expect(health.status).toBe(200);
-    expect(await health.json()).toEqual({
+    expect(await health.json()).toMatchObject({
       ok: true,
       product: "Roster",
       mode: "sandbox",
       rail: "mock",
       asset: "USDC",
+    storage: "memory",
     });
   });
 

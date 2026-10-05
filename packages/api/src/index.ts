@@ -1,7 +1,13 @@
 export { createApp } from "./app.js";
-export type { AppOptions, ListingPassportScore } from "./app.js";
+export { isPublicRoute, MAX_BODY_BYTES } from "./app.js";
+export type { AppHttpOptions, AppOptions, ListingPassportScore } from "./app.js";
+export { DEFAULT_RATE_LIMITS, IdempotencyCache, RateLimiter, resolveRateLimitConfig } from "./http.js";
+export type { RateLimitConfig, RateLimitRule } from "./http.js";
+export { hashPassword, verifyPassword } from "./password.js";
+export { startExpirySweeper, resolveExpireIntervalMs } from "./sweeper.js";
 export {
   bootstrapSandboxFleet,
+  sweepExpiredJobs,
   SANDBOX_FLEET_AGENT_NAME,
   SANDBOX_FLEET_FUND_USDC,
   SANDBOX_FLEET_ORG_NAME,

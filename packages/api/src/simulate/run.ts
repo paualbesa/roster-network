@@ -89,8 +89,10 @@ async function probeLive(baseUrl: string): Promise<ScenarioReport> {
   const results: ScenarioResult[] = [];
   results.push(await readHealth(baseUrl));
   results.push(await readOpenApi(baseUrl));
-  results.push(await expectUnauthorized(baseUrl, "/v1/registry/search"));
+  results.push(await expectPublicSearch(baseUrl));
+  results.push(await expectUnauthorized(baseUrl, "/v1/jobs"));
   results.push(await expectUnauthorized(baseUrl, "/v1/jobs", "POST"));
+  results.push(await expectJsonNotFound(baseUrl));
   const failed = results.some((result) => result.status === "fail");
   if (!failed) {
     results.push({
@@ -153,6 +155,36 @@ async function expectUnauthorized(baseUrl: string, path: string, method = "GET")
   }
 }
 
+async function expectPublicSearch(baseUrl: string): Promise<ScenarioResult> {
+  const name = "public GET /v1/registry/search";
+  try {
+    const response = await fetch(joinApiUrl(baseUrl, "/v1/registry/search?q=receipt&limit=5"));
+    if (response.status !== 200) return { name, status: "fail", detail: `expected 200, got ${response.status.toString()}` };
+    const body = (await response.json()) as { hits?: unknown };
+    if (!Array.isArray(body.hits)) return { name, status: "fail", detail: "response has no hits array" };
+    if (!response.headers.get("x-request-id")) return { name, status: "fail", detail: "missing X-Request-Id" };
+    return { name, status: "pass", detail: `${body.hits.length.toString()} hits` };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "search probe failed";
+    return { name, status: "fail", detail };
+  }
+}
+
+async function expectJsonNotFound(baseUrl: string): Promise<ScenarioResult> {
+  const name = "404 JSON";
+  try {
+    const response = await fetch(joinApiUrl(baseUrl, "/no-such-route"));
+    const body = (await response.json().catch(() => null)) as { error?: { code?: string } } | null;
+    if (response.status !== 404 || body?.error?.code !== "not_found") {
+      return { name, status: "fail", detail: `got ${response.status.toString()} ${body?.error?.code ?? "non-JSON"}` };
+    }
+    return { name, status: "pass" };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "404 probe failed";
+    return { name, status: "fail", detail };
+  }
+}
+
 function readPostgresConfig(): ReturnType<typeof readSupabaseConfig> | Error {
   try {
     return readSupabaseConfig();
@@ -167,6 +199,8 @@ function parseArgs(argv: string[]): { help: boolean; execute: boolean; baseUrl: 
   let baseUrl: string | null = null;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    // `pnpm simulate -- --base-url …` forwards the separator on pnpm 10.
+    if (arg === "--") continue;
     if (arg === "--help" || arg === "-h") help = true;
     else if (arg === "--execute") execute = true;
     else if (arg === "--base-url") {

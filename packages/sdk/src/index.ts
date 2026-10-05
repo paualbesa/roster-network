@@ -1,9 +1,22 @@
 export interface AlbesaOptions {
   apiKey: string;
-  /** Defaults to the local sandbox API. */
+  /** Defaults to the local sandbox API. The hosted sandbox is https://roster.network/roster-api. */
   baseUrl?: string;
   fetch?: typeof fetch;
+  /** Abort a request after this many milliseconds. Default 30000. 0 turns the timeout off. */
+  timeoutMs?: number;
+  /**
+   * Retries for 429, 502, 503, 504, timeouts, and network errors. Default 2.
+   * GETs always retry. Writes retry only when they carry an Idempotency-Key,
+   * which the client adds to every call that moves USDC.
+   */
+  maxRetries?: number;
+  /** First backoff step in milliseconds (doubles each attempt). Default 250. Retry-After wins when present. */
+  retryBaseDelayMs?: number;
 }
+
+/** Same options under the product name. */
+export type RosterOptions = AlbesaOptions;
 
 export interface CreateAgentInput {
   name: string;
@@ -272,14 +285,24 @@ export interface ListingSellerBinding {
 export class AlbesaError extends Error {
   readonly status: number;
   readonly code: string;
+  /** X-Request-Id from the API, to quote in a bug report. */
+  readonly requestId: string | null;
+  /** Seconds from Retry-After on a 429. */
+  readonly retryAfterS: number | null;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, requestId: string | null = null, retryAfterS: number | null = null) {
     super(message);
     this.name = "AlbesaError";
     this.status = status;
     this.code = code;
+    this.requestId = requestId;
+    this.retryAfterS = retryAfterS;
   }
 }
+
+/** Same error under the product name. `instanceof RosterError` and `instanceof AlbesaError` both hold. */
+export const RosterError = AlbesaError;
+export type RosterError = AlbesaError;
 
 interface ApiAgentResponse {
   agent: {
@@ -332,8 +355,30 @@ interface ApiPayResponse {
 }
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8787";
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_MS = 250;
+const RETRY_STATUSES = new Set([429, 502, 503, 504]);
+
+interface RequestOptions {
+  /** Send an Idempotency-Key. `true` generates one per logical call. */
+  idempotencyKey?: string | true;
+}
+
+function newIdempotencyKey(): string {
+  const cryptoApi = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (cryptoApi?.randomUUID) return `sdk_${cryptoApi.randomUUID()}`;
+  return `sdk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class Albesa {
+  private readonly timeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly retryBaseDelayMs: number;
   readonly agents: {
     create: (input: CreateAgentInput) => Promise<AgentHandle>;
     fund: (agentId: string, amountUsdc: string) => Promise<FundResult>;
@@ -385,6 +430,9 @@ export class Albesa {
     this.apiKey = options.apiKey.trim();
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.fetchImpl = options.fetch ?? globalThis.fetch;
+    this.timeoutMs = Math.max(0, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    this.maxRetries = Math.max(0, Math.floor(options.maxRetries ?? DEFAULT_MAX_RETRIES));
+    this.retryBaseDelayMs = Math.max(0, options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_MS);
     this.agents = {
       create: (input) => this.createAgent(input),
       fund: (agentId, amountUsdc) => this.fundAgent(agentId, amountUsdc),
@@ -439,7 +487,7 @@ export class Albesa {
   }
 
   private async fundAgent(agentId: string, amountUsdc: string): Promise<FundResult> {
-    const raw = await this.request<ApiFundResponse>("POST", `/v1/agents/${agentId}/fund`, { amountUsdc });
+    const raw = await this.request<ApiFundResponse>("POST", `/v1/agents/${agentId}/fund`, { amountUsdc }, { idempotencyKey: true });
     return {
       transactionId: raw.transaction.id,
       amountUsdc: raw.transaction.amountUsdc,
@@ -449,7 +497,7 @@ export class Albesa {
 
   private async payAgent(agentId: string, input: PayInput): Promise<Payment> {
     const body = input.memo === undefined ? { vendorId: input.vendorId, amountUsdc: input.amountUsdc } : input;
-    const raw = await this.request<ApiPayResponse>("POST", `/v1/agents/${agentId}/payments`, body);
+    const raw = await this.request<ApiPayResponse>("POST", `/v1/agents/${agentId}/payments`, body, { idempotencyKey: true });
     return {
       id: raw.transaction.id,
       status: "settled",
@@ -472,12 +520,12 @@ export class Albesa {
           schema: input.schema,
         }
       : input;
-    const raw = await this.request<ApiEscrowResponse>("POST", "/v1/escrows", body);
+    const raw = await this.request<ApiEscrowResponse>("POST", "/v1/escrows", body, { idempotencyKey: true });
     return toEscrowHandle(raw);
   }
 
   private async submitEscrow(escrowId: string, result: unknown): Promise<EscrowHandle> {
-    const raw = await this.request<ApiEscrowResponse>("POST", `/v1/escrows/${escrowId}/result`, { result });
+    const raw = await this.request<ApiEscrowResponse>("POST", `/v1/escrows/${escrowId}/result`, { result }, { idempotencyKey: true });
     return toEscrowHandle(raw);
   }
 
@@ -572,7 +620,7 @@ export class Albesa {
     if (input.maxP95Ms !== undefined) body.maxP95Ms = input.maxP95Ms;
     if (input.memo !== undefined) body.memo = input.memo;
     if (input.input !== undefined) body.input = input.input;
-    const raw = await this.request<{ job: JobHandle }>("POST", "/v1/jobs", body);
+    const raw = await this.request<{ job: JobHandle }>("POST", "/v1/jobs", body, { idempotencyKey: true });
     return raw.job;
   }
 
@@ -596,7 +644,7 @@ export class Albesa {
     options?: { latencyMs?: number },
   ): Promise<JobHandle> {
     const body = options?.latencyMs === undefined ? { result } : { result, latencyMs: options.latencyMs };
-    const raw = await this.request<{ job: JobHandle }>("POST", `/v1/jobs/${jobId}/result`, body);
+    const raw = await this.request<{ job: JobHandle }>("POST", `/v1/jobs/${jobId}/result`, body, { idempotencyKey: true });
     return raw.job;
   }
 
@@ -618,7 +666,7 @@ export class Albesa {
     return raw.hits;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.apiKey}`,
       accept: "application/json",
@@ -628,14 +676,61 @@ export class Albesa {
       headers["content-type"] = "application/json";
       init.body = JSON.stringify(body);
     }
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, init);
-    const payload: unknown = await response.json().catch(() => null);
-    if (!response.ok) {
-      const error = readError(payload);
-      throw new AlbesaError(response.status, error.code, error.message);
+    if (options.idempotencyKey !== undefined) {
+      headers["idempotency-key"] = options.idempotencyKey === true ? newIdempotencyKey() : options.idempotencyKey;
     }
-    return payload as T;
+    const retryable = method === "GET" || headers["idempotency-key"] !== undefined;
+    for (let attempt = 0; ; attempt += 1) {
+      const canRetry = retryable && attempt < this.maxRetries;
+      let response: Response;
+      const controller = this.timeoutMs > 0 ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
+      try {
+        response = await this.fetchImpl(
+          `${this.baseUrl}${path}`,
+          controller ? { ...init, signal: controller.signal } : init,
+        );
+      } catch (error) {
+        if (timer) clearTimeout(timer);
+        if (canRetry) {
+          await sleep(this.backoff(attempt, null));
+          continue;
+        }
+        const timedOut = controller?.signal.aborted === true;
+        throw new AlbesaError(
+          0,
+          timedOut ? "timeout" : "network_error",
+          timedOut
+            ? `Roster API did not answer within ${this.timeoutMs.toString()} ms.`
+            : `Roster API request failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (timer) clearTimeout(timer);
+      if (!response.ok && RETRY_STATUSES.has(response.status) && canRetry) {
+        await sleep(this.backoff(attempt, readRetryAfter(response)));
+        continue;
+      }
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const error = readError(payload);
+        throw new AlbesaError(
+          response.status,
+          error.code,
+          error.message,
+          response.headers?.get?.("x-request-id") ?? null,
+          readRetryAfter(response),
+        );
+      }
+      return payload as T;
+    }
   }
+
+  private backoff(attempt: number, retryAfterS: number | null): number {
+    if (retryAfterS !== null) return Math.min(retryAfterS, 10) * 1000;
+    const base = this.retryBaseDelayMs * 2 ** attempt;
+    return base + Math.floor(Math.random() * this.retryBaseDelayMs);
+  }
+
 }
 
 export async function createSandboxAccount(input: {
@@ -755,6 +850,13 @@ function toEscrowHandle(raw: ApiEscrowResponse): EscrowHandle {
   };
 }
 
+function readRetryAfter(response: Response): number | null {
+  const raw = response.headers?.get?.("retry-after");
+  if (!raw) return null;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+}
+
 function readError(payload: unknown): { code: string; message: string } {
   if (isRecord(payload) && isRecord(payload.error)) {
     const code = typeof payload.error.code === "string" ? payload.error.code : "request_failed";
@@ -767,3 +869,7 @@ function readError(payload: unknown): { code: string; message: string } {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/** The client under the product name. `new Roster({ apiKey })` is the same as `new Albesa({ apiKey })`. */
+export const Roster = Albesa;
+export type Roster = Albesa;

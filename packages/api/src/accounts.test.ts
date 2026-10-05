@@ -55,7 +55,9 @@ describe("Roster accounts", () => {
     const onDisk = readFileSync(dataFile, "utf8");
     expect(onDisk.includes(PASSWORD)).toBe(false);
     expect(onDisk.includes(body.apiKey)).toBe(false);
-    expect(onDisk.includes(createHash("sha256").update(PASSWORD, "utf8").digest("hex"))).toBe(true);
+    // Salted scrypt, never the bare SHA-256 digest of the password.
+    expect(onDisk.includes(createHash("sha256").update(PASSWORD, "utf8").digest("hex"))).toBe(false);
+    expect(onDisk).toMatch(/"hash": "scrypt\$16384\$8\$1\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+"/);
     expect(onDisk.includes(createHash("sha256").update(body.apiKey, "utf8").digest("hex"))).toBe(true);
 
     const account = await app.request("/v1/account", { headers: auth });

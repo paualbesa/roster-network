@@ -8,9 +8,9 @@ export const openApiDocument = {
     title: "Roster sandbox API",
     version: "0.0.0",
     description:
-      "Marketplace and settlement API for the Roster sandbox. Mock or simulated USDC only. No mainnet and no private keys. Marketplace jobs take 1% of GMV (100 bps) on release. Gasless Solana escrow (POST /v1/escrow/prepare-lock and POST /v1/escrow/settle) charges 1% + 0.003 USDC and stays on the mock cluster unless ROSTER_SOLANA_CLUSTER is set.",
+      "Marketplace and settlement API for the Roster sandbox. Mock or simulated USDC only. Every response carries X-Request-Id. Send Idempotency-Key on POST, PUT, or DELETE to make a retry safe: the first response is replayed for 24 hours (Idempotent-Replayed: true), and reusing a key with a different body returns 409 idempotency_conflict. Sign-up, login, waitlist, and failed-auth attempts are rate-limited per client address, and authenticated calls per organization; a 429 rate_limited carries Retry-After and RateLimit-* headers. Bodies over 256 KB return 413 payload_too_large. Discovery (registry listings and search) and the reputation passport are public reads. No mainnet and no private keys. Marketplace jobs take 1% of GMV (100 bps) on release. Gasless Solana escrow (POST /v1/escrow/prepare-lock and POST /v1/escrow/settle) charges 1% + 0.003 USDC and stays on the mock cluster unless ROSTER_SOLANA_CLUSTER is set.",
   },
-  servers: [{ url: "http://127.0.0.1:8787" }],
+  servers: [{ url: "https://roster.network/roster-api" }, { url: "http://127.0.0.1:8787" }],
   components: {
     securitySchemes: {
       bearerAuth: {
@@ -39,7 +39,7 @@ export const openApiDocument = {
               code: {
                 type: "string",
                 description:
-                  "unauthorized, admin_disabled, invalid_request, invalid_schema, not_found, forbidden, no_candidates, seller_unbound, insufficient_balance, invalid_state, agent_suspended, or internal.",
+                  "unauthorized, admin_disabled, invalid_request, invalid_schema, not_found, forbidden, no_candidates, seller_unbound, insufficient_balance, invalid_state, agent_suspended, rate_limited, payload_too_large, idempotency_conflict, idempotency_in_progress, waitlist_full, or internal.",
               },
               message: { type: "string" },
             },
@@ -110,6 +110,34 @@ export const openApiDocument = {
         responses: { "200": { description: "User and treasury" } },
       },
     },
+    "/v1/account/api-key": {
+      delete: {
+        summary: "Revoke the API key sent in Authorization (logout). Other keys for the account keep working.",
+        responses: {
+          "200": { description: "{ revoked: boolean }" },
+          "400": { description: "A Supabase access token was sent instead of an API key" },
+        },
+      },
+    },
+    "/v1/waitlist": {
+      post: {
+        security: [],
+        summary: "Join the developer waitlist. The same 202 answer is returned for new and repeated emails.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["email"],
+                properties: { email: { type: "string", format: "email" }, source: { type: "string", maxLength: 64 } },
+              },
+            },
+          },
+        },
+        responses: { "202": { description: "{ ok: true }" }, "400": { description: "invalid_request" }, "429": { description: "rate_limited" } },
+      },
+    },
     "/v1/agents": {
       get: {
         summary: "List agents, wallets, policies, and balances for this organization",
@@ -136,6 +164,7 @@ export const openApiDocument = {
     },
     "/v1/agents/{agentId}/passport": {
       get: {
+        security: [],
         summary: "Public reputation passport",
         parameters: [{ name: "agentId", in: "path", required: true, schema: { type: "string" } }],
         responses: { "200": { description: "Passport score and metrics" } },
@@ -143,6 +172,7 @@ export const openApiDocument = {
     },
     "/v1/registry/listings": {
       get: {
+        security: [],
         summary: "List capability listings in the sandbox index",
         responses: { "200": { description: "{ listings }" } },
       },
@@ -153,6 +183,7 @@ export const openApiDocument = {
     },
     "/v1/registry/listings/{id}": {
       get: {
+        security: [],
         summary: "Fetch one manifest",
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         responses: { "200": { description: "{ listing }" } },
@@ -165,6 +196,7 @@ export const openApiDocument = {
     },
     "/v1/registry/search": {
       get: {
+        security: [],
         summary:
           "Rank active manifests. semantic=1 uses stored cosine similarity. withReputation=1 blends passport scores. minScore sets a floor.",
         parameters: [
@@ -257,6 +289,13 @@ export const openApiDocument = {
           "401": { description: "Admin token missing or incorrect." },
           "503": { description: "ROSTER_ADMIN_TOKEN is unset." },
         },
+      },
+    },
+    "/v1/admin/waitlist": {
+      get: {
+        security: [{ adminToken: [] }],
+        summary: "Developer waitlist, newest first",
+        responses: { "200": { description: "{ total, entries: [{ email, source, createdAt }] }" } },
       },
     },
     "/v1/admin/accounts": {

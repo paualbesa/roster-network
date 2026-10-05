@@ -15,6 +15,12 @@ import type {
 
 const FILE_VERSION = 1;
 
+export interface WaitlistEntry {
+  email: string;
+  source: string | null;
+  createdAt: string;
+}
+
 export class SandboxStoreError extends Error {
   constructor(message: string) {
     super(message);
@@ -24,7 +30,8 @@ export class SandboxStoreError extends Error {
 
 /**
  * Process-local sandbox state. `apiKeys` maps a SHA-256 hex digest to an organization id.
- * `passwordHashes` maps a user id to the SHA-256 hex digest of the sandbox password.
+ * `passwordHashes` maps a user id to a salted scrypt hash (older rows: SHA-256 hex,
+ * upgraded on the next login).
  * The secrets themselves are never stored. `usersByEmail` is a lowercase email index.
  */
 export class MemoryStore {
@@ -39,6 +46,8 @@ export class MemoryStore {
   readonly escrows = new Map<string, Escrow>();
   readonly transactions: Transaction[] = [];
   readonly ledger: LedgerEntry[] = [];
+  /** Developer waitlist keyed by lowercase email. */
+  readonly waitlist = new Map<string, WaitlistEntry>();
   /** Supabase Auth user id (uuid) to Roster user id. Omitted from the JSON file. */
   readonly authUsersById = new Map<string, string>();
   /** Set by the Supabase mirror. The JSON store does not use it. */
@@ -66,6 +75,8 @@ interface FileDocument {
   transactions: Transaction[];
   ledger: LedgerEntry[];
   wallet: MockWalletSnapshot;
+  /** Optional on older files. */
+  waitlist?: WaitlistEntry[];
 }
 
 /**
@@ -135,6 +146,7 @@ export class JsonFileStore extends MemoryStore {
     for (const escrow of document.escrows) this.escrows.set(escrow.id, escrow);
     this.transactions.push(...document.transactions);
     this.ledger.push(...document.ledger);
+    for (const entry of document.waitlist ?? []) this.waitlist.set(entry.email, entry);
     this.wallet = document.wallet;
   }
 
@@ -152,6 +164,7 @@ export class JsonFileStore extends MemoryStore {
       transactions: this.transactions.slice(),
       ledger: this.ledger.slice(),
       wallet: this.readWalletState(),
+      waitlist: [...this.waitlist.values()],
     };
     const json = `${JSON.stringify(document, null, 2)}\n`;
     mkdirSync(dirname(this.filePath), { recursive: true });
@@ -178,7 +191,24 @@ function parseDocument(value: unknown): FileDocument {
     transactions: asEntities<Transaction>(value.transactions, "transactions"),
     ledger: asEntities<LedgerEntry>(value.ledger, "ledger"),
     wallet: parseWallet(value.wallet),
+    waitlist: value.waitlist === undefined ? [] : parseWaitlist(value.waitlist),
   };
+}
+
+function parseWaitlist(value: unknown): WaitlistEntry[] {
+  if (!Array.isArray(value)) throw new SandboxStoreError("waitlist must be an array.");
+  return value.map((item, index) => {
+    if (
+      !isRecord(item) ||
+      typeof item.email !== "string" ||
+      item.email.length === 0 ||
+      typeof item.createdAt !== "string" ||
+      (item.source !== null && item.source !== undefined && typeof item.source !== "string")
+    ) {
+      throw new SandboxStoreError(`waitlist[${index.toString()}] is missing email or createdAt.`);
+    }
+    return { email: item.email, source: typeof item.source === "string" ? item.source : null, createdAt: item.createdAt };
+  });
 }
 
 function parseUsers(value: unknown): UserAccount[] {
@@ -217,8 +247,8 @@ function parsePasswordHashes(value: unknown): { userId: string; hash: string }[]
     if (!isRecord(item) || typeof item.userId !== "string" || typeof item.hash !== "string") {
       throw new SandboxStoreError("passwordHashes entries must include userId and hash.");
     }
-    if (!/^[0-9a-f]{64}$/.test(item.hash)) {
-      throw new SandboxStoreError("passwordHashes entries must be SHA-256 hex digests.");
+    if (!/^[0-9a-f]{64}$/.test(item.hash) && !/^scrypt\$\d+\$\d+\$\d+\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/.test(item.hash)) {
+      throw new SandboxStoreError("passwordHashes entries must be scrypt hashes or legacy SHA-256 hex digests.");
     }
     hashes.push({ userId: item.userId, hash: item.hash });
   }
