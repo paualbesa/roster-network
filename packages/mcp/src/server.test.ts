@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createApp, sandboxReceiptListing } from "@albesa/api";
+import { bootstrapSandboxFleet, createApp, sandboxReceiptListing } from "@albesa/api";
 import { createSandboxAccount } from "@albesa/sdk";
 import { describe, expect, it } from "vitest";
 import { createRosterMcpServer, readRosterClientOptions } from "./index.js";
@@ -250,6 +250,31 @@ describe("Roster MCP server", () => {
     expect(readRosterClientOptions({ ALBESA_API_KEY: "sk_sandbox_a", ROSTER_MODE: "sandbox" })).toEqual({
       apiKey: "sk_sandbox_a",
       baseUrl: "http://127.0.0.1:8787",
+    });
+  });
+
+  it("answers roster_need and buys the top match with roster_buy", async () => {
+    const app = createApp({ mode: "sandbox", autofill: "sync" });
+    await bootstrapSandboxFleet(app);
+    const fetchImpl = fetchFor(app);
+    const { apiKey } = await createSandboxAccount({
+      email: "need@example.com",
+      password: PASSWORD,
+      name: "Need",
+      baseUrl: "http://roster.test",
+      fetch: fetchImpl,
+    });
+    const server = createRosterMcpServer({ apiKey, baseUrl: "http://roster.test", fetch: fetchImpl, env: { ROSTER_MODE: "sandbox" } });
+    await withClient(server, async (mcp) => {
+      const tools = await mcp.listTools();
+      expect(tools.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["roster_need", "roster_buy"]));
+      const found = await mcp.callTool({ name: "roster_need", arguments: { need: "summarize a long document into bullet points" } });
+      expect(found.isError).toBeUndefined();
+      const parsed = JSON.parse(toolText(found)) as { matched: boolean; matches: { listingId: string }[] };
+      expect(parsed.matched).toBe(true);
+      const bought = await mcp.callTool({ name: "roster_buy", arguments: { listingId: parsed.matches[0]!.listingId } });
+      expect(bought.isError).toBeUndefined();
+      expect(JSON.parse(toolText(bought))).toMatchObject({ status: "released", delivered: true });
     });
   });
 });

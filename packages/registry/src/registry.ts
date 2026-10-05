@@ -8,8 +8,10 @@ import type {
   CapabilityManifest,
   CapabilitySearchHit,
   CapabilitySearchQuery,
+  DataProductInfo,
   JsonSchema,
   LatencySla,
+  ListingKind,
   ListingStatus,
   PricingHint,
   PricingModel,
@@ -53,6 +55,8 @@ interface ListingDraft {
   status: ListingStatus;
   agentId: string | null;
   manifest: CapabilityManifest | null;
+  kind: ListingKind;
+  data: DataProductInfo | null;
 }
 
 export class CapabilityRegistry {
@@ -98,6 +102,8 @@ export class CapabilityRegistry {
       status: draft.status,
       agentId: draft.agentId,
       manifest: draft.manifest,
+      kind: draft.kind,
+      data: draft.data,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -134,6 +140,8 @@ export class CapabilityRegistry {
       status: draft.status,
       agentId: draft.agentId,
       manifest: draft.manifest,
+      kind: draft.kind,
+      data: draft.data,
       createdAt: previous.createdAt,
       updatedAt: this.now().toISOString(),
     };
@@ -172,7 +180,9 @@ export class CapabilityRegistry {
     semanticSimilarities: ReadonlyMap<string, number> | null = null,
   ): CapabilitySearchHit[] {
     const normalized = normalizeSearchQuery(query);
-    return rankListings([...this.entries.values()], normalized, reputation, this.vectors, semanticSimilarities).map((hit) => ({
+    const kinds = normalized.kinds ?? [];
+    const pool = kinds.length === 0 ? [...this.entries.values()] : [...this.entries.values()].filter((listing) => kinds.includes(listing.kind ?? "service"));
+    return rankListings(pool, normalized, reputation, this.vectors, semanticSimilarities).map((hit) => ({
       listing: structuredClone(hit.listing),
       score: hit.score,
       relevance: hit.relevance,
@@ -235,7 +245,13 @@ export function parseSearchQuery(raw: RawSearchParams): CapabilitySearchQuery {
     minScore: parseMinScoreParam(raw.minScore),
     withReputation: parseWithReputation(raw.withReputation),
     semantic: parseSemantic(raw.semantic),
+    kinds: parseKinds(raw.kind),
   });
+}
+
+function parseKinds(value: string | undefined): ListingKind[] {
+  if (value === undefined || value.trim() === "") return [];
+  return [...new Set(value.split(",").map((part) => part.trim()).filter(Boolean).map((part) => readKind(part)))];
 }
 
 /**
@@ -273,7 +289,8 @@ function normalizeSearchQuery(query: Partial<CapabilitySearchQuery>): Capability
   if (typeof semantic !== "boolean") {
     throw new RegistryError(400, "invalid_request", 'semantic must be "1" or "0".');
   }
-  return { q, tags, maxPriceUsdc, maxP95Ms, limit, minScore, withReputation, semantic };
+  const kinds = (query.kinds ?? []).map((kind) => readKind(kind));
+  return { q, tags, maxPriceUsdc, maxP95Ms, limit, minScore, withReputation, semantic, kinds };
 }
 
 function parseRegisterBody(input: unknown): ListingDraft {
@@ -290,6 +307,7 @@ function parseRegisterBody(input: unknown): ListingDraft {
     status: body.status === undefined ? "active" : readStatus(body.status),
     agentId: body.agentId === undefined ? null : readAgentId(body.agentId),
     manifest: body.manifest === undefined ? null : readManifest(body.manifest),
+    ...readKindAndData(body.kind, body.data, "service", null),
   };
 }
 
@@ -307,6 +325,8 @@ function parseUpdateBody(input: unknown, current: CapabilityListing): ListingDra
     "status",
     "agentId",
     "manifest",
+    "kind",
+    "data",
   ];
   if (!mutable.some((key) => key in body)) {
     throw new RegistryError(400, "invalid_request", "Update must change at least one listing field.");
@@ -324,6 +344,95 @@ function parseUpdateBody(input: unknown, current: CapabilityListing): ListingDra
     status: body.status === undefined ? current.status : readStatus(body.status),
     agentId: body.agentId === undefined ? current.agentId : readAgentId(body.agentId),
     manifest: body.manifest === undefined ? current.manifest : readManifest(body.manifest),
+    ...readKindAndData(body.kind, body.data, current.kind ?? "service", current.data ?? null),
+  };
+}
+
+function readKindAndData(
+  rawKind: unknown,
+  rawData: unknown,
+  currentKind: ListingKind,
+  currentData: DataProductInfo | null,
+): { kind: ListingKind; data: DataProductInfo | null } {
+  const kind = rawKind === undefined ? currentKind : readKind(rawKind);
+  const data = rawData === undefined ? (rawKind === undefined ? currentData : kind === "service" ? null : currentData) : readDataInfo(rawData);
+  if (kind === "service" && data !== null) {
+    throw new RegistryError(400, "invalid_request", 'data is only allowed when kind is "dataset", "feed", or "lookup".');
+  }
+  if (kind !== "service" && data === null) {
+    throw new RegistryError(400, "invalid_request", `kind "${kind}" needs data (sources, refreshCadence, formats, delivery, columns).`);
+  }
+  return { kind, data };
+}
+
+function readKind(value: unknown): ListingKind {
+  if (value === "service" || value === "dataset" || value === "feed" || value === "lookup") return value;
+  throw new RegistryError(400, "invalid_request", 'kind must be "service", "dataset", "feed", or "lookup".');
+}
+
+function shortText(value: unknown, field: string, max: number, required = true): string {
+  if (typeof value !== "string" || (required && value.trim() === "") || value.length > max) {
+    throw new RegistryError(400, "invalid_request", `${field} must be a string of 1-${max.toString()} characters.`);
+  }
+  return value.trim();
+}
+
+function httpUrl(value: unknown, field: string): string {
+  const text = shortText(value, field, 500);
+  if (!/^https?:\/\/[^\s]+$/.test(text)) throw new RegistryError(400, "invalid_request", `${field} must be an http(s) URL.`);
+  return text;
+}
+
+function readDataInfo(value: unknown): DataProductInfo | null {
+  if (value === null) return null;
+  if (!isRecord(value)) throw new RegistryError(400, "invalid_request", "data must be an object.");
+  assertKeys(value, ["slug", "sources", "refreshCadence", "refreshIntervalS", "formats", "delivery", "columns"], "data");
+  const slug = shortText(value.slug, "data.slug", 64);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new RegistryError(400, "invalid_request", "data.slug must be kebab-case.");
+  if (!Array.isArray(value.sources) || value.sources.length === 0 || value.sources.length > 8) {
+    throw new RegistryError(400, "invalid_request", "data.sources must list 1-8 sources.");
+  }
+  const sources = value.sources.map((source, index) => {
+    if (!isRecord(source)) throw new RegistryError(400, "invalid_request", `data.sources[${index.toString()}] must be an object.`);
+    assertKeys(source, ["name", "url", "license", "licenseUrl", "attribution"], `data.sources[${index.toString()}]`);
+    return {
+      name: shortText(source.name, "data.sources.name", 120),
+      url: httpUrl(source.url, "data.sources.url"),
+      license: shortText(source.license, "data.sources.license", 120),
+      licenseUrl: httpUrl(source.licenseUrl, "data.sources.licenseUrl"),
+      attribution: shortText(source.attribution, "data.sources.attribution", 400),
+    };
+  });
+  const interval = value.refreshIntervalS;
+  if (typeof interval !== "number" || !Number.isInteger(interval) || interval < 60 || interval > 90 * 86_400) {
+    throw new RegistryError(400, "invalid_request", "data.refreshIntervalS must be an integer from 60 to 7776000.");
+  }
+  if (!Array.isArray(value.formats) || value.formats.length === 0 || value.formats.some((f) => f !== "json" && f !== "csv")) {
+    throw new RegistryError(400, "invalid_request", 'data.formats must contain "json" and/or "csv".');
+  }
+  if (value.delivery !== "signed_url" && value.delivery !== "inline") {
+    throw new RegistryError(400, "invalid_request", 'data.delivery must be "signed_url" or "inline".');
+  }
+  if (!Array.isArray(value.columns) || value.columns.length === 0 || value.columns.length > 60) {
+    throw new RegistryError(400, "invalid_request", "data.columns must list 1-60 columns.");
+  }
+  const columns = value.columns.map((column, index) => {
+    if (!isRecord(column)) throw new RegistryError(400, "invalid_request", `data.columns[${index.toString()}] must be an object.`);
+    assertKeys(column, ["name", "type", "description"], `data.columns[${index.toString()}]`);
+    return {
+      name: shortText(column.name, "data.columns.name", 64),
+      type: shortText(column.type, "data.columns.type", 32),
+      description: shortText(column.description, "data.columns.description", 300, false),
+    };
+  });
+  return {
+    slug,
+    sources,
+    refreshCadence: shortText(value.refreshCadence, "data.refreshCadence", 40),
+    refreshIntervalS: interval,
+    formats: [...new Set(value.formats as string[])],
+    delivery: value.delivery,
+    columns,
   };
 }
 

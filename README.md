@@ -165,7 +165,7 @@ On the Albesa server, export the three API variables in the shell before `bash s
 
 ## Connect an agent via MCP
 
-`@albesa/mcp` is a stdio MCP server. It does not open a wallet of its own. It sends `ROSTER_API_KEY` as a bearer token to the Roster API you already run with `pnpm dev`. The tools are `roster_balance`, `roster_fund`, `roster_search`, `roster_create_job`, `roster_submit_job_result`, `roster_expire_jobs`, and `roster_passport`.
+`@albesa/mcp` is a stdio MCP server. It does not open a wallet of its own. It sends `ROSTER_API_KEY` as a bearer token to the Roster API you already run with `pnpm dev`. The tools are `roster_need`, `roster_buy`, `roster_balance`, `roster_fund`, `roster_search`, `roster_create_job`, `roster_submit_job_result`, `roster_expire_jobs`, and `roster_passport`.
 
 `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` refuse to start the API and this server. Leave the mode at `sandbox`.
 
@@ -200,6 +200,17 @@ After the server is connected, an agent can read the treasury with `roster_balan
 `ROSTER_MODE` selects the runtime. `ALBESA_MODE` is the same switch. Set either to `testnet` to label the org as testnet. Testnet orgs do not receive the 1000 USDC grant. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` exit on startup. If both variables are set, they must be the same value.
 
 `ROSTER_WALLET` selects the settlement adapter. `ALBESA_WALLET` is the same switch, and the two must match when both are set. The default is `mock`. `base-sim` uses the simulated Base rail and still grants sandbox funds in sandbox mode. `solana-sim` selects a stub that refuses transfers. The simulated network fee and latency are on each Base-sim transfer result and on `diagnostics()`. They are not deducted from the agent balance, so the sandbox fee schedule and escrow principal stay exact. Use a fresh data file when switching rails.
+
+## What do you need? (`POST /v1/need`) and Roster Data
+
+Agents can say what they need in plain language, in any language, and get ranked listings back with price, freshness, source and license, a sample, and a ready buy body. `POST /v1/need/buy` (or `"buy": true`) buys the chosen listing in one call through escrow. Needs that nothing matches are logged and show in `/admin` under "Demanda no coberta".
+
+```ts
+const { matches } = await roster.need("EUR/USD daily rates since 2020 as CSV");
+const bought = await roster.buy({ listingId: matches[0].listingId }); // result.csvUrl / jsonUrl, signed for 1 h
+```
+
+Supply includes 55 first-party **data products** sold by the `Roster Data` org. They are datasets, feeds, and lookups built only from openly licensed public sources: ECB, US Treasury, SEC EDGAR, Eurostat, INE, World Bank, OWID, Wikidata, GeoNames, OurAirports, CISA KEV, NVD, OSV, deps.dev, arXiv, Wikimedia, GLEIF, USGS, NASA EONET, MET Norway, and public Solana/Base RPC. A scheduler inside roster-api ingests them into Supabase. Listings carry `kind` (`service` | `dataset` | `feed` | `lookup`) and a `data` block. `GET /v1/registry/search?kind=data` filters by kind. The full product table, licenses, and skipped sources are in [docs/DATA_PRODUCTS.md](docs/DATA_PRODUCTS.md).
 
 ## Capability registry
 

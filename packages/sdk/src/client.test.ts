@@ -1,4 +1,4 @@
-import { createApp } from "@albesa/api";
+import { bootstrapSandboxFleet, createApp } from "@albesa/api";
 import { describe, expect, it } from "vitest";
 import { Albesa, AlbesaError, createSandboxAccount, createSandboxOrganization, loginSandboxAccount } from "./index.js";
 
@@ -416,5 +416,32 @@ describe("Albesa SDK", () => {
     expect(passport.metrics.failureCount).toBe(1);
     expect(passport.metrics.volumeSettledUsdc).toBe("0.000000");
     expect(await buyerOrg.client.jobs.expire()).toEqual([]);
+  });
+
+  it("finds a listing with need() and buys it in one call", async () => {
+    const app = createApp({ mode: "sandbox", autofill: "sync" });
+    await bootstrapSandboxFleet(app);
+    const fetchImpl: typeof fetch = (input, init) => Promise.resolve(app.request(input, init));
+    const { client } = await createSandboxAccount({
+      email: "need@example.com",
+      password: "sandbox-passphrase-9",
+      name: "Need",
+      baseUrl: "http://albesa.test",
+      fetch: fetchImpl,
+    });
+    const found = await client.need("summarize a long document into bullet points");
+    expect(found.matched).toBe(true);
+    const top = found.matches[0]!;
+    expect(top.buy.path).toBe("/v1/need/buy");
+    const bought = await client.buy({ listingId: top.listingId });
+    expect(bought.status).toBe("released");
+    expect(bought.delivered).toBe(true);
+    expect(bought.receipt.listingId).toBe(top.listingId);
+
+    const missing = await client.need({ need: "live seat map for a specific concert tonight" });
+    expect(missing.matched).toBe(false);
+    expect(missing.unmet?.logged).toBe(true);
+    const hits = await client.registry.search({ q: "summarize", kinds: ["service"] });
+    expect(hits.every((hit) => (hit.listing.kind ?? "service") === "service")).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import { ROSTER_BROWSER_API_BASE } from "./api-base";
+import { readBuyResponse, readDataProduct, readNeedResponse, type BuyResponseView, type DataProductView, type ListingKind, type NeedResponseView } from "./need";
 import type { RosterFeeQuote } from "./roster-fee";
 
 export class RosterApiError extends Error {
@@ -56,6 +57,9 @@ export interface MarketplaceListing {
   agentId: string | null;
   inputSchema: unknown;
   outputSchema: unknown;
+  kind: ListingKind;
+  /** Refresh cadence and first source for data products. */
+  data: { slug: string; refreshCadence: string; source: string; license: string } | null;
 }
 
 export interface MarketplaceHit {
@@ -255,6 +259,21 @@ export function createRosterClient(options: RosterClientOptions = {}) {
       if (input.listingId) body.listingId = input.listingId;
       if (input.input !== undefined) body.input = input.input;
       return request<unknown>("POST", "/v1/jobs", body).then(readJobPayload);
+    },
+    /** Plain-language need → ranked listings. Public; sends the key when the client has one. */
+    need(input: { need: string; budgetUsdc?: string; kinds?: string[]; limit?: number }): Promise<NeedResponseView> {
+      const apiKey = options.apiKey?.trim();
+      return request<unknown>("POST", "/v1/need", input, false, apiKey || undefined).then(readNeedResponse);
+    },
+    /** Buy one listing through escrow from the account's "Roster buyer" agent. */
+    buy(input: { listingId: string; input?: Record<string, unknown> }): Promise<BuyResponseView> {
+      return request<unknown>("POST", "/v1/need/buy", input).then(readBuyResponse);
+    },
+    dataProducts(): Promise<DataProductView[]> {
+      return request<unknown>("GET", "/v1/data/products", undefined, false).then((payload) => {
+        if (!isRecord(payload) || !Array.isArray(payload.products)) throw invalidResponse("Data catalog response was incomplete.");
+        return payload.products.map(readDataProduct).filter((product): product is DataProductView => product !== null);
+      });
     },
     health(): Promise<RosterHealth> {
       return request<unknown>("GET", "/health", undefined, false).then(readHealth);
@@ -456,6 +475,23 @@ function readListing(payload: unknown): MarketplaceListing {
     agentId: typeof payload.agentId === "string" ? payload.agentId : null,
     inputSchema: payload.inputSchema ?? {},
     outputSchema: payload.outputSchema ?? {},
+    kind: readListingKind(payload.kind),
+    data: readListingData(payload.data),
+  };
+}
+
+function readListingKind(value: unknown): ListingKind {
+  return value === "dataset" || value === "feed" || value === "lookup" ? value : "service";
+}
+
+function readListingData(value: unknown): MarketplaceListing["data"] {
+  if (!isRecord(value) || typeof value.slug !== "string") return null;
+  const first = Array.isArray(value.sources) && isRecord(value.sources[0]) ? value.sources[0] : null;
+  return {
+    slug: value.slug,
+    refreshCadence: typeof value.refreshCadence === "string" ? value.refreshCadence : "",
+    source: first && typeof first.name === "string" ? first.name : "",
+    license: first && typeof first.license === "string" ? first.license : "",
   };
 }
 

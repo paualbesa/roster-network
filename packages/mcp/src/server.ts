@@ -4,7 +4,9 @@ import { resolveRuntimeMode } from "@albesa/core";
 import {
   Albesa,
   AlbesaError,
+  type BuyInput,
   type CreateJobInput,
+  type NeedInput,
   type RegistrySearchQuery,
 } from "@albesa/sdk";
 import { z } from "zod";
@@ -97,6 +99,57 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
       },
     },
     async ({ agentId, amountUsdc }) => runTool(() => client.agents.fund(agentId, amountUsdc)),
+  );
+
+  server.registerTool(
+    "roster_need",
+    {
+      title: "Tell Roster what you need",
+      description:
+        "Describe what you need in plain language (any language), e.g. 'EUR/USD daily rates since 2020 as CSV' or 'is CVE-2024-3094 exploited?'. Returns ranked Roster listings (data products: dataset, feed, lookup; and services) with price in USDC, freshness, source and license, a sample, and a ready buy body. Often cheaper than finding and cleaning the data yourself. Set buy=true to buy the top match in the same call. Unmatched needs are logged so Roster can build them.",
+      inputSchema: {
+        need: z.string().min(2).max(500).describe("What you need, in plain language."),
+        budgetUsdc: z.string().optional().describe("Max price per call in USDC, for example 0.05."),
+        kinds: z
+          .array(z.enum(["service", "dataset", "feed", "lookup", "data"]))
+          .optional()
+          .describe("Restrict to listing kinds. 'data' means any data product."),
+        limit: z.number().int().positive().max(20).optional(),
+        buy: z.boolean().optional().describe("Buy the top match now through escrow."),
+        input: jsonObject.optional().describe("Input for the bought listing. Defaults to its example."),
+      },
+    },
+    async (args) =>
+      runTool(() => {
+        const input: NeedInput = { need: args.need };
+        if (args.budgetUsdc !== undefined) input.budgetUsdc = args.budgetUsdc;
+        if (args.kinds !== undefined) input.kinds = args.kinds;
+        if (args.limit !== undefined) input.limit = args.limit;
+        if (args.buy !== undefined) input.buy = args.buy;
+        if (args.input !== undefined) input.input = args.input;
+        return client.need(input);
+      }),
+  );
+
+  server.registerTool(
+    "roster_buy",
+    {
+      title: "Buy a Roster listing",
+      description:
+        "Buy one listing (usually a listingId from roster_need) through escrow and wait for delivery. You pay only when the result validates; otherwise you are refunded. Datasets return signed JSON/CSV download links valid for one hour; lookups and feeds return rows inline. Omit buyerAgentId to pay from the account's 'Roster buyer' agent, topped up from the treasury.",
+      inputSchema: {
+        listingId: z.string().describe("Listing id, e.g. from roster_need."),
+        input: jsonObject.optional().describe("Listing input, e.g. {\"base\":\"EUR\",\"symbols\":[\"USD\"]}."),
+        buyerAgentId: z.string().optional().describe("Pay from this agent instead of the default buyer."),
+      },
+    },
+    async ({ listingId, input, buyerAgentId }) =>
+      runTool(() => {
+        const body: BuyInput = { listingId };
+        if (input !== undefined) body.input = input;
+        if (buyerAgentId !== undefined) body.buyerAgentId = buyerAgentId;
+        return client.buy(body);
+      }),
   );
 
   server.registerTool(

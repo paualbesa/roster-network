@@ -4,7 +4,9 @@ import { resolveRuntimeMode, resolveWalletRail } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
 import { createApp, type AppHttpOptions } from "./app.js";
 import { LocalKycDocumentStore } from "./kyc.js";
-import { bootstrapSandboxFleet } from "./fleet.js";
+import { appDataCatalog, bootstrapDataProducts, bootstrapSandboxFleet } from "./fleet.js";
+import { LocalDataStore } from "./data/store.js";
+import { DemandLog, FileDemandPersistence } from "./demand.js";
 import { resolveRateLimitConfig } from "./http.js";
 import { readListenAddress } from "./listen.js";
 import { resolveExpireIntervalMs, startExpirySweeper } from "./sweeper.js";
@@ -35,6 +37,7 @@ async function main(): Promise<void> {
       console.log(
         `Roster Labs fleet: ${fleet.listings.length.toString()} listings on ${fleet.sellerAgentId}`,
       );
+      await startDataProducts(opened.app);
     }
     await opened.mirror.flush();
     startExpirySweeper({ app: opened.app, intervalMs: expireIntervalMs, afterSweep: () => opened.mirror.flush() });
@@ -54,6 +57,11 @@ async function main(): Promise<void> {
       kycDocuments: new LocalKycDocumentStore({
         directory: process.env.ROSTER_KYC_DIR?.trim() || join(process.cwd(), "data", "kyc-documents"),
       }),
+      dataStore:
+        process.env.ROSTER_DATA_PRODUCTS?.trim() === "0"
+          ? null
+          : new LocalDataStore({ directory: process.env.ROSTER_DATA_DIR?.trim() || join(process.cwd(), "data", "data-products") }),
+      demandLog: new DemandLog(new FileDemandPersistence(join(process.cwd(), "data", "unmet-needs.json"))),
     });
     app = jsonApp;
     if (mode === "sandbox") {
@@ -61,6 +69,7 @@ async function main(): Promise<void> {
       console.log(
         `Roster Labs fleet: ${fleet.listings.length.toString()} listings on ${fleet.sellerAgentId}`,
       );
+      await startDataProducts(jsonApp);
     }
     startExpirySweeper({ app: jsonApp, intervalMs: expireIntervalMs });
   }
@@ -69,6 +78,27 @@ async function main(): Promise<void> {
       `Roster API on http://${hostname}:${info.port.toString()} (${mode}, ${walletRail} USDC, ${where}, rate limits ${http.rateLimit ? "on" : "off"}, SLA sweep ${expireIntervalMs > 0 ? `${expireIntervalMs.toString()} ms` : "off"})`,
     );
   });
+}
+
+/**
+ * Publish the Roster Data listings and start the ingestion scheduler.
+ * Refreshes run in the background, one product at a time; boot never waits on upstreams.
+ * ROSTER_DATA_REFRESH=0 publishes the listings without fetching anything.
+ */
+async function startDataProducts(app: object): Promise<void> {
+  const catalog = appDataCatalog(app);
+  if (!catalog) return;
+  try {
+    await catalog.init();
+    const data = await bootstrapDataProducts(app);
+    console.log(`Roster Data: ${data.listings.length.toString()} data products on ${data.sellerAgentId} (${catalog.storeKind} store)`);
+    if (process.env.ROSTER_DATA_REFRESH?.trim() !== "0") {
+      catalog.start({ intervalMs: 5 * 60_000, initialDelayMs: 15_000 });
+    }
+  } catch (error) {
+    // Data products must never take the payments API down.
+    console.error("Roster Data bootstrap failed", error);
+  }
 }
 
 main().catch((error: unknown) => {

@@ -169,8 +169,125 @@ export interface RegistryListing {
   manifest: RegistryManifest | null;
   /** Seller agent bound to this listing, or null when the publisher did not set one. */
   agentId: string | null;
+  /** "service" (default) or a data product: "dataset", "feed", or "lookup". */
+  kind?: ListingKind;
+  /** Data product details (sources, license, cadence, columns). Only on data listings. */
+  data?: DataProductListingInfo;
   createdAt: string;
   updatedAt: string;
+}
+
+export type ListingKind = "service" | "dataset" | "feed" | "lookup";
+
+export interface DataSourceAttribution {
+  name: string;
+  url: string;
+  license: string;
+  licenseUrl?: string;
+  attribution?: string;
+}
+
+export interface DataProductListingInfo {
+  slug: string;
+  sources: DataSourceAttribution[];
+  refreshCadence: string;
+  refreshIntervalS: number;
+  formats: ("json" | "csv")[];
+  delivery: "signed_url" | "inline";
+  columns: { name: string; type: string; description?: string }[];
+}
+
+export interface NeedInput {
+  /** What you need, in plain language (any language). */
+  need: string;
+  /** Max price per call in USDC, e.g. "0.05". */
+  budgetUsdc?: string;
+  /** Restrict to kinds. "data" means any data product. */
+  kinds?: (ListingKind | "data")[];
+  limit?: number;
+  /** Buy the top match in the same call. */
+  buy?: boolean;
+  /** Input for the bought listing. Defaults to the listing's example. */
+  input?: Record<string, unknown>;
+}
+
+export interface NeedMatch {
+  listingId: string;
+  name: string;
+  kind: ListingKind;
+  summary: string;
+  priceUsdc: string;
+  relevance: number;
+  score: number;
+  seller: string | null;
+  freshness: { lastRefreshedAt: string | null; refreshCadence: string | null; status: string; rowCount: number | null } | null;
+  source: { name: string; license: string; url: string } | null;
+  sample: Record<string, unknown>[];
+  inputExample: Record<string, unknown>;
+  p95Ms: number;
+  buy: { method: "POST"; path: "/v1/need/buy"; body: { listingId: string; input: Record<string, unknown> } };
+}
+
+export interface BuyInput {
+  listingId: string;
+  input?: Record<string, unknown>;
+  /** Pay from this agent. Omit to use (and top up) the account's "Roster buyer" agent. */
+  buyerAgentId?: string;
+}
+
+export interface BuyResult {
+  job: JobHandle;
+  status: JobHandle["status"];
+  delivered: boolean;
+  /** Delivered payload. Datasets carry signed `jsonUrl`/`csvUrl` links valid for one hour. */
+  result: unknown;
+  receipt: {
+    listingId: string;
+    listingName: string;
+    amountUsdc: string;
+    takeRateUsdc: string;
+    sellerNetUsdc: string;
+    escrowId: string;
+    buyerAgentId: string;
+    buyerBalanceUsdc: string;
+    settledAt: string | null;
+  };
+}
+
+export interface NeedResult {
+  need: string;
+  budgetUsdc: string | null;
+  matched: boolean;
+  matches: NeedMatch[];
+  /** Present when nothing matched well. The need was logged as demand. */
+  unmet?: { logged: boolean; message: string };
+  weak?: boolean;
+  bought?: BuyResult;
+}
+
+export interface DataProduct {
+  slug: string;
+  name: string;
+  kind: Exclude<ListingKind, "service">;
+  description: string;
+  priceUsdc: string;
+  refreshCadence: string;
+  refreshIntervalS: number;
+  live: boolean;
+  status: string;
+  lastRefreshedAt: string | null;
+  nextRefreshAt: string | null;
+  rowCount: number;
+  bytes: number;
+  sha256: string | null;
+  lastError: string | null;
+  columns: { name: string; type: string; description?: string }[];
+  sample: Record<string, unknown>[];
+  sources: DataSourceAttribution[];
+  example: unknown;
+  formats: string[];
+  delivery: "signed_url" | "inline";
+  listingId: string | null;
 }
 
 export interface RegisterCapabilityInput {
@@ -213,6 +330,8 @@ export interface RegistrySearchQuery {
   withReputation?: boolean;
   /** Rank by stored semantic vectors (cosine). Omit to keep keyword search. */
   semantic?: boolean;
+  /** Only these listing kinds, e.g. ["dataset", "lookup"]. */
+  kinds?: ListingKind[];
 }
 
 export interface RegistrySearchHit {
@@ -421,6 +540,12 @@ export class Albesa {
     get: () => Promise<TreasuryBalance>;
   };
 
+  readonly data: {
+    /** Every Roster Data product with freshness, row count, sample, and license. */
+    products: () => Promise<DataProduct[]>;
+    product: (slug: string) => Promise<DataProduct>;
+  };
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -468,6 +593,26 @@ export class Albesa {
     this.treasury = {
       get: () => this.getTreasury(),
     };
+    this.data = {
+      products: async () => (await this.request<{ products: DataProduct[] }>("GET", "/v1/data/products")).products,
+      product: async (slug) =>
+        (await this.request<{ product: DataProduct }>("GET", `/v1/data/products/${encodeURIComponent(slug)}`)).product,
+    };
+  }
+
+  /**
+   * Say what you need in plain language and get ranked listings (data products and services)
+   * with price, freshness, and a ready buy body. Pass `buy: true` to buy the top match in one call.
+   * Needs nothing matches well are logged as demand.
+   */
+  async need(input: NeedInput | string): Promise<NeedResult> {
+    const body = typeof input === "string" ? { need: input } : input;
+    return this.request<NeedResult>("POST", "/v1/need", body, body.buy ? { idempotencyKey: true } : {});
+  }
+
+  /** Buy one listing through escrow and wait briefly for delivery. You pay only when the result validates. */
+  async buy(input: BuyInput): Promise<BuyResult> {
+    return this.request<BuyResult>("POST", "/v1/need/buy", input, { idempotencyKey: true });
   }
 
   private async createAgent(input: CreateAgentInput): Promise<AgentHandle> {
@@ -658,6 +803,7 @@ export class Albesa {
     if (query.minScore !== undefined) params.set("minScore", query.minScore.toString());
     if (query.withReputation) params.set("withReputation", "1");
     if (query.semantic) params.set("semantic", "1");
+    if (query.kinds !== undefined && query.kinds.length > 0) params.set("kind", query.kinds.join(","));
     const search = params.toString();
     const raw = await this.request<{ hits: RegistrySearchHit[] }>(
       "GET",

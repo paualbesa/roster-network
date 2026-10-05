@@ -328,12 +328,24 @@ function readAutofillDelay(raw: string | undefined): number {
   return parsed;
 }
 
+/**
+ * First-party seller that delivers by name with async work (network, storage).
+ * Roster Data uses it: buy → fetch or sign the data → submit through escrow.
+ */
+export interface ExternalFulfiller {
+  handles(listingName: string): boolean;
+  /** Resolve the result. A throw submits `{ error }`, which fails the schema and refunds the buyer. */
+  fulfill(listingName: string, input: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+
 export interface JobOrchestratorOptions {
   service: AgentFinanceService;
   registry: CapabilityRegistry;
   jobs: JobStore;
   now?: () => Date;
   autofill?: AutofillConfig;
+  /** Async first-party delivery (Roster Data). Bindings made with `autofill: true` use it. */
+  externalFulfiller?: ExternalFulfiller;
 }
 
 /**
@@ -351,6 +363,7 @@ export class JobOrchestrator {
   private readonly jobs: JobStore;
   private readonly now: () => Date;
   private readonly autofill: AutofillConfig;
+  private externalFulfiller: ExternalFulfiller | null;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: JobOrchestratorOptions) {
@@ -359,6 +372,16 @@ export class JobOrchestrator {
     this.jobs = options.jobs;
     this.now = options.now ?? (() => new Date());
     this.autofill = options.autofill ?? resolveAutofillConfig();
+    this.externalFulfiller = options.externalFulfiller ?? null;
+  }
+
+  /** Attach the async first-party fulfiller after construction (the data catalog boots later). */
+  setExternalFulfiller(fulfiller: ExternalFulfiller | null): void {
+    this.externalFulfiller = fulfiller;
+  }
+
+  private isExternalName(name: string): boolean {
+    return this.externalFulfiller?.handles(name) === true;
   }
 
   bindSeller(
@@ -456,7 +479,7 @@ export class JobOrchestrator {
       organizationId,
       sellerAgentId,
       createdAt: this.now().toISOString(),
-      autofill: options?.autofill === true && isSandboxFleetName(listing.name),
+      autofill: options?.autofill === true && (isSandboxFleetName(listing.name) || this.isExternalName(listing.name)),
     };
     this.jobs.saveSeller(binding);
     return { ...binding };
@@ -530,7 +553,12 @@ export class JobOrchestrator {
    * `deadlineAt` uses the same SLA refund as `POST /v1/jobs/expire`.
    */
   private async scheduleAutofill(job: StoredJob, binding: ListingSellerBinding): Promise<void> {
-    if (!binding.autofill || !isSandboxFleetName(job.listingName)) return;
+    if (!binding.autofill) return;
+    if (this.isExternalName(job.listingName)) {
+      await this.scheduleExternal(job);
+      return;
+    }
+    if (!isSandboxFleetName(job.listingName)) return;
     if (this.autofill.mode === "sync") {
       await this.deliverAutofill(job.id);
       return;
@@ -542,6 +570,48 @@ export class JobOrchestrator {
       });
     }, this.autofill.delayMs);
     timer.unref();
+  }
+
+  /**
+   * Sync mode resolves inside the lock (tests). Async mode resolves outside the
+   * queue so a slow upstream never blocks other jobs, then enqueues the submit.
+   */
+  private async scheduleExternal(job: StoredJob): Promise<void> {
+    const fulfiller = this.externalFulfiller;
+    if (!fulfiller) return;
+    const started = Date.now();
+    const resolveResult = async (): Promise<unknown> => {
+      try {
+        const payload = typeof job.input === "object" && job.input !== null && !Array.isArray(job.input) ? (job.input as Record<string, unknown>) : {};
+        return await fulfiller.fulfill(job.listingName, payload);
+      } catch (error) {
+        return { error: error instanceof Error ? error.message.slice(0, 300) : "delivery failed" };
+      }
+    };
+    if (this.autofill.mode === "sync") {
+      const result = await resolveResult();
+      await this.deliverExternal(job.id, result, Date.now() - started);
+      return;
+    }
+    const jobId = job.id;
+    void resolveResult().then((result) =>
+      this.enqueue(() => this.deliverExternal(jobId, result, Date.now() - started)).catch((error: unknown) => {
+        console.error(error);
+      }),
+    );
+  }
+
+  private async deliverExternal(jobId: string, result: unknown, elapsedMs: number): Promise<void> {
+    const job = this.jobs.readJob(jobId);
+    if (!job || job.status !== "held") return;
+    const binding = this.jobs.readSeller(job.listingId);
+    if (!binding?.autofill || binding.organizationId !== job.sellerOrganizationId) return;
+    if (this.isPastDeadline(job)) {
+      await this.settleTimeout(job);
+      return;
+    }
+    const latencyMs = Math.min(MAX_LATENCY_MS, Math.max(0, Math.round(elapsedMs)));
+    await this.submitResultUnlocked(job.sellerOrganizationId, job.id, { result, latencyMs });
   }
 
   private async deliverAutofill(jobId: string): Promise<void> {

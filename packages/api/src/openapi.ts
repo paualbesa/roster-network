@@ -143,6 +143,67 @@ export const openApiDocument = {
         responses: { "202": { description: "{ ok: true }" }, "400": { description: "invalid_request" }, "429": { description: "rate_limited" } },
       },
     },
+    "/v1/need": {
+      post: {
+        security: [],
+        summary:
+          "Say what you need in plain language. Returns ranked listings (data products: dataset, feed, lookup; and services) with price, freshness, source/license, sample, and a buy body. Unmatched needs are logged as demand. buy: true buys the top match and needs a key.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["need"],
+                properties: {
+                  need: { type: "string", minLength: 2, maxLength: 500 },
+                  budgetUsdc: { type: "string" },
+                  kinds: { type: "array", items: { type: "string", enum: ["service", "dataset", "feed", "lookup", "data"] } },
+                  limit: { type: "integer", minimum: 1, maximum: 20 },
+                  buy: { type: "boolean" },
+                  input: { type: "object" },
+                },
+              },
+            },
+          },
+        },
+        responses: { "200": { description: "{ need, matched, matches[], unmet?, bought? }" }, "400": { description: "invalid_request" } },
+      },
+    },
+    "/v1/need/buy": {
+      post: {
+        summary:
+          "Buy one listing through escrow from the account's Roster buyer agent (topped up from the treasury) or buyerAgentId, and wait up to 9 s for delivery. Datasets return signed JSON/CSV URLs valid 1 hour.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["listingId"],
+                properties: { listingId: { type: "string" }, input: { type: "object" }, buyerAgentId: { type: "string" } },
+              },
+            },
+          },
+        },
+        responses: { "201": { description: "{ job, status, delivered, result, receipt }" }, "409": { description: "insufficient_funds" } },
+      },
+    },
+    "/v1/data/products": {
+      get: {
+        security: [],
+        summary: "Roster Data catalog: every first-party data product with freshness, row count, sample, columns, sources and licenses.",
+        responses: { "200": { description: "{ seller, summary, products[] }" } },
+      },
+    },
+    "/v1/data/products/{slug}": {
+      get: {
+        security: [],
+        summary: "One data product with its registry listing.",
+        parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "{ product, listing }" }, "404": { description: "not_found" } },
+      },
+    },
     "/v1/agents": {
       get: {
         summary: "List agents, wallets, policies, and balances for this organization",
@@ -217,6 +278,12 @@ export const openApiDocument = {
             in: "query",
             schema: { type: "string", enum: ["0", "1"] },
             description: "1 ranks by the stored listing vector. 0 keeps keyword search.",
+          },
+          {
+            name: "kind",
+            in: "query",
+            schema: { type: "string" },
+            description: "Comma-separated listing kinds: service, dataset, feed, lookup, or data (any data product).",
           },
         ],
         responses: { "200": { description: "{ hits }" } },

@@ -28,9 +28,12 @@ export type {
   CapabilityManifest,
   CapabilitySearchHit,
   CapabilitySearchQuery,
+  DataProductInfo,
+  DataSourceAttribution,
   JsonSchema,
   JsonValue,
   LatencySla,
+  ListingKind,
   ListingStatus,
   McpToolManifest,
   OpenApiOperationManifest,
@@ -39,3 +42,5 @@ export type {
   RawSearchParams,
   ReputationRankInput,
 } from "./types.js";
+
+export { LISTING_KINDS } from "./types.js";

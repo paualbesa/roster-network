@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const NAV = [
+  { href: "/data", label: "Data" },
   { href: "/#problem", label: "Problem" },
   { href: "/#pillars", label: "Pillars" },
   { href: "/#flow", label: "How it works" },

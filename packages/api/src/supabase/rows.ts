@@ -427,7 +427,8 @@ export function rowsToSnapshot(tables: Record<string, Record<string, unknown>[]>
       at: normalizeTimestamp(requiredString(row, "at", "kyc_audit_log")),
     });
   }
-  audit.sort((left, right) => left.at.localeCompare(right.at) || left.id.localeCompare(right.id));
+  // Stable sort: entries written in the same millisecond keep their stored order.
+  audit.sort((left, right) => left.at.localeCompare(right.at));
   snapshot.kycAudit.push(...audit);
   return snapshot;
 }

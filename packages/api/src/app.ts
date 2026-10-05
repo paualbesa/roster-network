@@ -60,6 +60,10 @@ import {
 import { JsonFileStore } from "./store.js";
 import { KYC_SUBMISSION_MAX_BODY_BYTES, LocalKycDocumentStore, type KycDocumentStore, type KycLimits } from "./kyc.js";
 import { KYC_DOCUMENT_TOKEN_RE, KYC_SUBMISSION_PATH, registerKycAdminRoutes, registerKycRoutes } from "./kyc-routes.js";
+import { DataCatalog } from "./data/catalog.js";
+import { LocalDataStore, type DataStore } from "./data/store.js";
+import { DATA_DOWNLOAD_TOKEN_RE, registerDataAdminRoutes, registerDataRoutes } from "./data-routes.js";
+import { DemandLog } from "./demand.js";
 
 type AppEnv = {
   Variables: {
@@ -107,6 +111,15 @@ export interface AppOptions extends AppHttpOptions {
   kycLimits?: KycLimits;
   /** Private KYC document storage. Omit it to keep documents in process memory. */
   kycDocuments?: KycDocumentStore;
+  /**
+   * Data product files and freshness records. Omit it for an in-memory store;
+   * `null` turns Roster Data off. Ignored when `dataCatalog` is passed.
+   */
+  dataStore?: DataStore | null;
+  /** Prebuilt data catalog (tests inject fixture products). */
+  dataCatalog?: DataCatalog | null;
+  /** Unmet-demand log for `POST /v1/need`. Omit it to keep it in memory. */
+  demandLog?: DemandLog;
   /**
    * Test double for passport lookup. When set, search uses it instead of the
    * reputation ledger. Return null when the seller has no events (neutral).
@@ -166,15 +179,25 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     ...(options.autofill !== undefined ? { mode: options.autofill } : {}),
     ...(options.autofillDelayMs !== undefined ? { delayMs: options.autofillDelayMs } : {}),
   });
+  const dataStore =
+    options.dataStore === null ? null : (options.dataStore ?? (options.dataCatalog === undefined ? new LocalDataStore() : null));
+  const data =
+    options.dataCatalog !== undefined
+      ? options.dataCatalog
+      : dataStore
+        ? new DataCatalog(dataStore, options.now ? { now: options.now } : {})
+        : null;
+  const demand = options.demandLog ?? new DemandLog(null, options.now ?? (() => new Date()));
   const orchestrator = new JobOrchestrator({
     service,
     registry,
     jobs,
     autofill,
     ...(options.now ? { now: options.now } : {}),
+    ...(data ? { externalFulfiller: data } : {}),
   });
   const app = new Hono<AppEnv>();
-  attachAppRuntime(app, { mode, service, registry, jobs, orchestrator });
+  attachAppRuntime(app, { mode, service, registry, jobs, orchestrator, data });
   const clock = options.clock ?? Date.now;
   const limits = options.rateLimit ?? null;
   const limiter = new RateLimiter(clock);
@@ -637,7 +660,9 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   app.get("/v1/registry/listings/:id", (c) => {
     const listing = registry.get(c.req.param("id"));
     if (!listing) throw new RegistryError(404, "not_found", "Capability listing not found.");
-    return c.json({ listing });
+    const slug = listing.data?.slug;
+    const dataProduct = slug && data ? data.info(slug) : null;
+    return c.json({ listing, ...(dataProduct ? { dataProduct } : {}) });
   });
 
   app.get("/v1/registry/search", async (c) => {
@@ -650,6 +675,7 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
       minScore: c.req.query("minScore"),
       withReputation: c.req.query("withReputation"),
       semantic: c.req.query("semantic"),
+      kind: c.req.query("kind"),
     });
     const reputation = await reputationForSearch(registry, service, options.passportScores, query);
     const similarities =
@@ -693,7 +719,30 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return c.json(result);
   });
 
+  const optionalOrg = async (headers: Headers): Promise<string | null> => {
+    const match = /^Bearer\s+(\S+)$/.exec(headers.get("authorization") ?? "");
+    const key = match?.[1];
+    if (!key) return null;
+    if (looksLikeJwt(key)) {
+      const resolved = await organizationForSupabaseToken(service, options.supabase, key);
+      return typeof resolved === "string" ? resolved : null;
+    }
+    return service.authenticate(key);
+  };
+  registerDataRoutes(app, {
+    registry,
+    service,
+    orchestrator,
+    data,
+    demand,
+    dataStore,
+    optionalOrg,
+    orgOf: (c) => (c as Context<AppEnv>).get("orgId"),
+    ...(options.supabase?.matchCapabilities ? { matchCapabilities: options.supabase.matchCapabilities } : {}),
+  });
+
   registerAdminRoutes(app, adminDeps);
+  registerDataAdminRoutes(app, { data, demand });
   registerKycAdminRoutes(app, kycDeps);
   registerKycRoutes(app, kycDeps);
   registerSolanaEscrowRoutes(app, options.solana ?? resolveSolanaEngineConfig());
@@ -869,6 +918,7 @@ function parseEscrowResult(body: unknown): unknown {
 
 const PASSPORT_PATH_RE = /^\/v1\/agents\/[^/]+\/passport$/;
 const LISTING_PATH_RE = /^\/v1\/registry\/listings\/[^/]+$/;
+const DATA_PRODUCT_PATH_RE = /^\/v1\/data\/products\/[a-z0-9-]+$/;
 
 function isAuthRoute(method: string, path: string): boolean {
   return (
@@ -886,7 +936,7 @@ function isAuthRoute(method: string, path: string): boolean {
  */
 export function isPublicRoute(method: string, path: string): boolean {
   if (isAuthRoute(method, path)) return true;
-  if (method === "POST" && path === "/v1/waitlist") return true;
+  if (method === "POST" && (path === "/v1/waitlist" || path === "/v1/need")) return true;
   if (method !== "GET" && method !== "HEAD") return false;
   return (
     path === "/v1/openapi.json" ||
@@ -894,7 +944,10 @@ export function isPublicRoute(method: string, path: string): boolean {
     path === "/v1/registry/search" ||
     LISTING_PATH_RE.test(path) ||
     PASSPORT_PATH_RE.test(path) ||
-    KYC_DOCUMENT_TOKEN_RE.test(path)
+    KYC_DOCUMENT_TOKEN_RE.test(path) ||
+    path === "/v1/data/products" ||
+    DATA_PRODUCT_PATH_RE.test(path) ||
+    DATA_DOWNLOAD_TOKEN_RE.test(path)
   );
 }
 

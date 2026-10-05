@@ -26,6 +26,7 @@ import {
   jobMatchesFilter,
   summarizeReputation,
 } from "@/lib/admin-metrics";
+import { DataProductsSection, DemandSection } from "./demand";
 import { KycSection } from "./kyc";
 import { ActivityChart, DataTable, MetricCard, Pill, ScoreBar, StatusMix, jobTone } from "./ui";
 
@@ -45,6 +46,8 @@ const SECTIONS = [
   { id: "reputation", label: "Reputation" },
   { id: "waitlist", label: "Waitlist" },
   { id: "kyc", label: "KYC" },
+  { id: "demand", label: "Demanda no coberta" },
+  { id: "data", label: "Data" },
   { id: "ops", label: "Ops" },
 ] as const;
 
@@ -504,6 +507,8 @@ function SectionBody({
   onUnauthorized: () => void;
 }) {
   if (section === "kyc") return <KycSection onUnauthorized={onUnauthorized} />;
+  if (section === "demand") return <DemandSection onUnauthorized={onUnauthorized} />;
+  if (section === "data") return <DataProductsSection onUnauthorized={onUnauthorized} />;
   if (section === "accounts") return <AccountsSection accounts={accounts} />;
   if (section === "fleet") return <FleetSection listings={listings} />;
   if (section === "jobs") {

@@ -1,5 +1,7 @@
 import { compareUsdc, type RuntimeMode } from "@albesa/core";
 import type { CapabilityRegistry } from "@albesa/registry";
+import type { SandboxCapabilityDraft } from "./catalog.js";
+import type { DataCatalog } from "./data/catalog.js";
 import { rosterFleetListings, type JobOrchestrator, type JobStore } from "./jobs.js";
 import type { AgentFinanceService } from "./service.js";
 
@@ -12,6 +14,11 @@ export const SANDBOX_FLEET_AGENT_NAME = "Roster Fleet";
  * balance is still zero. Escrow release pays this wallet from the buyer lock.
  */
 export const SANDBOX_FLEET_FUND_USDC = "1.00";
+
+/** First-party organization that sells data products Roster collects itself. */
+export const DATA_ORG_NAME = "Roster Data";
+/** Seller agent that receives escrow for every data product. */
+export const DATA_AGENT_NAME = "Roster Data";
 
 export interface SandboxFleetListing {
   id: string;
@@ -34,13 +41,39 @@ interface AppRuntime {
   registry: CapabilityRegistry;
   jobs: JobStore;
   orchestrator: JobOrchestrator;
+  data: DataCatalog | null;
   inflight: Promise<SandboxFleetSnapshot> | null;
+  dataInflight: Promise<SandboxFleetSnapshot> | null;
 }
 
 const runtimes = new WeakMap<object, AppRuntime>();
 
-export function attachAppRuntime(app: object, runtime: Omit<AppRuntime, "inflight">): void {
-  runtimes.set(app, { ...runtime, inflight: null });
+export function attachAppRuntime(app: object, runtime: Omit<AppRuntime, "inflight" | "dataInflight">): void {
+  runtimes.set(app, { ...runtime, inflight: null, dataInflight: null });
+}
+
+/** The data catalog behind an app, or null when data products are off. */
+export function appDataCatalog(app: object): DataCatalog | null {
+  return runtimes.get(app)?.data ?? null;
+}
+
+/**
+ * Idempotent: the Roster Data organization, a funded seller agent, one listing
+ * per data product (kind dataset/feed/lookup), and autofill bindings that
+ * deliver through the data catalog. Sandbox only.
+ */
+export function bootstrapDataProducts(app: object): Promise<SandboxFleetSnapshot> {
+  const runtime = runtimes.get(app);
+  if (!runtime) throw new Error("bootstrapDataProducts requires the Hono app returned by createApp.");
+  if (runtime.mode !== "sandbox") throw new Error("Data product bootstrap only runs when the API mode is sandbox.");
+  const data = runtime.data;
+  if (!data) throw new Error("This app has no data catalog.");
+  if (runtime.dataInflight) return runtime.dataInflight;
+  const run = ensureFirstPartySeller(runtime, DATA_ORG_NAME, DATA_AGENT_NAME, data.drafts(), { syncDrafts: true }).finally(() => {
+    runtime.dataInflight = null;
+  });
+  runtime.dataInflight = run;
+  return run;
 }
 
 /**
@@ -69,21 +102,25 @@ export function bootstrapSandboxFleet(app: object): Promise<SandboxFleetSnapshot
     throw new Error("Sandbox fleet bootstrap only runs when the API mode is sandbox.");
   }
   if (runtime.inflight) return runtime.inflight;
-  const run = ensureSandboxFleet(runtime).finally(() => {
+  const run = ensureFirstPartySeller(runtime, SANDBOX_FLEET_ORG_NAME, SANDBOX_FLEET_AGENT_NAME, rosterFleetListings()).finally(() => {
     runtime.inflight = null;
   });
   runtime.inflight = run;
   return run;
 }
 
-async function ensureSandboxFleet(runtime: AppRuntime): Promise<SandboxFleetSnapshot> {
+async function ensureFirstPartySeller(
+  runtime: AppRuntime,
+  orgName: string,
+  agentName: string,
+  drafts: SandboxCapabilityDraft[],
+  options: { syncDrafts?: boolean } = {},
+): Promise<SandboxFleetSnapshot> {
   const organizations = await runtime.service.listOrganizations();
-  let organization = oldest(
-    organizations.filter((candidate) => candidate.name === SANDBOX_FLEET_ORG_NAME),
-  );
+  let organization = oldest(organizations.filter((candidate) => candidate.name === orgName));
   let createdOrganization = false;
   if (!organization) {
-    const created = await runtime.service.createOrganization(SANDBOX_FLEET_ORG_NAME);
+    const created = await runtime.service.createOrganization(orgName);
     organization = created.organization;
     createdOrganization = true;
   }
@@ -91,11 +128,11 @@ async function ensureSandboxFleet(runtime: AppRuntime): Promise<SandboxFleetSnap
 
   const agents = await runtime.service.listAgents(organizationId);
   let seller = oldest(
-    agents.filter((agent) => agent.name === SANDBOX_FLEET_AGENT_NAME && agent.status === "active"),
+    agents.filter((agent) => agent.name === agentName && agent.status === "active"),
   );
   if (!seller) {
     const created = await runtime.service.createAgent(organizationId, {
-      name: SANDBOX_FLEET_AGENT_NAME,
+      name: agentName,
       dailySpendLimitUsdc: "1000.00",
       vendorAllowlist: [],
     });
@@ -107,18 +144,22 @@ async function ensureSandboxFleet(runtime: AppRuntime): Promise<SandboxFleetSnap
     await runtime.service.fundAgent(organizationId, sellerAgentId, SANDBOX_FLEET_FUND_USDC);
   }
 
-  const drafts = rosterFleetListings();
   for (const draft of drafts) {
-    const exists = runtime.registry
+    const existing = runtime.registry
       .list()
-      .some((listing) => listing.organizationId === organizationId && listing.name === draft.name);
-    if (!exists) runtime.registry.register(organizationId, draft);
+      .find((listing) => listing.organizationId === organizationId && listing.name === draft.name);
+    if (!existing) {
+      runtime.registry.register(organizationId, draft);
+    } else if (options.syncDrafts && listingDrifted(existing as unknown as Record<string, unknown>, draft)) {
+      // Data product descriptions, schemas and prices evolve with the code: keep the listing in step.
+      runtime.registry.update(organizationId, existing.id, draft);
+    }
   }
   const listings = drafts.map((draft) => {
     const match = runtime.registry
       .list()
       .find((listing) => listing.organizationId === organizationId && listing.name === draft.name);
-    if (!match) throw new Error(`Sandbox fleet listing "${draft.name}" was not published.`);
+    if (!match) throw new Error(`First-party listing "${draft.name}" was not published.`);
     return match;
   });
 
@@ -137,12 +178,33 @@ async function ensureSandboxFleet(runtime: AppRuntime): Promise<SandboxFleetSnap
 
   return {
     organizationId,
-    organizationName: SANDBOX_FLEET_ORG_NAME,
+    organizationName: orgName,
     sellerAgentId,
-    sellerAgentName: SANDBOX_FLEET_AGENT_NAME,
+    sellerAgentName: agentName,
     listings: listings.map((listing) => ({ id: listing.id, name: listing.name })),
     createdOrganization,
   };
+}
+
+function listingDrifted(listing: Record<string, unknown>, draft: SandboxCapabilityDraft): boolean {
+  const record = draft as unknown as Record<string, unknown>;
+  const pricing = listing.pricing as { model?: string; amountUsdc?: string } | undefined;
+  if (pricing?.model !== draft.pricing.model || compareUsdc(pricing.amountUsdc ?? "0", draft.pricing.amountUsdc) !== 0) return true;
+  for (const key of ["description", "inputSchema", "outputSchema", "latency", "tags", "kind", "data"]) {
+    if (!(key in record)) continue;
+    const want = key === "tags" ? [...(record.tags as string[])].sort() : record[key];
+    const have = key === "tags" ? [...((listing.tags as string[] | undefined) ?? [])].sort() : listing[key];
+    if (stableJson(want) !== stableJson(have)) return true;
+  }
+  return false;
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner && typeof inner === "object" && !Array.isArray(inner)
+      ? Object.fromEntries(Object.entries(inner as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)))
+      : inner,
+  );
 }
 
 function oldest<T extends { createdAt: string }>(items: T[]): T | undefined {
