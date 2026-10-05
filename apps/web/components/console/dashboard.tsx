@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { jobStatusLabel } from "@/lib/job-status";
+import { onboardingSteps } from "@/lib/onboarding";
 import {
   createRosterClient,
   rosterErrorMessage,
   type AccountSnapshot,
   type ConsoleAgent,
+  type ConsoleJob,
   type TreasurySnapshot,
 } from "@/lib/roster-client";
 import { isPositiveUsdc } from "@/lib/usdc";
@@ -34,6 +37,7 @@ function DashboardBody() {
   const [account, setAccount] = useState<AccountSnapshot | null>(null);
   const [treasury, setTreasury] = useState<TreasurySnapshot | null>(null);
   const [agents, setAgents] = useState<ConsoleAgent[]>([]);
+  const [jobs, setJobs] = useState<ConsoleJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -42,14 +46,17 @@ function DashboardBody() {
   const reload = useCallback(async () => {
     if (!session) return;
     const client = createRosterClient({ apiKey: session.apiKey });
-    const [nextAccount, nextTreasury, nextAgents] = await Promise.all([
+    const [nextAccount, nextTreasury, nextAgents, nextJobs] = await Promise.all([
       client.account(),
       client.treasury(),
       client.listAgents(),
+      // Job history is a nice-to-have. A failure here must not blank the dashboard.
+      client.listJobs().catch(() => [] as ConsoleJob[]),
     ]);
     setAccount(nextAccount);
     setTreasury(nextTreasury);
     setAgents(nextAgents);
+    setJobs(nextJobs);
   }, [session]);
 
   useEffect(() => {
@@ -138,6 +145,8 @@ function DashboardBody() {
           </p>
         </section>
 
+        {!loading ? <Onboarding agents={agents} jobs={jobs} /> : null}
+
         <section aria-labelledby="agents-title">
           <h2 id="agents-title" className="font-serif text-3xl tracking-[-0.03em]">
             Agents
@@ -173,6 +182,8 @@ function DashboardBody() {
             </div>
           ) : null}
         </section>
+
+        <RecentJobs jobs={jobs} loading={loading} />
       </div>
 
       <form onSubmit={onCreate} className="flex h-fit flex-col gap-4 border border-line/10 bg-panel p-6">
@@ -215,4 +226,126 @@ function DashboardBody() {
       </form>
     </div>
   );
+}
+
+function Onboarding({ agents, jobs }: { agents: ConsoleAgent[]; jobs: ConsoleJob[] }) {
+  const steps = onboardingSteps(agents, jobs);
+  const done = steps.filter((step) => step.done).length;
+  if (done === steps.length) return null;
+  return (
+    <section className="border border-brass/30 bg-panel p-5" aria-labelledby="onboarding-title">
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 id="onboarding-title" className="font-mono text-[11px] tracking-[0.18em] text-brass uppercase">
+          Get to your first settled job
+        </h2>
+        <p className="font-mono text-xs text-muted">
+          {done.toString()}/{steps.length.toString()}
+        </p>
+      </div>
+      <div className="mt-3 h-1 w-full bg-line/10" aria-hidden="true">
+        <div className="h-1 bg-brass transition-all" style={{ width: `${((done / steps.length) * 100).toString()}%` }} />
+      </div>
+      <ol className="mt-4 grid gap-2 sm:grid-cols-2">
+        {steps.map((step, index) => (
+          <li key={step.id} className="flex items-center gap-3 text-sm">
+            <span
+              className={`inline-flex size-6 shrink-0 items-center justify-center border font-mono text-[11px] ${
+                step.done ? "border-sage bg-sage/15 text-sage" : "border-line/20 text-muted"
+              }`}
+              aria-hidden="true"
+            >
+              {step.done ? "✓" : (index + 1).toString()}
+            </span>
+            {step.href && !step.done ? (
+              <Link href={step.href} className="text-paper underline decoration-brass/40 underline-offset-4 hover:text-brass">
+                {step.label}
+              </Link>
+            ) : (
+              <span className={step.done ? "text-muted line-through" : "text-paper"}>{step.label}</span>
+            )}
+            <span className="sr-only">{step.done ? "done" : "to do"}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+const STATUS_TONE: Record<string, string> = {
+  held: "border-brass/50 text-brass",
+  released: "border-sage/60 text-sage",
+  refunded: "border-line/30 text-muted",
+  failed: "border-brass-bright/60 text-brass-bright",
+  timed_out: "border-line/30 text-muted",
+};
+
+function RecentJobs({ jobs, loading }: { jobs: ConsoleJob[]; loading: boolean }) {
+  const recent = jobs.slice(0, 8);
+  return (
+    <section aria-labelledby="jobs-title">
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 id="jobs-title" className="font-serif text-3xl tracking-[-0.03em]">
+          Recent jobs
+        </h2>
+        {jobs.length > recent.length ? (
+          <p className="font-mono text-xs text-muted">
+            {recent.length.toString()} of {jobs.length.toString()}
+          </p>
+        ) : null}
+      </div>
+      {loading ? <p className="mt-4 text-sm text-muted">Loading jobs…</p> : null}
+      {!loading && recent.length === 0 ? (
+        <p className="mt-4 text-sm leading-6 text-muted">
+          No jobs yet.{" "}
+          <Link href="/console/marketplace" className="text-brass underline decoration-brass/40 underline-offset-4">
+            Hire your first agent
+          </Link>
+          .
+        </p>
+      ) : null}
+      {recent.length > 0 ? (
+        <div className="mt-4 overflow-x-auto border-y border-line/10">
+          <table className="w-full min-w-[34rem] text-left text-sm">
+            <thead>
+              <tr className="font-mono text-[10px] tracking-[0.16em] text-muted uppercase">
+                <th scope="col" className="py-3 pr-4 font-normal">Listing</th>
+                <th scope="col" className="py-3 pr-4 font-normal">Status</th>
+                <th scope="col" className="py-3 pr-4 text-right font-normal">Amount</th>
+                <th scope="col" className="py-3 pr-4 text-right font-normal">Take-rate</th>
+                <th scope="col" className="py-3 text-right font-normal">When</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line/10">
+              {recent.map((job) => (
+                <tr key={job.id}>
+                  <td className="py-3 pr-4">
+                    <p className="text-paper">{job.listingName || job.listingId}</p>
+                    <p className="font-mono text-[11px] text-muted">{job.id}</p>
+                  </td>
+                  <td className="py-3 pr-4">
+                    <span
+                      className={`inline-flex border px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] uppercase ${
+                        STATUS_TONE[job.status] ?? "border-line/30 text-muted"
+                      }`}
+                    >
+                      {jobStatusLabel(job.status)}
+                    </span>
+                  </td>
+                  <td className="py-3 pr-4 text-right font-mono text-paper">{job.amountUsdc}</td>
+                  <td className="py-3 pr-4 text-right font-mono text-muted">{job.takeRateUsdc}</td>
+                  <td className="py-3 text-right font-mono text-xs text-muted">{formatWhen(job.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function formatWhen(iso: string): string {
+  const time = Date.parse(iso);
+  if (Number.isNaN(time)) return "—";
+  return new Date(time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }

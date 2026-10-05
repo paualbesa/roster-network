@@ -7,6 +7,7 @@ import {
   writeBrowserSession,
   type SandboxSession,
 } from "@/lib/session";
+import { createRosterClient } from "@/lib/roster-client";
 import { beginSupabaseSignOut } from "@/lib/supabase/browser";
 
 interface SessionValue {
@@ -51,11 +52,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clear = useCallback(() => {
+    // Revoke the sandbox key server-side as well. Best effort: sign-out never waits on the API.
+    const apiKey = session?.apiKey;
+    if (apiKey) void createRosterClient({ apiKey }).revokeKey().catch(() => undefined);
     beginSupabaseSignOut();
     clearBrowserSession();
     setLinkingState(true);
     setSession(null);
-  }, []);
+  }, [session?.apiKey]);
 
   const value = useMemo<SessionValue>(
     () => ({

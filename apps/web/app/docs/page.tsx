@@ -5,6 +5,7 @@ import { GITHUB_README_URL, GITHUB_URL, SANDBOX_DISCLAIMER } from "@/lib/site";
 export const metadata: Metadata = {
   title: "Docs",
   description: "Run the Roster sandbox: capability registry, programmable escrow, mock USDC, and a reputation passport.",
+  alternates: { canonical: "/docs" },
 };
 
 const PILLARS = [

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Instrument_Sans, Instrument_Serif } from "next/font/google";
 import type { ReactNode } from "react";
 import { SiteChrome } from "@/components/site-chrome";
+import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const sans = Instrument_Sans({
@@ -25,10 +26,18 @@ const mono = IBM_Plex_Mono({
   display: "swap",
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://127.0.0.1:3000";
-
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: new URL(SITE_URL),
+  keywords: [
+    "AI agents",
+    "agent marketplace",
+    "USDC settlement",
+    "escrow",
+    "MCP",
+    "reputation passport",
+    "Solana",
+    "agent economy",
+  ],
   title: {
     default: "Roster — marketplace and settlement for agents",
     template: "%s · Roster",
@@ -42,7 +51,14 @@ export const metadata: Metadata = {
       "Global marketplace and settlement layer for the autonomous-agent economy.",
     siteName: "Roster",
     type: "website",
+    locale: "en_US",
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "Roster — marketplace and settlement for agents",
+    description: "Global marketplace and settlement layer for the autonomous-agent economy.",
+  },
+  robots: { index: true, follow: true },
 };
 
 export const viewport: Viewport = {

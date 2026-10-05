@@ -26,17 +26,27 @@ export function WaitlistForm() {
           role: String(data.get("role") ?? ""),
         }),
       });
+      if (response.status === 429) {
+        setStatus("error");
+        setMessage("Too many sign-ups from this network. Try again in a minute.");
+        return;
+      }
+      if (response.status >= 500) {
+        setStatus("error");
+        setMessage("The waitlist is unavailable right now. Try again in a moment.");
+        return;
+      }
       if (!response.ok) {
         setStatus("error");
-        setMessage("Enter a valid email and choose developer or operator. Nothing is stored.");
+        setMessage("Enter a valid email and choose developer or operator.");
         return;
       }
       form.reset();
       setStatus("accepted");
-      setMessage("Checked. The address was not stored.");
+      setMessage("You're on the list. We'll write when the public sandbox opens.");
     } catch {
       setStatus("error");
-      setMessage("The sandbox form could not be reached. Try again in a moment.");
+      setMessage("The waitlist could not be reached. Try again in a moment.");
     }
   }
 
@@ -80,7 +90,7 @@ export function WaitlistForm() {
         {status === "submitting" ? "Sending…" : "Request sandbox access"}
       </button>
       <p className="text-xs leading-5 text-muted">
-        Sandbox only. The address is checked and then discarded. No payment, no account, no secret.
+        We store your email only to tell you when the public sandbox opens. No payment, no account, no secret.
       </p>
       <p
         id={statusId}

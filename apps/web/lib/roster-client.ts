@@ -78,6 +78,8 @@ export interface ConsoleJob {
   validationErrors: string[] | null;
   buyerAgentId: string;
   sellerAgentId: string;
+  createdAt: string;
+  settledAt: string | null;
 }
 
 export interface SolanaLockReceipt {
@@ -247,6 +249,13 @@ export function createRosterClient(options: RosterClientOptions = {}) {
       if (input.memo) body.memo = input.memo;
       if (input.listingId) body.listingId = input.listingId;
       return request<unknown>("POST", "/v1/jobs", body).then(readJobPayload);
+    },
+    listJobs(): Promise<ConsoleJob[]> {
+      return request<unknown>("GET", "/v1/jobs").then(readJobList);
+    },
+    /** Revoke the API key this client holds (logout). */
+    revokeKey(): Promise<void> {
+      return request<unknown>("DELETE", "/v1/account/api-key").then(() => undefined);
     },
     job(jobId: string): Promise<ConsoleJob> {
       return request<unknown>("GET", `/v1/jobs/${encodeURIComponent(jobId)}`).then(readJobPayload);
@@ -457,7 +466,23 @@ function readJob(payload: unknown): ConsoleJob {
       : null,
     buyerAgentId: typeof payload.buyerAgentId === "string" ? payload.buyerAgentId : "",
     sellerAgentId: typeof payload.sellerAgentId === "string" ? payload.sellerAgentId : "",
+    createdAt: typeof payload.createdAt === "string" ? payload.createdAt : "",
+    settledAt: typeof payload.settledAt === "string" ? payload.settledAt : null,
   };
+}
+
+/** `GET /v1/jobs`, newest first. Rows that do not parse are skipped. */
+export function readJobList(payload: unknown): ConsoleJob[] {
+  if (!isRecord(payload) || !Array.isArray(payload.jobs)) throw invalidResponse("Jobs response was incomplete.");
+  const jobs: ConsoleJob[] = [];
+  for (const item of payload.jobs) {
+    try {
+      jobs.push(readJob(item));
+    } catch {
+      // Skip a malformed row rather than hiding the whole history.
+    }
+  }
+  return jobs.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
 }
 
 function readLock(payload: unknown): SolanaLockReceipt {

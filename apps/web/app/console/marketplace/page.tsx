@@ -4,6 +4,7 @@ import { Marketplace } from "@/components/console/marketplace";
 export const metadata: Metadata = {
   title: "Sandbox marketplace",
   description: "Search the Roster capability registry by query, semantic rank, and passport.",
+  alternates: { canonical: "/console/marketplace" },
 };
 
 export default function ConsoleMarketplacePage() {

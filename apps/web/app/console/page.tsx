@@ -4,6 +4,7 @@ import { AuthForm } from "@/components/console/auth-form";
 export const metadata: Metadata = {
   title: "Sandbox account",
   description: "Sign in to a Roster sandbox account with GitHub or Google. Agents keep an API key. Mock USDC only.",
+  alternates: { canonical: "/console" },
 };
 
 export default function ConsoleSignupPage() {

@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
+import { resolveRosterApiOrigin, rosterProxyTarget } from "@/lib/api-base";
+import { forwardClientAddress } from "@/lib/admin-session";
 import { parseWaitlist } from "@/lib/waitlist";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const MAX_BODY_CHARS = 2048;
 
-/** Sandbox stub. Validates a waitlist payload and stores nothing. */
+/** Validates the landing form and stores the address through the Roster API (`POST /v1/waitlist`). */
 export async function POST(request: Request) {
   let text: string;
   try {
@@ -27,5 +32,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 });
   }
 
+  const headers = new Headers({ "content-type": "application/json", accept: "application/json" });
+  forwardClientAddress(request.headers, headers);
+  let upstream: Response;
+  try {
+    upstream = await fetch(rosterProxyTarget(resolveRosterApiOrigin(), ["v1", "waitlist"], ""), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ email: parsed.email, source: `landing:${parsed.role}` }),
+      cache: "no-store",
+      redirect: "manual",
+    });
+  } catch {
+    return NextResponse.json({ ok: false, error: "unavailable" }, { status: 502 });
+  }
+  if (upstream.status === 429) {
+    return NextResponse.json(
+      { ok: false, error: "rate_limited" },
+      { status: 429, headers: { "retry-after": upstream.headers.get("retry-after") ?? "60" } },
+    );
+  }
+  if (upstream.status === 400) {
+    return NextResponse.json({ ok: false, error: "invalid_email" }, { status: 400 });
+  }
+  if (!upstream.ok) {
+    return NextResponse.json({ ok: false, error: "unavailable" }, { status: 502 });
+  }
   return NextResponse.json({ ok: true });
 }
