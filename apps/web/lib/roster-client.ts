@@ -54,6 +54,7 @@ export interface MarketplaceListing {
   latency: { p95Ms: number };
   tags: string[];
   agentId: string | null;
+  inputSchema: unknown;
   outputSchema: unknown;
 }
 
@@ -238,6 +239,7 @@ export function createRosterClient(options: RosterClientOptions = {}) {
       tags: string[];
       memo: string | null;
       listingId?: string | null;
+      input?: unknown;
     }): Promise<ConsoleJob> {
       const body: Record<string, unknown> = {
         buyerAgentId: input.buyerAgentId,
@@ -248,6 +250,7 @@ export function createRosterClient(options: RosterClientOptions = {}) {
       };
       if (input.memo) body.memo = input.memo;
       if (input.listingId) body.listingId = input.listingId;
+      if (input.input !== undefined) body.input = input.input;
       return request<unknown>("POST", "/v1/jobs", body).then(readJobPayload);
     },
     listJobs(): Promise<ConsoleJob[]> {
@@ -436,6 +439,7 @@ function readListing(payload: unknown): MarketplaceListing {
     },
     tags: Array.isArray(payload.tags) ? payload.tags.filter((tag): tag is string => typeof tag === "string") : [],
     agentId: typeof payload.agentId === "string" ? payload.agentId : null,
+    inputSchema: payload.inputSchema ?? {},
     outputSchema: payload.outputSchema ?? {},
   };
 }

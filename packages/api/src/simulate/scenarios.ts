@@ -8,7 +8,7 @@ import {
 } from "@albesa/core";
 import { projectPassport, type ReputationTotals } from "@albesa/reputation";
 import { quoteRosterNetworkFee } from "@albesa/solana";
-import { sandboxJobSchema, sandboxMarketplaceListings, sandboxReceiptListing } from "../jobs.js";
+import { rosterFleetListings, sandboxJobSchema, sandboxReceiptListing } from "../jobs.js";
 import type { SimWorld } from "./worlds.js";
 
 const GRANT = parseUsdc(SANDBOX_TREASURY_GRANT_USDC);
@@ -701,7 +701,7 @@ interface FleetListing {
 async function discoverFleet(ctx: SimContext, auth: Record<string, string>): Promise<FleetListing[]> {
   const response = await ctx.request("/v1/registry/listings", { headers: auth });
   await expectStatus(response, 200, "list fleet listings");
-  const names = new Set(sandboxMarketplaceListings().map((listing) => listing.name));
+  const names = new Set(rosterFleetListings().map((listing) => listing.name));
   const listings = ((await response.json()) as { listings: { id: string; name: string; organizationId: string; agentId: string | null }[] }).listings.filter(
     (listing) => names.has(listing.name) && listing.agentId,
   );

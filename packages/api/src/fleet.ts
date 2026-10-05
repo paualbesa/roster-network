@@ -1,6 +1,6 @@
 import { compareUsdc, type RuntimeMode } from "@albesa/core";
 import type { CapabilityRegistry } from "@albesa/registry";
-import { sandboxMarketplaceListings, type JobOrchestrator, type JobStore } from "./jobs.js";
+import { rosterFleetListings, type JobOrchestrator, type JobStore } from "./jobs.js";
 import type { AgentFinanceService } from "./service.js";
 
 /** System seller that publishes the first-party sandbox catalog. */
@@ -55,7 +55,7 @@ export async function sweepExpiredJobs(app: object): Promise<number> {
 }
 
 /**
- * Idempotent sandbox boot: Roster Labs, the six first-party listings, a bound
+ * Idempotent sandbox boot: Roster Labs, the Roster Fleet catalog, a bound
  * seller agent, and a treasury transfer so that agent can be paid.
  * A second call keeps the same organization, agent, and listing ids.
  * Refuses every mode except sandbox.
@@ -107,7 +107,7 @@ async function ensureSandboxFleet(runtime: AppRuntime): Promise<SandboxFleetSnap
     await runtime.service.fundAgent(organizationId, sellerAgentId, SANDBOX_FLEET_FUND_USDC);
   }
 
-  const drafts = sandboxMarketplaceListings();
+  const drafts = rosterFleetListings();
   for (const draft of drafts) {
     const exists = runtime.registry
       .list()
