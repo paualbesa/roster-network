@@ -374,6 +374,26 @@ describe("POST /v1/need", () => {
     expect(unauth.status).toBe(401);
   });
 
+  it("rejects a buy whose input misses a required field before any money moves", async () => {
+    const { app, catalog } = fixtureApp();
+    await bootstrapDataProducts(app);
+    await catalog.refresh("test-rates");
+    const apiKey = await signup(app);
+    const products = (await (await app.request("/v1/data/products")).json()) as { products: { slug: string; listingId: string }[] };
+    const listingId = products.products.find((product) => product.slug === "test-rate-lookup")!.listingId;
+    const wrong = await app.request("/v1/need/buy", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ listingId, input: { code: "GBP" } }),
+    });
+    expect(wrong.status).toBe(400);
+    const error = (await wrong.json()) as { error: { code: string; message: string } };
+    expect(error.error.code).toBe("invalid_input");
+    expect(error.error.message).toContain("currency");
+    const jobs = (await (await app.request("/v1/jobs", { headers: { authorization: `Bearer ${apiKey}` } })).json()) as { jobs: unknown[] };
+    expect(jobs.jobs).toHaveLength(0);
+  });
+
   it("buys the top match in one call with buy: true", async () => {
     const { app, catalog } = fixtureApp();
     await bootstrapDataProducts(app);
