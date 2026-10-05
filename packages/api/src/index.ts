@@ -14,9 +14,11 @@ export {
 } from "./fleet.js";
 export type { SandboxFleetListing, SandboxFleetSnapshot } from "./fleet.js";
 export {
+  isRosterFleetName,
   JobOrchestrator,
   JsonJobStore,
   MemoryJobStore,
+  rosterFleetListings,
   sandboxComputeArbListing,
   sandboxDocQaListing,
   sandboxDocSummarizerListing,

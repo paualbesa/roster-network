@@ -1,4 +1,5 @@
 import { formatUsdc, parseUsdc } from "@albesa/core";
+import { findFleetTool, fleetDraft, fleetTools, runFleetTool } from "./fleet/index.js";
 
 /**
  * First-party sandbox catalog.
@@ -280,7 +281,31 @@ export function sandboxMarketplaceListings(): SandboxCapabilityDraft[] {
   ];
 }
 
-/** Escrow result schema for a seeded listing. Pass it as `schema` on `POST /v1/jobs`. */
+/**
+ * Everything Roster Fleet publishes: the six classic demo listings plus the
+ * first-party catalog in `./fleet`. Only the fleet bootstrap uses this list.
+ * `POST /v1/registry/seed` keeps publishing the six classic drafts so a
+ * developer org does not inherit dozens of first-party listings.
+ */
+export function rosterFleetListings(): SandboxCapabilityDraft[] {
+  return [...sandboxMarketplaceListings(), ...fleetTools().map((tool) => fleetDraft(tool))];
+}
+
+/** True for every listing name Roster Fleet can deliver with `sandboxExecute`. */
+export function isRosterFleetName(name: string): boolean {
+  return CLASSIC_NAMES.has(name) || findFleetTool(name) !== undefined;
+}
+
+const CLASSIC_NAMES = new Set([
+  "Receipt parser",
+  "Doc summarizer",
+  "Unit converter",
+  "Structured data extract",
+  "Doc Q&A",
+  "Compute arb",
+]);
+
+/** Escrow result schema for a fleet listing. Pass it as `schema` on `POST /v1/jobs`. */
 export function sandboxJobSchema(name: string): Record<string, unknown> {
   return structuredClone(requireDraft(name).outputSchema);
 }
@@ -317,8 +342,11 @@ export function sandboxExecute(name: string, input: unknown): Record<string, unk
       return executeDocQa(input);
     case "Compute arb":
       return executeComputeArb(input);
-    default:
-      throw new Error(`Unknown sandbox listing "${name}".`);
+    default: {
+      const tool = findFleetTool(name);
+      if (!tool) throw new Error(`Unknown sandbox listing "${name}".`);
+      return runFleetTool(tool, input);
+    }
   }
 }
 
@@ -351,6 +379,8 @@ function tool(spec: ToolSpec): SandboxCapabilityDraft {
 }
 
 function requireDraft(name: string): SandboxCapabilityDraft {
+  const fleet = findFleetTool(name);
+  if (fleet) return fleetDraft(fleet);
   const draft = sandboxMarketplaceListings().find((listing) => listing.name === name);
   if (!draft) throw new Error(`Unknown sandbox listing "${name}".`);
   return draft;

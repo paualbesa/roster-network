@@ -3,6 +3,8 @@ import { dirname } from "node:path";
 import { createId, EscrowSchemaError, parseResultSchema, parseUsdc } from "@albesa/core";
 import { CapabilityRegistry, type CapabilityListing } from "@albesa/registry";
 import {
+  isRosterFleetName,
+  rosterFleetListings,
   sandboxComputeArbListing,
   sandboxDocQaListing,
   sandboxDocSummarizerListing,
@@ -161,6 +163,8 @@ export class JobStoreError extends Error {
 
 export type { SandboxCapabilityDraft, SandboxSellerBindRequest } from "./catalog.js";
 export {
+  isRosterFleetName,
+  rosterFleetListings,
   sandboxComputeArbListing,
   sandboxDocQaListing,
   sandboxDocSummarizerListing,
@@ -927,7 +931,7 @@ function parseBinding(value: unknown, index: number): ListingSellerBinding {
 }
 
 function isSandboxFleetName(name: string): boolean {
-  return sandboxMarketplaceListings().some((draft) => draft.name === name);
+  return isRosterFleetName(name);
 }
 
 function parsePassport(value: unknown, index: number): JobPassportChange | null {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { countOnlineAgents } from "./admin.js";
 import { createApp } from "./app.js";
-import { sandboxJobSchema, sandboxMarketplaceListings, sandboxReceiptListing } from "./jobs.js";
+import { rosterFleetListings, sandboxJobSchema, sandboxReceiptListing } from "./jobs.js";
 
 const TOKEN = "operator-sandbox-token";
 const PASSWORD = "sandbox-pass-1";
@@ -58,7 +58,7 @@ describe("admin operator API", () => {
     };
     expect(fleet.fleet.createdOrganization).toBe(true);
     expect(fleet.fleet.listings.map((listing) => listing.name)).toEqual(
-      sandboxMarketplaceListings().map((listing) => listing.name),
+      rosterFleetListings().map((listing) => listing.name),
     );
     const again = await app.request("/v1/admin/fleet/bootstrap", { method: "POST", headers: adminHeaders(TOKEN) });
     const restored = (await again.json()) as { fleet: { organizationId: string; createdOrganization: boolean } };
@@ -116,7 +116,7 @@ describe("admin operator API", () => {
     expect(snapshot.counts.organizations).toBe(2);
     expect(snapshot.counts.agents).toBe(2);
     expect(snapshot.counts.agentsOnline).toBe(2);
-    expect(snapshot.counts.listings).toBe(6);
+    expect(snapshot.counts.listings).toBe(rosterFleetListings().length);
     expect(snapshot.counts.jobs.released).toBe(1);
     expect(snapshot.counts.jobs.locked).toBe(0);
     expect(snapshot.gmv.releasedUsdc).toBe("1.000000");

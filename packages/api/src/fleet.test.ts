@@ -5,7 +5,7 @@ import { CapabilityRegistry } from "@albesa/registry";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { bootstrapSandboxFleet } from "./fleet.js";
-import { resolveAutofillConfig, sandboxJobSchema, sandboxMarketplaceListings } from "./jobs.js";
+import { resolveAutofillConfig, rosterFleetListings, sandboxJobSchema } from "./jobs.js";
 
 const directories: string[] = [];
 
@@ -127,7 +127,7 @@ describe("sandbox fleet autofill", () => {
     expect(again.organizationId).toBe(fleet.organizationId);
     expect(again.sellerAgentId).toBe(fleet.sellerAgentId);
     expect(again.listings.map((listing) => listing.id)).toEqual(fleet.listings.map((listing) => listing.id));
-    expect(fleet.listings.map((listing) => listing.name)).toEqual(sandboxMarketplaceListings().map((listing) => listing.name));
+    expect(fleet.listings.map((listing) => listing.name)).toEqual(rosterFleetListings().map((listing) => listing.name));
 
     const buyer = await organization(app);
     const buyerId = await createAgent(app, buyer.auth, "buyer");

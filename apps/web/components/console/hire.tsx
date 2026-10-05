@@ -53,6 +53,7 @@ function HireBody({ listingId }: { listingId: string }) {
   const [query, setQuery] = useState("");
   const [amount, setAmount] = useState("1.00");
   const [schemaText, setSchemaText] = useState('{\n  "type": "object",\n  "properties": { "total": { "type": "string" } },\n  "required": ["total"]\n}');
+  const [inputText, setInputText] = useState("{}");
   const [tags, setTags] = useState<string[]>([]);
   const [job, setJob] = useState<ConsoleJob | null>(null);
   const [lock, setLock] = useState<SolanaLockReceipt | null>(null);
@@ -86,6 +87,7 @@ function HireBody({ listingId }: { listingId: string }) {
         setQuery(nextListing.name);
         setAmount(defaultHireAmount(nextListing.pricing.amountUsdc));
         setSchemaText(JSON.stringify(nextListing.outputSchema, null, 2));
+        setInputText(JSON.stringify(exampleInput(nextListing.inputSchema), null, 2));
         setTags(nextListing.tags);
         setResultText(JSON.stringify(sampleResult(nextListing.outputSchema), null, 2));
       } catch (cause) {
@@ -235,6 +237,13 @@ function HireBody({ listingId }: { listingId: string }) {
       setError("Result schema must be JSON.");
       return;
     }
+    let jobInput: unknown;
+    try {
+      jobInput = inputText.trim() ? (JSON.parse(inputText) as unknown) : {};
+    } catch {
+      setError("Input must be JSON.");
+      return;
+    }
     setPending(true);
     setError("");
     setNotice("");
@@ -246,6 +255,7 @@ function HireBody({ listingId }: { listingId: string }) {
         amountUsdc: amount,
         schema,
         tags,
+        input: jobInput,
         memo: listing ? `Sandbox console hire ${listing.id}` : "Sandbox console hire",
         ...(listing ? { listingId: listing.id } : {}),
       });
@@ -374,6 +384,19 @@ function HireBody({ listingId }: { listingId: string }) {
         <p className="text-xs leading-5 text-muted">
           The Roster fee is 1% of the price plus 0.003 USDC. Provider payout is the price minus that fee. Timeout and refund collect nothing.
         </p>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="hire-input" className="text-sm text-paper">
+            Input (JSON)
+          </label>
+          <textarea
+            id="hire-input"
+            value={inputText}
+            onChange={(event) => setInputText(event.target.value)}
+            rows={6}
+            className={`${fieldClass} min-h-32 py-3 font-mono text-sm`}
+          />
+          <p className="text-xs leading-5 text-muted">Prefilled from the listing&apos;s example input. The provider receives this payload.</p>
+        </div>
         <div className="flex flex-col gap-2">
           <label htmlFor="hire-schema" className="text-sm text-paper">
             Result schema
@@ -516,4 +539,12 @@ function Receipt({
       ) : null}
     </section>
   );
+}
+
+function exampleInput(schema: unknown): unknown {
+  if (schema && typeof schema === "object" && !Array.isArray(schema)) {
+    const examples = (schema as { examples?: unknown }).examples;
+    if (Array.isArray(examples) && examples.length > 0) return examples[0];
+  }
+  return {};
 }
