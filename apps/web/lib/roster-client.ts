@@ -154,7 +154,10 @@ export function createRosterClient(options: RosterClientOptions = {}) {
       headers.authorization = `Bearer ${apiKey}`;
     }
     const init: RequestInit = { method, headers, cache: "no-store" };
-    if (body !== undefined) {
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+      // The browser sets the multipart boundary.
+      init.body = body;
+    } else if (body !== undefined) {
       headers["content-type"] = "application/json";
       init.body = JSON.stringify(body);
     }
@@ -253,6 +256,15 @@ export function createRosterClient(options: RosterClientOptions = {}) {
       if (input.input !== undefined) body.input = input.input;
       return request<unknown>("POST", "/v1/jobs", body).then(readJobPayload);
     },
+    health(): Promise<RosterHealth> {
+      return request<unknown>("GET", "/health", undefined, false).then(readHealth);
+    },
+    kyc(): Promise<KycSnapshot> {
+      return request<unknown>("GET", "/v1/kyc").then(readKycPayload);
+    },
+    submitKyc(form: FormData): Promise<KycSnapshot> {
+      return request<unknown>("POST", "/v1/kyc/submission", form).then(readKycPayload);
+    },
     listJobs(): Promise<ConsoleJob[]> {
       return request<unknown>("GET", "/v1/jobs").then(readJobList);
     },
@@ -302,6 +314,9 @@ export function createRosterClient(options: RosterClientOptions = {}) {
 }
 
 export function rosterErrorMessage(error: unknown): string {
+  if (error instanceof RosterApiError && error.code === "kyc_limit_exceeded") {
+    return `${error.message} Raise the cap with Tier 1 verification at /console/kyc.`;
+  }
   if (error instanceof RosterApiError && error.message.trim()) return error.message;
   return "The sandbox console could not complete that request.";
 }
@@ -555,4 +570,104 @@ function invalidResponse(message: string): RosterApiError {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export type EscrowMode = "custodial-mock" | "noncustodial-sim";
+
+export interface RosterHealth {
+  version: string;
+  escrowMode: EscrowMode;
+  mode: string;
+  rail: string;
+}
+
+export function readHealth(payload: unknown): RosterHealth {
+  if (!isRecord(payload)) throw invalidResponse("Health response was incomplete.");
+  return {
+    version: typeof payload.version === "string" ? payload.version : "dev",
+    escrowMode: payload.escrowMode === "noncustodial-sim" ? "noncustodial-sim" : "custodial-mock",
+    mode: typeof payload.mode === "string" ? payload.mode : "sandbox",
+    rail: typeof payload.rail === "string" ? payload.rail : "mock",
+  };
+}
+
+export function describeEscrowMode(mode: EscrowMode): string {
+  return mode === "noncustodial-sim"
+    ? "Non-custodial (simulated): the buyer wallet signs the lock into a program vault; Roster holds no keys."
+    : "Custodial mock: sandbox locks sit on a Roster-minted mock hold address.";
+}
+
+export type KycStatus = "none" | "pending" | "approved" | "rejected";
+
+export interface KycSnapshot {
+  tier: 0 | 1;
+  status: KycStatus;
+  windowDays: number;
+  usedUsdc: string;
+  limitUsdc: string;
+  remainingUsdc: string;
+  limits: { tier0Usdc: string; tier1Usdc: string };
+  submission: {
+    entityType: "individual" | "company";
+    legalName: string;
+    country: string;
+    dateOfBirth: string | null;
+    companyRegNo: string | null;
+    submittedAt: string;
+  } | null;
+  document: { mimeType: string; sizeBytes: number; uploadedAt: string; deleted: boolean } | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  upgrade: string | null;
+}
+
+function str(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+export function readKycPayload(payload: unknown): KycSnapshot {
+  if (!isRecord(payload) || !isRecord(payload.kyc)) throw invalidResponse("KYC response was incomplete.");
+  const kyc = payload.kyc;
+  const limits = isRecord(kyc.limits) ? kyc.limits : {};
+  const status = kyc.status;
+  const submission = isRecord(kyc.submission) ? kyc.submission : null;
+  const document = isRecord(kyc.document) ? kyc.document : null;
+  return {
+    tier: kyc.tier === 1 ? 1 : 0,
+    status: status === "pending" || status === "approved" || status === "rejected" ? status : "none",
+    windowDays: typeof kyc.windowDays === "number" ? kyc.windowDays : 30,
+    usedUsdc: str(kyc.usedUsdc, "0.000000"),
+    limitUsdc: str(kyc.limitUsdc, "0.000000"),
+    remainingUsdc: str(kyc.remainingUsdc, "0.000000"),
+    limits: { tier0Usdc: str(limits.tier0Usdc, "0.000000"), tier1Usdc: str(limits.tier1Usdc, "0.000000") },
+    submission: submission
+      ? {
+          entityType: submission.entityType === "company" ? "company" : "individual",
+          legalName: str(submission.legalName),
+          country: str(submission.country),
+          dateOfBirth: typeof submission.dateOfBirth === "string" ? submission.dateOfBirth : null,
+          companyRegNo: typeof submission.companyRegNo === "string" ? submission.companyRegNo : null,
+          submittedAt: str(submission.submittedAt),
+        }
+      : null,
+    document: document
+      ? {
+          mimeType: str(document.mimeType),
+          sizeBytes: typeof document.sizeBytes === "number" ? document.sizeBytes : 0,
+          uploadedAt: str(document.uploadedAt),
+          deleted: document.deleted === true,
+        }
+      : null,
+    reviewedAt: typeof kyc.reviewedAt === "string" ? kyc.reviewedAt : null,
+    rejectionReason: typeof kyc.rejectionReason === "string" ? kyc.rejectionReason : null,
+    upgrade: typeof kyc.upgrade === "string" ? kyc.upgrade : null,
+  };
+}
+
+/** Share of the cap already used, 0-100. */
+export function kycUsagePercent(snapshot: Pick<KycSnapshot, "usedUsdc" | "limitUsdc">): number {
+  const used = Number(snapshot.usedUsdc);
+  const limit = Number(snapshot.limitUsdc);
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((used / limit) * 1000) / 10));
 }

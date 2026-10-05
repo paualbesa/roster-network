@@ -16,12 +16,14 @@ import {
   parseUsdc,
   quoteEscrowSettlement,
   quoteSandboxFee,
+  resolveEscrowMode,
   SANDBOX_MAX_ACTIVE_AGENTS,
   SANDBOX_TREASURY_GRANT_USDC,
   sumSpentTodayUsdc,
   WalletProviderError,
   type Agent,
   type Escrow,
+  type EscrowMode,
   type LedgerDirection,
   type LedgerEntry,
   type Organization,
@@ -49,6 +51,20 @@ import {
   type ReputationPassport,
 } from "@albesa/reputation";
 import { burnPasswordCheck, hashPassword, verifyPassword } from "./password.js";
+import { buildEscrowCustody } from "./escrow-mode.js";
+import {
+  emptyKycProfile,
+  KYC_UPGRADE_HINT,
+  KYC_WINDOW_DAYS,
+  limitForTier,
+  resolveKycLimits,
+  type KycAuditEntry,
+  type KycDocumentRecord,
+  type KycLimits,
+  type KycProfile,
+  type KycSubmission,
+  type KycUsage,
+} from "./kyc.js";
 import { MemoryStore, type WaitlistEntry } from "./store.js";
 
 export type ErrorStatus = 400 | 401 | 403 | 404 | 409;
@@ -57,13 +73,22 @@ export class ServiceError extends Error {
   readonly status: ErrorStatus;
   readonly code: string;
   readonly transaction: Transaction | null;
+  /** Extra machine-readable fields merged into the `error` object. */
+  readonly details: Record<string, unknown> | null;
 
-  constructor(status: ErrorStatus, code: string, message: string, transaction: Transaction | null = null) {
+  constructor(
+    status: ErrorStatus,
+    code: string,
+    message: string,
+    transaction: Transaction | null = null,
+    details: Record<string, unknown> | null = null,
+  ) {
     super(message);
     this.name = "ServiceError";
     this.status = status;
     this.code = code;
     this.transaction = transaction;
+    this.details = details;
   }
 }
 
@@ -254,6 +279,26 @@ export interface ServiceOptions {
   store?: MemoryStore;
   reputation?: ReputationLedger;
   schemaHook?: SchemaValidationHook;
+  /** Escrow custody model. Omit it to read `ROSTER_ESCROW_MODE` (default `custodial-mock`). */
+  escrowMode?: EscrowMode;
+  /** KYC escrow-volume caps. Omit them to read `ROSTER_KYC_T0_LIMIT_USDC` / `ROSTER_KYC_T1_LIMIT_USDC`. */
+  kycLimits?: KycLimits;
+}
+
+export interface KycView extends KycUsage {
+  organizationId: string;
+  submission: KycSubmission | null;
+  document: { mimeType: string; sizeBytes: number; uploadedAt: string; deleted: boolean } | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  upgrade: string | null;
+}
+
+export interface KycQueueEntry extends KycView {
+  organizationName: string;
+  reviewedBy: string | null;
+  updatedAt: string;
+  documentPath: string | null;
 }
 
 export class AgentFinanceService implements ReputationHook {
@@ -263,6 +308,8 @@ export class AgentFinanceService implements ReputationHook {
   private readonly mode: RuntimeMode;
   private readonly now: () => Date;
   private readonly schemaHook: SchemaValidationHook | null;
+  private readonly escrowModeValue: EscrowMode;
+  private readonly kycLimitsValue: KycLimits;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: ServiceOptions = {}) {
@@ -272,6 +319,154 @@ export class AgentFinanceService implements ReputationHook {
     this.mode = options.mode ?? "sandbox";
     this.now = options.now ?? (() => new Date());
     this.schemaHook = options.schemaHook ?? null;
+    this.escrowModeValue = options.escrowMode ?? resolveEscrowMode();
+    this.kycLimitsValue = options.kycLimits ?? resolveKycLimits();
+  }
+
+  /** Escrow custody model reported by /health. */
+  get escrowMode(): EscrowMode {
+    return this.escrowModeValue;
+  }
+
+  get kycLimits(): KycLimits {
+    return { ...this.kycLimitsValue };
+  }
+
+  getKyc(organizationId: string): Promise<KycView> {
+    return this.enqueue(async () => {
+      this.requireOrganization(organizationId);
+      return this.kycView(organizationId);
+    });
+  }
+
+  /** Throws when the organization cannot submit right now (already pending or approved). */
+  assertKycSubmittable(organizationId: string): Promise<void> {
+    return this.enqueue(async () => {
+      this.requireOrganization(organizationId);
+      this.assertKycOpen(organizationId);
+    });
+  }
+
+  /**
+   * Record a Tier 1 submission. The document is already in private storage.
+   * Returns the previous document path (a rejected resubmission) so the caller can delete it.
+   */
+  submitKyc(
+    organizationId: string,
+    submission: Omit<KycSubmission, "submittedAt">,
+    document: KycDocumentRecord,
+  ): Promise<{ kyc: KycView; replacedDocumentPath: string | null }> {
+    return this.enqueue(async () => {
+      this.requireOrganization(organizationId);
+      this.assertKycOpen(organizationId);
+      const now = this.now().toISOString();
+      const previous = this.store.kycProfiles.get(organizationId);
+      const replaced = previous?.document && !previous.document.deletedAt ? previous.document.path : null;
+      const profile: KycProfile = {
+        organizationId,
+        status: "pending",
+        submission: { ...submission, submittedAt: now },
+        document,
+        reviewedAt: null,
+        reviewedBy: null,
+        rejectionReason: null,
+        tier: previous?.tier ?? 0,
+        updatedAt: now,
+      };
+      this.store.kycProfiles.set(organizationId, profile);
+      this.appendKycAudit(organizationId, "submitted", `org:${organizationId}`, null, now);
+      this.commit();
+      return { kyc: this.kycView(organizationId), replacedDocumentPath: replaced };
+    });
+  }
+
+  listKycQueue(status: KycProfile["status"] | null): Promise<{ entries: KycQueueEntry[]; audit: KycAuditEntry[] }> {
+    return this.enqueue(async () => {
+      const entries = [...this.store.kycProfiles.values()]
+        .filter((profile) => profile.status !== "none" && (status === null || profile.status === status))
+        .sort((left, right) => {
+          const rank = (value: KycProfile) => (value.status === "pending" ? 0 : 1);
+          return rank(left) - rank(right) || right.updatedAt.localeCompare(left.updatedAt);
+        })
+        .map((profile) => ({
+          ...this.kycView(profile.organizationId),
+          organizationName: this.store.organizations.get(profile.organizationId)?.name ?? profile.organizationId,
+          reviewedBy: profile.reviewedBy,
+          updatedAt: profile.updatedAt,
+          documentPath: profile.document && !profile.document.deletedAt ? profile.document.path : null,
+        }));
+      const audit = this.store.kycAudit.slice(-500).reverse().map((entry) => ({ ...entry }));
+      return { entries, audit };
+    });
+  }
+
+  /** Path of the live document for an operator preview. Logs the view in the audit trail. */
+  openKycDocument(organizationId: string, reviewer: string): Promise<{ path: string; mimeType: string }> {
+    return this.enqueue(async () => {
+      const profile = this.store.kycProfiles.get(organizationId);
+      if (!profile?.document || profile.document.deletedAt) {
+        throw new ServiceError(404, "not_found", "No KYC document on file for this organization.");
+      }
+      this.appendKycAudit(organizationId, "document_viewed", `admin:${reviewer}`, null, this.now().toISOString());
+      this.commit();
+      return { path: profile.document.path, mimeType: profile.document.mimeType };
+    });
+  }
+
+  reviewKyc(
+    organizationId: string,
+    decision: "approved" | "rejected",
+    reviewer: string,
+    reason: string | null,
+  ): Promise<KycView> {
+    return this.enqueue(async () => {
+      const profile = this.store.kycProfiles.get(organizationId);
+      if (!profile || profile.status !== "pending") {
+        throw new ServiceError(409, "kyc_not_pending", "Only a pending KYC submission can be reviewed.");
+      }
+      if (decision === "rejected" && !reason) {
+        throw new ServiceError(400, "invalid_request", "A rejection needs a reason the applicant can act on.");
+      }
+      const now = this.now().toISOString();
+      profile.status = decision;
+      profile.tier = decision === "approved" ? 1 : profile.tier;
+      profile.reviewedAt = now;
+      profile.reviewedBy = reviewer;
+      profile.rejectionReason = decision === "rejected" ? reason : null;
+      profile.updatedAt = now;
+      this.appendKycAudit(organizationId, decision, `admin:${reviewer}`, reason, now);
+      this.commit();
+      return this.kycView(organizationId);
+    });
+  }
+
+  /** Validate that the document may be deleted (review finished) and return its path. */
+  kycDocumentForDeletion(organizationId: string): Promise<string> {
+    return this.enqueue(async () => {
+      const profile = this.store.kycProfiles.get(organizationId);
+      if (!profile?.document || profile.document.deletedAt) {
+        throw new ServiceError(404, "not_found", "No KYC document on file for this organization.");
+      }
+      if (profile.status === "pending") {
+        throw new ServiceError(409, "kyc_review_pending", "Approve or reject the submission before deleting its document.");
+      }
+      return profile.document.path;
+    });
+  }
+
+  markKycDocumentDeleted(organizationId: string, reviewer: string): Promise<KycView> {
+    return this.enqueue(async () => {
+      const profile = this.store.kycProfiles.get(organizationId);
+      if (!profile?.document || profile.document.deletedAt) {
+        throw new ServiceError(404, "not_found", "No KYC document on file for this organization.");
+      }
+      const now = this.now().toISOString();
+      profile.document = { ...profile.document, deletedAt: now };
+      profile.updatedAt = now;
+      this.appendKycAudit(organizationId, "document_deleted", `admin:${reviewer}`, null, now);
+      this.commit();
+      return this.kycView(organizationId);
+    });
   }
 
   authenticate(apiKey: string): string | null {
@@ -1185,6 +1380,7 @@ export class AgentFinanceService implements ReputationHook {
     if (compareUsdc(buyerBalance, canonical) < 0) {
       throw new ServiceError(409, "insufficient_balance", "Buyer balance cannot cover the escrow lock.");
     }
+    this.assertKycAllows(organization.id, canonical);
 
     const createdAt = this.now().toISOString();
     const escrowId = createId("esc");
@@ -1221,6 +1417,14 @@ export class AgentFinanceService implements ReputationHook {
       createdAt,
       notifiedAt: createdAt,
       settledAt: null,
+      custody: buildEscrowCustody(this.escrowModeValue, {
+        escrowId,
+        buyerAddress: buyerWallet.address,
+        sellerAddress: sellerWallet.address,
+        amountUsdc: canonical,
+        schema,
+        signedAt: createdAt,
+      }),
     };
     await this.appendLedger({
       organizationId: organization.id,
@@ -1546,6 +1750,105 @@ export class AgentFinanceService implements ReputationHook {
 
   private notFound(message: string): ServiceError {
     return new ServiceError(404, "not_found", message);
+  }
+
+  private assertKycOpen(organizationId: string): void {
+    const profile = this.store.kycProfiles.get(organizationId);
+    if (profile?.status === "pending") {
+      throw new ServiceError(409, "kyc_pending", "A KYC submission is already waiting for review.");
+    }
+    if (profile?.status === "approved") {
+      throw new ServiceError(409, "kyc_already_approved", "This organization is already verified at Tier 1.");
+    }
+  }
+
+  private appendKycAudit(
+    organizationId: string,
+    action: KycAuditEntry["action"],
+    actor: string,
+    reason: string | null,
+    at: string,
+  ): void {
+    this.store.kycAudit.push({ id: createId("kya"), organizationId, action, actor, reason, at });
+  }
+
+  private kycUsage(organizationId: string): KycUsage {
+    const profile = this.store.kycProfiles.get(organizationId) ?? emptyKycProfile(organizationId, this.now().toISOString());
+    const since = this.now().getTime() - KYC_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    let used = 0n;
+    for (const escrow of this.store.escrows.values()) {
+      if (escrow.organizationId !== organizationId || escrow.status === "refunded") continue;
+      if (Date.parse(escrow.createdAt) < since) continue;
+      used += parseUsdc(escrow.amountUsdc);
+    }
+    const limit = limitForTier(profile.tier, this.kycLimitsValue);
+    const remaining = parseUsdc(limit) - used;
+    return {
+      tier: profile.tier,
+      status: profile.status,
+      windowDays: KYC_WINDOW_DAYS,
+      usedUsdc: formatUsdc(used),
+      limitUsdc: limit,
+      remainingUsdc: formatUsdc(remaining > 0n ? remaining : 0n),
+      limits: { ...this.kycLimitsValue },
+    };
+  }
+
+  private kycView(organizationId: string): KycView {
+    const profile = this.store.kycProfiles.get(organizationId) ?? emptyKycProfile(organizationId, this.now().toISOString());
+    const usage = this.kycUsage(organizationId);
+    return {
+      organizationId,
+      ...usage,
+      submission: profile.submission ? { ...profile.submission } : null,
+      document: profile.document
+        ? {
+            mimeType: profile.document.mimeType,
+            sizeBytes: profile.document.sizeBytes,
+            uploadedAt: profile.document.uploadedAt,
+            deleted: profile.document.deletedAt !== null,
+          }
+        : null,
+      reviewedAt: profile.reviewedAt,
+      rejectionReason: profile.rejectionReason,
+      upgrade: profile.tier === 0 && profile.status !== "pending" ? KYC_UPGRADE_HINT : null,
+    };
+  }
+
+  private assertKycAllows(organizationId: string, amountUsdc: string): void {
+    const usage = this.kycUsage(organizationId);
+    const after = parseUsdc(usage.usedUsdc) + parseUsdc(amountUsdc);
+    if (after <= parseUsdc(usage.limitUsdc)) return;
+    const upgrade =
+      usage.tier === 0
+        ? {
+            tier: 1,
+            limitUsdc: usage.limits.tier1Usdc,
+            status: usage.status,
+            how:
+              usage.status === "pending"
+                ? "Your Tier 1 submission is pending manual review. The higher cap applies once an operator approves it."
+                : KYC_UPGRADE_HINT,
+            endpoint: "POST /v1/kyc/submission",
+            console: "/console/kyc",
+          }
+        : null;
+    throw new ServiceError(
+      403,
+      "kyc_limit_exceeded",
+      `This lock would take escrow volume to ${formatUsdc(after)} USDC over the rolling ${KYC_WINDOW_DAYS.toString()} days; the Tier ${usage.tier.toString()} limit is ${usage.limitUsdc} USDC.`,
+      null,
+      {
+        tier: usage.tier,
+        kycStatus: usage.status,
+        windowDays: usage.windowDays,
+        usedUsdc: usage.usedUsdc,
+        requestedUsdc: formatUsdc(parseUsdc(amountUsdc)),
+        limitUsdc: usage.limitUsdc,
+        remainingUsdc: usage.remainingUsdc,
+        upgrade,
+      },
+    );
   }
 
   private commit(): void {

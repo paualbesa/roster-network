@@ -15,6 +15,8 @@ const FORWARD_RESPONSE = [
   "ratelimit-remaining",
   "ratelimit-reset",
   "idempotent-replayed",
+  "cache-control",
+  "content-disposition",
 ] as const;
 
 async function proxy(request: Request, context: RouteContext): Promise<Response> {

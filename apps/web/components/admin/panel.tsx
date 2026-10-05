@@ -26,6 +26,7 @@ import {
   jobMatchesFilter,
   summarizeReputation,
 } from "@/lib/admin-metrics";
+import { KycSection } from "./kyc";
 import { ActivityChart, DataTable, MetricCard, Pill, ScoreBar, StatusMix, jobTone } from "./ui";
 
 const FILTERS: { id: JobFilter; label: string }[] = [
@@ -43,6 +44,7 @@ const SECTIONS = [
   { id: "jobs", label: "Jobs" },
   { id: "reputation", label: "Reputation" },
   { id: "waitlist", label: "Waitlist" },
+  { id: "kyc", label: "KYC" },
   { id: "ops", label: "Ops" },
 ] as const;
 
@@ -357,14 +359,14 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
           <p className="font-mono text-[11px] tracking-[0.18em] text-brass uppercase">Network</p>
           <p className="mt-2 font-serif text-2xl tracking-[-0.03em] text-paper">Operations</p>
         </div>
-        <SectionNav section={section} openJobs={openJobs} variant="sidebar" onSelect={selectSection} />
+        <SectionNav section={section} openJobs={openJobs} pendingKyc={overview?.kyc?.pending ?? 0} variant="sidebar" onSelect={selectSection} />
         <p className="mt-auto border-t border-line/10 px-5 py-4 text-xs leading-5 text-muted">
           Cookie session. Locking clears it in this browser.
         </p>
       </aside>
       <div className="min-w-0">
         <div className="border-b border-line/10 bg-panel/80 lg:hidden">
-          <SectionNav section={section} openJobs={openJobs} variant="bar" onSelect={selectSection} />
+          <SectionNav section={section} openJobs={openJobs} pendingKyc={overview?.kyc?.pending ?? 0} variant="bar" onSelect={selectSection} />
         </div>
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -414,6 +416,7 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
               onOpenJob={(jobId) => void openJob(jobId)}
               onAction={(path, label) => void runAction(path, label)}
               onSection={selectSection}
+              onUnauthorized={onUnauthorized}
             />
           ) : null}
         </div>
@@ -427,11 +430,13 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
 function SectionNav({
   section,
   openJobs,
+  pendingKyc,
   variant,
   onSelect,
 }: {
   section: SectionId;
   openJobs: number;
+  pendingKyc: number;
   variant: "sidebar" | "bar";
   onSelect: (id: SectionId) => void;
 }) {
@@ -453,9 +458,9 @@ function SectionNav({
             }
           >
             <span>{item.label}</span>
-            {item.id === "jobs" && openJobs > 0 ? (
+            {(item.id === "jobs" && openJobs > 0) || (item.id === "kyc" && pendingKyc > 0) ? (
               <span className={`font-mono text-[11px] ${active && !bar ? "text-brass" : bar && active ? "text-ink" : "text-muted"}`}>
-                {openJobs.toString()}
+                {(item.id === "jobs" ? openJobs : pendingKyc).toString()}
               </span>
             ) : null}
           </button>
@@ -480,6 +485,7 @@ function SectionBody({
   onOpenJob,
   onAction,
   onSection,
+  onUnauthorized,
 }: {
   section: SectionId;
   overview: AdminOverview;
@@ -495,7 +501,9 @@ function SectionBody({
   onOpenJob: (jobId: string) => void;
   onAction: (path: string, label: string) => void;
   onSection: (id: SectionId) => void;
+  onUnauthorized: () => void;
 }) {
+  if (section === "kyc") return <KycSection onUnauthorized={onUnauthorized} />;
   if (section === "accounts") return <AccountsSection accounts={accounts} />;
   if (section === "fleet") return <FleetSection listings={listings} />;
   if (section === "jobs") {
@@ -884,6 +892,15 @@ function OpsSection({
         <MiniStat label="API version" value={overview.health.version ?? "—"} hint="Commit deployed on roster-api" />
         <MiniStat label="Uptime" value={formatUptime(overview.health.uptimeS)} hint="Since the last restart" />
         <MiniStat label="Mode" value={overview.health.mode} hint={`${overview.health.rail} rail · ${overview.health.asset}`} />
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <MiniStat
+          label="Escrow mode"
+          value={overview.health.escrowMode ?? "custodial-mock"}
+          hint="ROSTER_ESCROW_MODE · see docs/ESCROW_NON_CUSTODIAL.md"
+        />
+        <MiniStat label="KYC pending" value={(overview.kyc?.pending ?? 0).toString()} hint="Tier 1 submissions to review" />
+        <MiniStat label="KYC approved" value={(overview.kyc?.approved ?? 0).toString()} hint="Organizations at Tier 1" />
       </div>
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <article className="border border-line/10 bg-panel p-6">

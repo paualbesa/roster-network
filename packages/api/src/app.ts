@@ -7,6 +7,7 @@ import {
   isPersistentSandboxWallet,
   resolveRuntimeMode,
   resolveWalletRail,
+  type EscrowMode,
   type RuntimeMode,
   type WalletRail,
 } from "@albesa/core";
@@ -57,6 +58,8 @@ import {
   type PaymentInput,
 } from "./service.js";
 import { JsonFileStore } from "./store.js";
+import { KYC_SUBMISSION_MAX_BODY_BYTES, LocalKycDocumentStore, type KycDocumentStore, type KycLimits } from "./kyc.js";
+import { KYC_DOCUMENT_TOKEN_RE, KYC_SUBMISSION_PATH, registerKycAdminRoutes, registerKycRoutes } from "./kyc-routes.js";
 
 type AppEnv = {
   Variables: {
@@ -98,6 +101,12 @@ export interface AppOptions extends AppHttpOptions {
   reputationFile?: string;
   /** Capability index. Omit it to keep listings in memory. */
   registry?: CapabilityRegistry;
+  /** Escrow custody model. Ignored when `service` is passed. Omit it to read `ROSTER_ESCROW_MODE`. */
+  escrowMode?: EscrowMode;
+  /** KYC caps. Ignored when `service` is passed. Omit them to read `ROSTER_KYC_T*_LIMIT_USDC`. */
+  kycLimits?: KycLimits;
+  /** Private KYC document storage. Omit it to keep documents in process memory. */
+  kycDocuments?: KycDocumentStore;
   /**
    * Test double for passport lookup. When set, search uses it instead of the
    * reputation ledger. Return null when the seller has no events (neutral).
@@ -227,22 +236,30 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
       crossOriginOpenerPolicy: false,
     }),
   );
-  app.use(
-    "/v1/*",
-    bodyLimit({
-      maxSize: MAX_BODY_BYTES,
-      onError: (c) =>
-        c.json(
-          {
-            error: {
-              code: "payload_too_large",
-              message: `Request body must be at most ${(MAX_BODY_BYTES / 1024).toString()} KB.`,
-            },
+  const defaultBodyLimit = bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: (c) =>
+      c.json(
+        {
+          error: {
+            code: "payload_too_large",
+            message: `Request body must be at most ${(MAX_BODY_BYTES / 1024).toString()} KB.`,
           },
-          413,
-        ),
-    }),
+        },
+        413,
+      ),
+  });
+  // KYC document uploads get their own 5 MB (+ multipart overhead) cap.
+  const kycBodyLimit = bodyLimit({
+    maxSize: KYC_SUBMISSION_MAX_BODY_BYTES,
+    onError: (c) =>
+      c.json({ error: { code: "payload_too_large", message: "The KYC submission must be at most 5 MB." } }, 413),
+  });
+  app.use("/v1/*", (c, next) =>
+    c.req.method === "POST" && c.req.path === KYC_SUBMISSION_PATH ? kycBodyLimit(c, next) : defaultBodyLimit(c, next),
   );
+  const kycDocuments = options.kycDocuments ?? new LocalKycDocumentStore(options.now ? { now: options.now } : {});
+  const kycDeps = { service, documents: kycDocuments, now: options.now ?? (() => new Date()) };
 
   app.get("/health", (c) =>
     c.json({
@@ -253,6 +270,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
       asset: "USDC",
       version,
       storage,
+      escrowMode: service.escrowMode,
+      kyc: { tier0LimitUsdc: service.kycLimits.tier0Usdc, tier1LimitUsdc: service.kycLimits.tier1Usdc, windowDays: 30 },
       startedAt: STARTED_AT.toISOString(),
       uptimeS: Math.floor((Date.now() - STARTED_AT.getTime()) / 1000),
     }),
@@ -357,7 +376,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     const method = c.req.method;
     const key = c.req.header(IDEMPOTENCY_HEADER)?.trim();
     const orgId = c.get("orgId");
-    if ((method !== "POST" && method !== "PUT" && method !== "DELETE") || !key || !orgId) {
+    // Multipart uploads are not replayed: reading the body as text would corrupt the file.
+    if ((method !== "POST" && method !== "PUT" && method !== "DELETE") || !key || !orgId || c.req.path === KYC_SUBMISSION_PATH) {
       await next();
       return;
     }
@@ -674,6 +694,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   });
 
   registerAdminRoutes(app, adminDeps);
+  registerKycAdminRoutes(app, kycDeps);
+  registerKycRoutes(app, kycDeps);
   registerSolanaEscrowRoutes(app, options.solana ?? resolveSolanaEngineConfig());
 
   app.onError((error, c) => {
@@ -681,9 +703,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
       return c.json({ error: { code: error.code, message: error.message } }, error.status);
     }
     if (error instanceof ServiceError) {
-      const body = error.transaction
-        ? { error: { code: error.code, message: error.message }, transaction: error.transaction }
-        : { error: { code: error.code, message: error.message } };
+      const payload = { code: error.code, message: error.message, ...(error.details ?? {}) };
+      const body = error.transaction ? { error: payload, transaction: error.transaction } : { error: payload };
       return c.json(body, error.status);
     }
     if (error instanceof RegistryError) {
@@ -872,7 +893,8 @@ export function isPublicRoute(method: string, path: string): boolean {
     path === "/v1/registry/listings" ||
     path === "/v1/registry/search" ||
     LISTING_PATH_RE.test(path) ||
-    PASSPORT_PATH_RE.test(path)
+    PASSPORT_PATH_RE.test(path) ||
+    KYC_DOCUMENT_TOKEN_RE.test(path)
   );
 }
 
@@ -977,6 +999,8 @@ function openService(options: AppOptions, mode: RuntimeMode, walletRail: WalletR
   return new AgentFinanceService({
     mode,
     wallets,
+    ...(options.escrowMode ? { escrowMode: options.escrowMode } : {}),
+    ...(options.kycLimits ? { kycLimits: options.kycLimits } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(reputation ? { reputation } : {}),
     ...(store ? { store } : {}),

@@ -16,6 +16,7 @@ import { verifySupabaseAccessToken } from "./auth.js";
 import { createAnonClient, createServiceClient } from "./client.js";
 import type { SupabaseConfig } from "./env.js";
 import { SupabaseMirror, createSupabaseTableClient } from "./mirror.js";
+import { KYC_BUCKET, SupabaseKycDocumentStore } from "../kyc.js";
 import { UPSERT_ORDER, applySnapshot, rowsToSnapshot } from "./rows.js";
 
 export interface SupabaseApp {
@@ -69,6 +70,7 @@ export async function openSupabaseApp(options: {
     ...(options.now ? { now: options.now } : {}),
     ...(options.autofill ? { autofill: options.autofill } : {}),
     ...(options.solana ? { solana: options.solana } : {}),
+    kycDocuments: new SupabaseKycDocumentStore(serviceClient.storage, process.env.ROSTER_KYC_BUCKET?.trim() || KYC_BUCKET),
     supabase: {
       verifyAccessToken: (accessToken) => verifySupabaseAccessToken(anonClient, accessToken),
       matchCapabilities: (query, limit) => mirror.matchCapabilities(query, limit),

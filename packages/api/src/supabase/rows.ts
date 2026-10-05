@@ -22,6 +22,7 @@ import {
   type ReputationTotals,
 } from "@albesa/reputation";
 import type { ListingSellerBinding, MemoryJobStore, StoredJob } from "../jobs.js";
+import type { KycAuditEntry, KycProfile } from "../kyc.js";
 import type { MemoryStore, WaitlistEntry } from "../store.js";
 import { toVectorLiteral } from "./vector.js";
 
@@ -44,6 +45,8 @@ export const ROSTER_TABLES = {
   reputationTotals: "reputation_totals",
   reputationEvents: "reputation_events",
   waitlist: "waitlist_entries",
+  kycProfiles: "kyc_profiles",
+  kycAudit: "kyc_audit_log",
 } as const;
 
 const WALLET_STATE_ID = "sandbox";
@@ -69,6 +72,8 @@ export interface RosterSnapshot {
   reputationTotals: ReputationTotals[];
   reputationEvents: ReputationEventRecord[];
   waitlist: WaitlistEntry[];
+  kycProfiles: KycProfile[];
+  kycAudit: KycAuditEntry[];
 }
 
 export function emptySnapshot(): RosterSnapshot {
@@ -93,6 +98,8 @@ export function emptySnapshot(): RosterSnapshot {
     reputationTotals: [],
     reputationEvents: [],
     waitlist: [],
+    kycProfiles: [],
+    kycAudit: [],
   };
 }
 
@@ -138,6 +145,8 @@ export function captureSnapshot(input: {
     reputationTotals: input.reputation.listTotals(),
     reputationEvents: input.reputation.listEvents(),
     waitlist: [...input.store.waitlist.values()].map((entry) => ({ ...entry })),
+    kycProfiles: [...input.store.kycProfiles.values()].map((profile) => structuredClone(profile)),
+    kycAudit: input.store.kycAudit.map((entry) => ({ ...entry })),
   };
 }
 
@@ -252,6 +261,21 @@ export function snapshotToRows(snapshot: RosterSnapshot): Record<string, Record<
       email: entry.email,
       source: entry.source,
       created_at: entry.createdAt,
+    })),
+    [ROSTER_TABLES.kycProfiles]: snapshot.kycProfiles.map((profile) => ({
+      organization_id: profile.organizationId,
+      status: profile.status,
+      tier: profile.tier,
+      body: profile,
+      updated_at: profile.updatedAt,
+    })),
+    [ROSTER_TABLES.kycAudit]: snapshot.kycAudit.map((entry) => ({
+      id: entry.id,
+      organization_id: entry.organizationId,
+      action: entry.action,
+      actor: entry.actor,
+      reason: entry.reason,
+      at: entry.at,
     })),
   };
 }
@@ -388,6 +412,23 @@ export function rowsToSnapshot(tables: Record<string, Record<string, unknown>[]>
       createdAt: normalizeTimestamp(requiredString(row, "created_at", "waitlist_entries")),
     });
   }
+  for (const row of tables[ROSTER_TABLES.kycProfiles] ?? []) {
+    snapshot.kycProfiles.push(parseBody<KycProfile>(row.body, "kyc_profiles"));
+  }
+  const audit: KycAuditEntry[] = [];
+  for (const row of tables[ROSTER_TABLES.kycAudit] ?? []) {
+    const action = requiredString(row, "action", "kyc_audit_log") as KycAuditEntry["action"];
+    audit.push({
+      id: requiredString(row, "id", "kyc_audit_log"),
+      organizationId: requiredString(row, "organization_id", "kyc_audit_log"),
+      action,
+      actor: requiredString(row, "actor", "kyc_audit_log"),
+      reason: typeof row.reason === "string" ? row.reason : null,
+      at: normalizeTimestamp(requiredString(row, "at", "kyc_audit_log")),
+    });
+  }
+  audit.sort((left, right) => left.at.localeCompare(right.at) || left.id.localeCompare(right.id));
+  snapshot.kycAudit.push(...audit);
   return snapshot;
 }
 
@@ -412,6 +453,8 @@ export function applySnapshot(input: {
   store.transactions.length = 0;
   store.ledger.length = 0;
   store.waitlist.clear();
+  store.kycProfiles.clear();
+  store.kycAudit.length = 0;
   for (const organization of snapshot.organizations) store.organizations.set(organization.id, organization);
   for (const user of snapshot.users) {
     const email = user.email.toLowerCase();
@@ -429,6 +472,8 @@ export function applySnapshot(input: {
   store.transactions.push(...snapshot.transactions);
   store.ledger.push(...snapshot.ledger);
   for (const entry of snapshot.waitlist) store.waitlist.set(entry.email, entry);
+  for (const profile of snapshot.kycProfiles) store.kycProfiles.set(profile.organizationId, profile);
+  store.kycAudit.push(...snapshot.kycAudit);
   input.jobs.replaceAll(snapshot.jobs, snapshot.sellers);
   input.reputation.replaceAll(snapshot.reputationTotals, snapshot.reputationEvents);
   input.registry.replaceAll(snapshot.listings);
@@ -453,9 +498,13 @@ export const UPSERT_ORDER = [
   ROSTER_TABLES.reputationTotals,
   ROSTER_TABLES.reputationEvents,
   ROSTER_TABLES.waitlist,
+  ROSTER_TABLES.kycProfiles,
+  ROSTER_TABLES.kycAudit,
 ] as const;
 
 export const DELETE_ORDER: { table: string; column: string }[] = [
+  { table: ROSTER_TABLES.kycAudit, column: "id" },
+  { table: ROSTER_TABLES.kycProfiles, column: "organization_id" },
   { table: ROSTER_TABLES.waitlist, column: "email" },
   { table: ROSTER_TABLES.reputationEvents, column: "id" },
   { table: ROSTER_TABLES.reputationTotals, column: "agent_id" },
