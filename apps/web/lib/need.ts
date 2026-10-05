@@ -63,6 +63,7 @@ export interface DataProductView {
   formats: string[];
   delivery: string;
   listingId: string | null;
+  derivedFrom: string | null;
 }
 
 export const NEED_EXAMPLES = [
@@ -217,6 +218,7 @@ export function readDataProduct(payload: unknown): DataProductView | null {
     formats: Array.isArray(payload.formats) ? payload.formats.filter((value): value is string => typeof value === "string") : [],
     delivery: typeof payload.delivery === "string" ? payload.delivery : "inline",
     listingId: typeof payload.listingId === "string" ? payload.listingId : null,
+    derivedFrom: typeof payload.derivedFrom === "string" ? payload.derivedFrom : null,
   };
 }
 

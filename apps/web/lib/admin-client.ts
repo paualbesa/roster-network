@@ -298,6 +298,7 @@ export interface AdminDataProduct {
   source: string | null;
   license: string | null;
   listingId?: string | null;
+  derivedFrom?: string | null;
 }
 
 export interface AdminDataCatalog {

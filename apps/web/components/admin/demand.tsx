@@ -162,7 +162,7 @@ export function DataProductsSection({ onUnauthorized }: { onUnauthorized: () => 
 
   const products = catalog?.products ?? [];
   const healthy = products.filter((product) => product.live || product.status === "ok").length;
-  const rows = products.reduce((sum, product) => sum + product.rowCount, 0);
+  const rows = products.reduce((sum, product) => sum + (product.derivedFrom ? 0 : product.rowCount), 0);
   const failing = products.filter((product) => product.status === "error").length;
   return (
     <section aria-labelledby="data-title">
