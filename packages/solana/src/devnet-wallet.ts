@@ -33,6 +33,23 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import { keypairFromSecret } from "./keys.js";
+import {
+  createAndFundIx,
+  disputeIx,
+  escrowPda as noncustodialEscrowPda,
+  refundIx,
+  releaseIx,
+  rosterEscrowProgramId,
+  vaultPda,
+} from "./noncustodial-escrow.js";
+import { solanaExplorerAddressUrl, solanaExplorerTxUrl } from "./explorer.js";
+import type {
+  ProgramEscrowFundInput,
+  ProgramEscrowFundResult,
+  ProgramEscrowRail,
+  ProgramEscrowSettleInput,
+  ProgramEscrowSettleResult,
+} from "./program-escrow-rail.js";
 
 
 const DEFAULT_RPC = "https://api.devnet.solana.com";
@@ -123,7 +140,8 @@ export interface SolanaDevnetStatus {
  *   public Devnet USDC faucet is not automatable; minting keeps sandbox funding
  *   reliable while still producing real explorer signatures.
  */
-export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSandboxWallet {
+export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSandboxWallet, ProgramEscrowRail {
+  readonly programEscrowEnabled = true as const;
   readonly id = "solana-devnet" as const;
   readonly chain = "solana-devnet" as const;
 
@@ -358,6 +376,140 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
     await this.credit(address, amountUsdc);
     const after = this.pendingCredits.get(this.resolveOwner(address).toBase58()) ?? 0n;
     return after > before ? "soft" : "chain";
+  }
+
+
+  async programFundEscrow(input: ProgramEscrowFundInput): Promise<ProgramEscrowFundResult> {
+    if (this.offlineLedger) {
+      throw new WalletProviderError("Program escrow requires an online solana-devnet rail.");
+    }
+    await this.ensureMint();
+    if (!this.mint) throw new WalletProviderError("Mint unavailable.");
+    const programId = rosterEscrowProgramId();
+    const buyer = this.resolveOwner(input.buyerAddress);
+    const seller = this.resolveOwner(input.sellerAddress);
+    const buyerKp = this.keypairForAddress(buyer.toBase58(), input.buyerAddress);
+    const buyerAta = await this.ensureAta(buyer);
+    // Flush soft credits so the ATA can fund the vault.
+    const pending = this.pendingCredits.get(buyer.toBase58()) ?? 0n;
+    if (pending > 0n) {
+      const txMint = new Transaction().add(
+        createMintToInstruction(this.mint, buyerAta, this.feePayer.publicKey, pending, [], TOKEN_PROGRAM_ID),
+      );
+      await this.send(txMint, [this.feePayer]);
+      this.pendingCredits.delete(buyer.toBase58());
+    }
+    const amount = parseUsdc(input.amountUsdc);
+    const schemaHash = createHash("sha256").update(JSON.stringify(input.schema)).digest();
+    const ix = createAndFundIx({
+      buyer,
+      buyerAta,
+      seller,
+      mint: this.mint,
+      escrowId: input.escrowId,
+      amount,
+      schemaHash,
+      deadlineTs: BigInt(input.deadlineTs),
+      programId,
+    });
+    const [escrow] = noncustodialEscrowPda(buyer, input.escrowId, programId);
+    const [vault] = vaultPda(escrow, programId);
+    const signature = await this.send(new Transaction().add(ix), [this.feePayer, buyerKp]);
+    this.sequence += 1;
+    const cluster = "devnet" as const;
+    return {
+      providerRef: signature,
+      vault: vault.toBase58(),
+      escrowPda: escrow.toBase58(),
+      programId: programId.toBase58(),
+      chain: this.chain,
+      lockExplorerUrl: solanaExplorerTxUrl(signature, cluster),
+      vaultExplorerUrl: solanaExplorerAddressUrl(vault.toBase58(), cluster),
+      programExplorerUrl: solanaExplorerAddressUrl(programId.toBase58(), cluster),
+    };
+  }
+
+  async programReleaseEscrow(input: ProgramEscrowSettleInput): Promise<ProgramEscrowSettleResult> {
+    if (this.offlineLedger || !this.mint) {
+      throw new WalletProviderError("Program escrow requires an online solana-devnet rail.");
+    }
+    const programId = rosterEscrowProgramId();
+    const buyer = this.resolveOwner(input.buyerAddress);
+    const seller = this.resolveOwner(input.sellerAddress);
+    const buyerKp = this.keypairForAddress(buyer.toBase58(), input.buyerAddress);
+    const [escrow] = noncustodialEscrowPda(buyer, input.escrowId, programId);
+    const [vault] = vaultPda(escrow, programId);
+    const sellerAta = await this.ensureAta(seller);
+    const feeAta = await this.ensureAta(this.feePayer.publicKey);
+    const ix = releaseIx({
+      authority: buyer,
+      escrow,
+      vault,
+      sellerAta,
+      feeAta,
+      mint: this.mint,
+      programId,
+    });
+    const signature = await this.send(new Transaction().add(ix), [this.feePayer, buyerKp]);
+    this.sequence += 1;
+    return {
+      providerRef: signature,
+      chain: this.chain,
+      explorerUrl: solanaExplorerTxUrl(signature, "devnet"),
+    };
+  }
+
+  async programRefundEscrow(
+    input: ProgramEscrowSettleInput & { permissionless?: boolean },
+  ): Promise<ProgramEscrowSettleResult> {
+    if (this.offlineLedger || !this.mint) {
+      throw new WalletProviderError("Program escrow requires an online solana-devnet rail.");
+    }
+    const programId = rosterEscrowProgramId();
+    const buyer = this.resolveOwner(input.buyerAddress);
+    const [escrow] = noncustodialEscrowPda(buyer, input.escrowId, programId);
+    const [vault] = vaultPda(escrow, programId);
+    const buyerAta = await this.ensureAta(buyer);
+    const authority = input.permissionless ? this.feePayer : this.keypairForAddress(buyer.toBase58(), input.buyerAddress);
+    const ix = refundIx({
+      authority: authority.publicKey,
+      escrow,
+      vault,
+      buyerAta,
+      mint: this.mint,
+      programId,
+    });
+    const signers = input.permissionless ? [this.feePayer] : [this.feePayer, authority];
+    const signature = await this.send(new Transaction().add(ix), signers);
+    this.sequence += 1;
+    return {
+      providerRef: signature,
+      chain: this.chain,
+      explorerUrl: solanaExplorerTxUrl(signature, "devnet"),
+    };
+  }
+
+  async programDisputeEscrow(input: {
+    escrowId: string;
+    partyAddress: string;
+    buyerAddress: string;
+  }): Promise<ProgramEscrowSettleResult> {
+    if (this.offlineLedger) {
+      throw new WalletProviderError("Program escrow requires an online solana-devnet rail.");
+    }
+    const programId = rosterEscrowProgramId();
+    const buyer = this.resolveOwner(input.buyerAddress);
+    const party = this.resolveOwner(input.partyAddress);
+    const partyKp = this.keypairForAddress(party.toBase58(), input.partyAddress);
+    const [escrow] = noncustodialEscrowPda(buyer, input.escrowId, programId);
+    const ix = disputeIx({ party, escrow, programId });
+    const signature = await this.send(new Transaction().add(ix), [this.feePayer, partyKp]);
+    this.sequence += 1;
+    return {
+      providerRef: signature,
+      chain: this.chain,
+      explorerUrl: solanaExplorerTxUrl(signature, "devnet"),
+    };
   }
 
   private async ensureMint(): Promise<PublicKey> {

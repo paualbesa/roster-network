@@ -161,6 +161,8 @@ export function createPollers(client: Client, channels: RostyChannels, stateFile
           latencyMs: item.latencyMs ?? null,
           sandbox: item.sandbox !== false,
           explorerUrl: item.explorerUrl,
+          vaultExplorerUrl: item.vaultExplorerUrl ?? null,
+          programExplorerUrl: item.programExplorerUrl ?? null,
           railLabel: item.railLabel,
           chain: item.chain,
         }),

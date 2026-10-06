@@ -51,7 +51,9 @@ import {
   type ReputationPassport,
 } from "@albesa/reputation";
 import { burnPasswordCheck, hashPassword, verifyPassword } from "./password.js";
-import { buildEscrowCustody } from "./escrow-mode.js";
+import { buildEscrowCustody, quoteOnChainEscrowFee } from "./escrow-mode.js";
+import { isProgramEscrowRail } from "@albesa/solana";
+
 import {
   emptyKycProfile,
   KYC_UPGRADE_HINT,
@@ -180,6 +182,8 @@ export interface CreateEscrowInput {
   amountUsdc: string;
   schema: unknown;
   memo: string | null;
+  /** Absolute ISO deadline for on-chain permissionless refund (noncustodial-devnet). */
+  deadlineAt?: string | null;
 }
 
 export interface EscrowNotification {
@@ -898,6 +902,11 @@ export class AgentFinanceService implements ReputationHook {
     return this.enqueue(() => this.submitEscrowResultUnlocked(organizationId, escrowId, result));
   }
 
+  /** Non-custodial only: buyer or seller opens a dispute window on-chain. */
+  disputeEscrow(organizationId: string, escrowId: string, partyAgentId: string): Promise<{ signature: string }> {
+    return this.enqueue(() => this.disputeEscrowUnlocked(organizationId, escrowId, partyAgentId));
+  }
+
   /**
    * Refund a held marketplace escrow because the listing SLA elapsed.
    * Uses the same full-principal refund as a schema failure and does not collect the take-rate.
@@ -1557,6 +1566,32 @@ export class AgentFinanceService implements ReputationHook {
     return { event, passport: projectPassport(next) };
   }
 
+
+  private usesProgramEscrow(): boolean {
+    return this.escrowModeValue === "noncustodial-devnet" && isProgramEscrowRail(this.wallets);
+  }
+
+  /** On-chain fee schedule when settling through the program (1% + 0.003). */
+  private quoteForMode(amountUsdc: string, overrideBps: number | null): {
+    takeRateBps: number;
+    takeRateUsdc: string;
+    sellerNetUsdc: string;
+  } {
+    if (this.usesProgramEscrow()) {
+      const take = quoteOnChainEscrowFee(amountUsdc);
+      const gross = parseUsdc(amountUsdc);
+      const fee = parseUsdc(take);
+      return {
+        takeRateBps: 100,
+        takeRateUsdc: take,
+        sellerNetUsdc: formatUsdc(gross - fee),
+      };
+    }
+    return overrideBps === null
+      ? quoteEscrowSettlement(amountUsdc)
+      : quoteEscrowSettlement(amountUsdc, overrideBps);
+  }
+
   private async createEscrowUnlocked(
     organizationId: string,
     input: CreateEscrowInput,
@@ -1575,7 +1610,7 @@ export class AgentFinanceService implements ReputationHook {
         ? this.requireActiveAgentAnywhere(input.sellerAgentId)
         : this.requireActiveAgent(organization.id, input.sellerAgentId);
     const overrideBps = this.takeRatePolicy?.(seller.organizationId) ?? null;
-    const quote = overrideBps === null ? quoteEscrowSettlement(canonical) : quoteEscrowSettlement(canonical, overrideBps);
+    const quote = this.quoteForMode(canonical, overrideBps);
     const buyerWallet = this.requireWallet(buyer.walletId);
     const sellerWallet = this.requireWallet(seller.walletId);
     const buyerBalance = await this.wallets.getBalance(buyerWallet.address);
@@ -1587,13 +1622,69 @@ export class AgentFinanceService implements ReputationHook {
     const createdAt = this.now().toISOString();
     const escrowId = createId("esc");
     const transactionId = createId("txn");
-    const minted = await this.wallets.createAddress(`escrow:${escrowId}`);
-    const transfer = await this.transferOrInsufficient({
-      fromAddress: buyerWallet.address,
-      toAddress: minted.address,
+
+    let holdAddress: string;
+    let lockProviderRef: string;
+    let chain: Escrow["chain"];
+    let custody = buildEscrowCustody(this.escrowModeValue, {
+      escrowId,
+      buyerAddress: buyerWallet.address,
+      sellerAddress: sellerWallet.address,
       amountUsdc: canonical,
-      idempotencyKey: `${escrowId}:lock`,
+      schema,
+      signedAt: createdAt,
     });
+
+    if (this.usesProgramEscrow() && isProgramEscrowRail(this.wallets)) {
+      const deadlineIso = input.deadlineAt?.trim() || new Date(Date.parse(createdAt) + 120_000).toISOString();
+      const deadlineTs = Math.floor(Date.parse(deadlineIso) / 1000);
+      if (!Number.isFinite(deadlineTs) || deadlineTs * 1000 <= Date.parse(createdAt)) {
+        throw new ServiceError(400, "invalid_request", "Escrow deadline must be in the future.");
+      }
+      try {
+        const funded = await this.wallets.programFundEscrow({
+          escrowId,
+          buyerAddress: buyerWallet.address,
+          sellerAddress: sellerWallet.address,
+          amountUsdc: canonical,
+          schema,
+          deadlineTs,
+        });
+        holdAddress = funded.vault;
+        lockProviderRef = funded.providerRef;
+        chain = funded.chain;
+        custody = {
+          ...custody,
+          mode: "noncustodial-devnet",
+          custodian: "program",
+          programId: funded.programId,
+          vault: funded.vault,
+          releaseAuthority: "program-rules",
+          onChainFeeUsdc: quote.takeRateUsdc,
+          buyerAuthorization: {
+            signer: buyerWallet.address,
+            message: custody.buyerAuthorization?.message ?? `program-lock:${escrowId}`,
+            signature: funded.providerRef,
+            signedAt: createdAt,
+          },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "program fund failed";
+        throw new ServiceError(502, "chain_unavailable", `Non-custodial lock failed: ${message}`);
+      }
+    } else {
+      const minted = await this.wallets.createAddress(`escrow:${escrowId}`);
+      const transfer = await this.transferOrInsufficient({
+        fromAddress: buyerWallet.address,
+        toAddress: minted.address,
+        amountUsdc: canonical,
+        idempotencyKey: `${escrowId}:lock`,
+      });
+      holdAddress = minted.address;
+      lockProviderRef = transfer.providerRef;
+      chain = transfer.chain;
+    }
+
     const escrow: Escrow = {
       id: escrowId,
       organizationId: organization.id,
@@ -1609,24 +1700,17 @@ export class AgentFinanceService implements ReputationHook {
       schema,
       result: null,
       validationErrors: null,
-      holdAddress: minted.address,
-      chain: transfer.chain,
+      holdAddress,
+      chain,
       asset: "USDC",
-      lockProviderRef: transfer.providerRef,
+      lockProviderRef,
       settlementProviderRef: null,
       feeProviderRef: null,
       memo,
       createdAt,
       notifiedAt: createdAt,
       settledAt: null,
-      custody: buildEscrowCustody(this.escrowModeValue, {
-        escrowId,
-        buyerAddress: buyerWallet.address,
-        sellerAddress: sellerWallet.address,
-        amountUsdc: canonical,
-        schema,
-        signedAt: createdAt,
-      }),
+      custody,
     };
     await this.appendLedger({
       organizationId: organization.id,
@@ -1644,13 +1728,13 @@ export class AgentFinanceService implements ReputationHook {
       type: "escrow_lock",
       status: "settled",
       fromWalletId: buyerWallet.id,
-      toAddress: minted.address,
+      toAddress: holdAddress,
       vendorId: null,
       amountUsdc: canonical,
       feeUsdc: "0.000000",
       rejectionReason: null,
-      providerRef: transfer.providerRef,
-      chain: transfer.chain,
+      providerRef: lockProviderRef,
+      chain,
       memo: memo ?? `Lock escrow ${escrowId}`,
       escrowId,
       createdAt,
@@ -1709,6 +1793,34 @@ export class AgentFinanceService implements ReputationHook {
     return this.escrowView(settled);
   }
 
+
+  private async disputeEscrowUnlocked(
+    organizationId: string,
+    escrowId: string,
+    partyAgentId: string,
+  ): Promise<{ signature: string }> {
+    const escrow = this.requireEscrow(organizationId, escrowId);
+    if (escrow.status !== "held") {
+      throw new ServiceError(409, "invalid_state", "Only held escrows can be disputed.");
+    }
+    if (escrow.custody?.mode !== "noncustodial-devnet" || !this.usesProgramEscrow() || !isProgramEscrowRail(this.wallets)) {
+      throw new ServiceError(400, "invalid_request", "Dispute requires noncustodial-devnet mode.");
+    }
+    if (partyAgentId !== escrow.buyerAgentId && partyAgentId !== escrow.sellerAgentId) {
+      throw new ServiceError(403, "forbidden", "Only buyer or seller may dispute.");
+    }
+    const buyerWallet = this.requireWallet(escrow.buyerWalletId);
+    const partyWallet = this.requireWallet(
+      partyAgentId === escrow.buyerAgentId ? escrow.buyerWalletId : escrow.sellerWalletId,
+    );
+    const settled = await this.wallets.programDisputeEscrow({
+      escrowId: escrow.id,
+      buyerAddress: buyerWallet.address,
+      partyAddress: partyWallet.address,
+    });
+    return { signature: settled.providerRef };
+  }
+
   private async timeoutEscrowUnlocked(organizationId: string, escrowId: string): Promise<EscrowResult> {
     const escrow = this.requireEscrow(organizationId, escrowId);
     let decision: ReturnType<typeof decideSlaTimeout>;
@@ -1747,9 +1859,51 @@ export class AgentFinanceService implements ReputationHook {
       throw new Error("Escrow settlement amounts do not balance.");
     }
     const sellerWallet = this.requireWallet(escrow.sellerWalletId);
+    const buyerWallet = this.requireWallet(escrow.buyerWalletId);
     const transactionId = createId("txn");
     let settlementProviderRef: string | null = null;
     let feeProviderRef: string | null = null;
+
+    if (escrow.custody?.mode === "noncustodial-devnet" && this.usesProgramEscrow() && isProgramEscrowRail(this.wallets)) {
+      const settled = await this.wallets.programReleaseEscrow({
+        escrowId: escrow.id,
+        buyerAddress: buyerWallet.address,
+        sellerAddress: sellerWallet.address,
+      });
+      settlementProviderRef = settled.providerRef;
+      feeProviderRef = settled.providerRef;
+      if (net > 0n) {
+        await this.appendLedger({
+          organizationId: sellerWallet.organizationId,
+          wallet: sellerWallet,
+          transactionId,
+          direction: "credit",
+          amountUsdc: escrow.sellerNetUsdc,
+          memo: `Escrow release ${escrow.id}`,
+          createdAt,
+        });
+      }
+      this.store.transactions.push({
+        id: transactionId,
+        organizationId: sellerWallet.organizationId,
+        agentId: escrow.sellerAgentId,
+        type: "escrow_release",
+        status: "settled",
+        fromWalletId: null,
+        toAddress: sellerWallet.address,
+        vendorId: null,
+        amountUsdc: escrow.sellerNetUsdc,
+        feeUsdc: escrow.takeRateUsdc,
+        rejectionReason: null,
+        providerRef: settled.providerRef,
+        chain: escrow.chain,
+        memo: `Escrow ${escrow.id} released via program`,
+        escrowId: escrow.id,
+        createdAt,
+      });
+      return { settlementProviderRef: settled.providerRef, feeProviderRef };
+    }
+
     if (net > 0n) {
       const payout = await this.wallets.transfer({
         fromAddress: escrow.holdAddress,
@@ -1807,7 +1961,58 @@ export class AgentFinanceService implements ReputationHook {
     createdAt: string,
   ): Promise<{ settlementProviderRef: string; feeProviderRef: null }> {
     const buyerWallet = this.requireWallet(escrow.buyerWalletId);
+    const sellerWallet = this.requireWallet(escrow.sellerWalletId);
     const transactionId = createId("txn");
+
+    if (escrow.custody?.mode === "noncustodial-devnet" && this.usesProgramEscrow() && isProgramEscrowRail(this.wallets)) {
+      // After deadline anyone may crank; prefer permissionless fee-payer crank when past deadline.
+      // Prefer buyer-signed cancel while Held; fall back to permissionless crank after deadline.
+      let settled;
+      try {
+        settled = await this.wallets.programRefundEscrow({
+          escrowId: escrow.id,
+          buyerAddress: buyerWallet.address,
+          sellerAddress: sellerWallet.address,
+          permissionless: false,
+        });
+      } catch {
+        settled = await this.wallets.programRefundEscrow({
+          escrowId: escrow.id,
+          buyerAddress: buyerWallet.address,
+          sellerAddress: sellerWallet.address,
+          permissionless: true,
+        });
+      }
+      await this.appendLedger({
+        organizationId: escrow.organizationId,
+        wallet: buyerWallet,
+        transactionId,
+        direction: "credit",
+        amountUsdc: escrow.amountUsdc,
+        memo: `Escrow refund ${escrow.id}`,
+        createdAt,
+      });
+      this.store.transactions.push({
+        id: transactionId,
+        organizationId: escrow.organizationId,
+        agentId: escrow.buyerAgentId,
+        type: "escrow_refund",
+        status: "settled",
+        fromWalletId: null,
+        toAddress: buyerWallet.address,
+        vendorId: null,
+        amountUsdc: escrow.amountUsdc,
+        feeUsdc: "0.000000",
+        rejectionReason: null,
+        providerRef: settled.providerRef,
+        chain: escrow.chain,
+        memo: `Escrow ${escrow.id} refunded via program`,
+        escrowId: escrow.id,
+        createdAt,
+      });
+      return { settlementProviderRef: settled.providerRef, feeProviderRef: null };
+    }
+
     const transfer = await this.wallets.transfer({
       fromAddress: escrow.holdAddress,
       toAddress: buyerWallet.address,

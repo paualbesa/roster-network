@@ -1,4 +1,4 @@
-import { looksLikeSolanaSignature, solanaExplorerTxUrl } from "@albesa/solana";
+import { looksLikeSolanaSignature, solanaExplorerAddressUrl, solanaExplorerTxUrl } from "@albesa/solana";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createId, EscrowSchemaError, parseResultSchema, parseUsdc } from "@albesa/core";
@@ -128,6 +128,13 @@ export interface JobView {
   settlementProviderRef: string | null;
   /** Solana Explorer URL when settlement ref is a real Devnet signature. */
   settlementExplorerUrl: string | null;
+  lockExplorerUrl: string | null;
+  /** Non-custodial vault PDA (devnet program). */
+  vaultAddress: string | null;
+  vaultExplorerUrl: string | null;
+  programId: string | null;
+  programExplorerUrl: string | null;
+  escrowMode: string | null;
   result: unknown;
   validationErrors: string[] | null;
   latencyMs: number | null;
@@ -543,18 +550,22 @@ export class JobOrchestrator {
       throw new ServiceError(400, "invalid_request", "Buyer and seller must be different agents.");
     }
 
+    const createdAt = this.now().toISOString();
+    // slaMs stays the listing p95 (seller delivery SLA). deadlineAt adds a Devnet
+    // settlement buffer so chain RPC latency cannot force a false timeout.
+    // Compute deadline before lock so the on-chain program stores the same instant.
+    const slaMs = top.listing.latency.p95Ms;
+    const provisionalChain = this.service.walletProvider.chain;
+    const deadlineMs = effectiveJobSlaMs(slaMs, provisionalChain);
+    const deadlineAt = new Date(Date.parse(createdAt) + deadlineMs).toISOString();
     const locked = await this.service.createMarketplaceEscrow(organizationId, {
       buyerAgentId: input.buyerAgentId,
       sellerAgentId: binding.sellerAgentId,
       amountUsdc: input.amountUsdc,
       schema: input.schema,
       memo: input.memo ?? `Roster job ${top.listing.name}`,
+      deadlineAt,
     });
-    const createdAt = this.now().toISOString();
-    // slaMs stays the listing p95 (seller delivery SLA). deadlineAt adds a Devnet
-    // settlement buffer so chain RPC latency cannot force a false timeout.
-    const slaMs = top.listing.latency.p95Ms;
-    const deadlineMs = effectiveJobSlaMs(slaMs, locked.escrow.chain);
     const job: StoredJob = {
       id: createId("job"),
       organizationId,
@@ -571,7 +582,7 @@ export class JobOrchestrator {
       rankScore: top.score,
       status: "held",
       slaMs,
-      deadlineAt: new Date(Date.parse(createdAt) + deadlineMs).toISOString(),
+      deadlineAt,
       result: null,
       validationErrors: null,
       latencyMs: null,
@@ -881,6 +892,21 @@ export class JobOrchestrator {
         looksLikeSolanaSignature(live.escrow.settlementProviderRef)
           ? solanaExplorerTxUrl(live.escrow.settlementProviderRef!, live.escrow.chain === "solana-devnet" ? "devnet" : "mock")
           : null,
+      lockExplorerUrl:
+        looksLikeSolanaSignature(live.escrow.lockProviderRef)
+          ? solanaExplorerTxUrl(live.escrow.lockProviderRef, live.escrow.chain === "solana-devnet" ? "devnet" : "mock")
+          : null,
+      vaultAddress: live.escrow.custody?.vault ?? null,
+      vaultExplorerUrl:
+        live.escrow.custody?.vault && live.escrow.chain === "solana-devnet"
+          ? solanaExplorerAddressUrl(live.escrow.custody.vault, "devnet")
+          : null,
+      programId: live.escrow.custody?.programId ?? null,
+      programExplorerUrl:
+        live.escrow.custody?.programId && live.escrow.chain === "solana-devnet"
+          ? solanaExplorerAddressUrl(live.escrow.custody.programId, "devnet")
+          : null,
+      escrowMode: live.escrow.custody?.mode ?? null,
       result: job.result,
       validationErrors: job.validationErrors ? job.validationErrors.slice() : null,
       latencyMs: job.latencyMs,

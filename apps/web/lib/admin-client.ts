@@ -88,6 +88,10 @@ export interface AdminJobDetail {
     lockProviderRef?: string;
     settlementProviderRef?: string | null;
     settlementExplorerUrl?: string | null;
+    vaultAddress?: string | null;
+    vaultExplorerUrl?: string | null;
+    programId?: string | null;
+    programExplorerUrl?: string | null;
   };
   escrow: {
     id: string;

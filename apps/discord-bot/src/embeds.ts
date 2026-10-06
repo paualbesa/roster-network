@@ -37,6 +37,8 @@ export function txEmbed(input: {
   summary?: boolean;
   fleetCount?: number;
   explorerUrl?: string | null;
+  vaultExplorerUrl?: string | null;
+  programExplorerUrl?: string | null;
   railLabel?: string | null;
   chain?: string | null;
 }): EmbedBuilder {
@@ -62,7 +64,9 @@ export function txEmbed(input: {
   const lines: string[] = [];
   if (isDevnet) lines.push("**devnet** settlement");
   else if (input.sandbox) lines.push("sandbox");
-  if (input.explorerUrl) lines.push(`[View on Solana Explorer](${input.explorerUrl})`);
+  if (input.explorerUrl) lines.push(`[TX on Solana Explorer (devnet)](${input.explorerUrl})`);
+  if (input.vaultExplorerUrl) lines.push(`[Vault PDA (devnet)](${input.vaultExplorerUrl})`);
+  if (input.programExplorerUrl) lines.push(`[Escrow program (devnet)](${input.programExplorerUrl})`);
   if (lines.length) embed.setDescription(lines.join("\n"));
   return embed;
 }

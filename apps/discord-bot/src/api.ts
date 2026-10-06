@@ -34,6 +34,8 @@ export interface ActivityItem {
   chain?: string | null;
   settlementProviderRef?: string | null;
   explorerUrl?: string | null;
+  vaultExplorerUrl?: string | null;
+  programExplorerUrl?: string | null;
   railLabel?: string | null;
 }
 
