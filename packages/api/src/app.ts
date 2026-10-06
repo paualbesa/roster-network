@@ -1,4 +1,10 @@
-import { SolanaFeeError, resolveSolanaEngineConfig, type SolanaEngineConfig } from "@albesa/solana";
+import {
+  SolanaFeeError,
+  createSolanaDevnetWallet,
+  resolveSolanaEngineConfig,
+  type SolanaDevnetWalletProvider,
+  type SolanaEngineConfig,
+} from "@albesa/solana";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
@@ -139,10 +145,12 @@ export interface AppOptions extends AppHttpOptions {
    */
   passportScores?: ListingPassportScore;
   /**
-   * Settlement adapter. Omit it to read `ROSTER_WALLET` / `ALBESA_WALLET`.
+   * Settlement adapter. Omit it to read `ROSTER_WALLET` / `ROSTER_RAIL` / `ALBESA_WALLET`.
    * Unset selects the mock rail.
    */
   walletRail?: WalletRail;
+  /** Override the wallet provider (tests / solana-devnet pre-built instance). */
+  wallets?: import("@albesa/core").WalletProvider;
   /** Jobs and listing→seller bindings. Omit both this and `jobsFile` to keep them in memory. */
   jobs?: JobStore;
   /** Versioned JSON file for jobs. Ignored when `jobs` is passed. */
@@ -310,21 +318,34 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const kycDocuments = options.kycDocuments ?? new LocalKycDocumentStore(options.now ? { now: options.now } : {});
   const kycDeps = { service, documents: kycDocuments, now: options.now ?? (() => new Date()) };
 
-  app.get("/health", (c) =>
-    c.json({
+  app.get("/health", async (c) => {
+    const body: Record<string, unknown> = {
       ok: true,
       product: "Roster",
       mode,
       rail: walletRail,
-      asset: "USDC",
+      asset: walletRail === "solana-devnet" ? "USDC-devnet-test" : "USDC",
       version,
       storage,
       escrowMode: service.escrowMode,
       kyc: { tier0LimitUsdc: service.kycLimits.tier0Usdc, tier1LimitUsdc: service.kycLimits.tier1Usdc, windowDays: 30 },
       startedAt: STARTED_AT.toISOString(),
       uptimeS: Math.floor((Date.now() - STARTED_AT.getTime()) / 1000),
-    }),
-  );
+    };
+    const wallets = service.walletProvider as { status?: () => Promise<unknown>; chain?: string };
+    if (walletRail === "solana-devnet" && typeof wallets.status === "function") {
+      try {
+        body.solana = await wallets.status();
+      } catch (error) {
+        body.solana = {
+          rail: "solana-devnet",
+          error: error instanceof Error ? error.message : "status unavailable",
+          label: "devnet · Roster test SPL (not mainnet)",
+        };
+      }
+    }
+    return c.json(body);
+  });
 
 
   app.get("/openapi.json", (c) => c.json(openApiDocument));
@@ -1128,7 +1149,9 @@ function openJobStore(options: AppOptions): JobStore {
 }
 
 function openService(options: AppOptions, mode: RuntimeMode, walletRail: WalletRail): AgentFinanceService {
-  const wallets = createWalletProvider(walletRail);
+  const wallets =
+    options.wallets ??
+    (walletRail === "solana-devnet" ? createSolanaDevnetWallet() : createWalletProvider(walletRail));
   const reputationPath = options.reputationFile?.trim();
   const reputation =
     options.reputation ?? (reputationPath ? JsonReputationLedger.open(reputationPath) : undefined);
@@ -1144,4 +1167,29 @@ function openService(options: AppOptions, mode: RuntimeMode, walletRail: WalletR
     ...(reputation ? { reputation } : {}),
     ...(store ? { store } : {}),
   });
+}
+
+/** Best-effort Devnet SOL airdrop when the solana-devnet rail is selected. */
+export async function warmSolanaDevnetRail(wallets: object): Promise<void> {
+  const candidate = wallets as SolanaDevnetWalletProvider;
+  if (typeof candidate.ensureFeePayerSol !== "function") return;
+  const result = await candidate.ensureFeePayerSol();
+  if (!result.ok) {
+    console.warn(
+      JSON.stringify({
+        t: new Date().toISOString(),
+        msg: "solana-devnet airdrop unavailable; transfers need fee-payer SOL",
+        error: result.error,
+      }),
+    );
+  } else {
+    console.log(
+      JSON.stringify({
+        t: new Date().toISOString(),
+        msg: "solana-devnet fee-payer funded",
+        sol: result.sol,
+        feePayer: candidate.feePayerPublicKey,
+      }),
+    );
+  }
 }

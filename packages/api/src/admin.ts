@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { addUsdc, type RuntimeMode, type WalletRail } from "@albesa/core";
 import type { CapabilityListing, CapabilityRegistry } from "@albesa/registry";
+import { looksLikeSolanaSignature, solanaExplorerTxUrl } from "@albesa/solana";
 import type { Context, Env, Hono } from "hono";
 import { appDataCatalog, bootstrapDataProducts, bootstrapSandboxFleet, SANDBOX_FLEET_ORG_NAME } from "./fleet.js";
 import type { JobOrchestrator, JobStatus, JobStore, JobView, ListingSellerBinding } from "./jobs.js";
@@ -79,6 +80,10 @@ export interface AdminJobRecord {
   validationErrors: string[] | null;
   escrowId: string;
   holdAddress: string;
+  chain?: string;
+  lockProviderRef?: string;
+  settlementProviderRef?: string | null;
+  settlementExplorerUrl?: string | null;
 }
 
 export interface AdminDeps {
@@ -247,6 +252,13 @@ export function toAdminJob(job: JobView, names: ReadonlyMap<string, string>): Ad
     validationErrors: job.validationErrors,
     escrowId: job.escrowId,
     holdAddress: job.holdAddress,
+    chain: job.chain,
+    lockProviderRef: job.lockProviderRef,
+    settlementProviderRef: job.settlementProviderRef,
+    settlementExplorerUrl:
+      looksLikeSolanaSignature(job.settlementProviderRef) && job.chain === "solana-devnet"
+        ? solanaExplorerTxUrl(job.settlementProviderRef!, "devnet")
+        : null,
   };
 }
 

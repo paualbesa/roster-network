@@ -64,6 +64,30 @@ function supabaseWebEnv() {
 }
 
 /** Commit reported by /health. Set by scripts/deploy-roster-api.sh. */
+
+/** Devnet settlement rail. Only whitelisted keys from solana-devnet.env / shell. */
+function solanaDevnetEnv() {
+  const rail = trimmed(process.env.ROSTER_WALLET) || trimmed(process.env.ROSTER_RAIL);
+  if (rail !== "solana-devnet" && rail !== "solana_devnet" && rail !== "devnet") return {};
+  const env = {
+    ROSTER_WALLET: "solana-devnet",
+    ROSTER_RAIL: "solana-devnet",
+    ROSTER_SOLANA_CLUSTER: trimmed(process.env.ROSTER_SOLANA_CLUSTER) || "devnet",
+  };
+  const keyFile = trimmed(process.env.ROSTER_FEE_PAYER_KEYPAIR);
+  const pubkey = trimmed(process.env.ROSTER_FEE_PAYER_PUBKEY);
+  const rpc = trimmed(process.env.SOLANA_RPC_URL);
+  const mint = trimmed(process.env.ROSTER_SOLANA_MINT_STATE);
+  if (keyFile) env.ROSTER_FEE_PAYER_KEYPAIR = keyFile;
+  if (pubkey) env.ROSTER_FEE_PAYER_PUBKEY = pubkey;
+  if (rpc) env.SOLANA_RPC_URL = rpc;
+  if (mint) env.ROSTER_SOLANA_MINT_STATE = mint;
+  // Never forward ROSTER_FEE_PAYER_SECRET from a random shell into PM2 unless explicitly set for this rail.
+  const secret = trimmed(process.env.ROSTER_FEE_PAYER_SECRET);
+  if (secret) env.ROSTER_FEE_PAYER_SECRET = secret;
+  return env;
+}
+
 function releaseEnv() {
   const sha = trimmed(process.env.ROSTER_GIT_SHA);
   return sha ? { ROSTER_GIT_SHA: sha } : {};
@@ -160,6 +184,7 @@ module.exports = {
         ...adminTokenEnv(),
         ...supabaseServerEnv(),
         ...releaseEnv(),
+        ...solanaDevnetEnv(),
       },
     },
     {

@@ -40,3 +40,12 @@ export {
   verifyEd25519,
 } from "./keys.js";
 export { deserializeVersionedTransaction, serializeVersionedTransaction } from "./transaction.js";
+
+export {
+  SolanaDevnetWalletProvider,
+  createSolanaDevnetWallet,
+  loadFeePayerSecret,
+  testFeePayerSecret,
+} from "./devnet-wallet.js";
+export type { SolanaDevnetWalletOptions, SolanaDevnetStatus } from "./devnet-wallet.js";
+export { looksLikeSolanaSignature, solanaExplorerAddressUrl, solanaExplorerTxUrl } from "./explorer.js";

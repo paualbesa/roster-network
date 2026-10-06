@@ -969,6 +969,13 @@ function JobDetail({ detail, onClose }: { detail: AdminJobDetail; onClose: () =>
           <Detail label="Seller net" value={formatUsdcDisplay(detail.escrow.sellerNetUsdc)} />
           <Detail label="Settled" value={formatOperatorTime(detail.escrow.settledAt)} />
           <Detail label="Hold" value={detail.escrow.holdAddress} />
+          {detail.job.chain ? <Detail label="Chain" value={detail.job.chain} /> : null}
+          {detail.job.settlementProviderRef ? (
+            <Detail label="Settlement tx" value={detail.job.settlementProviderRef} />
+          ) : null}
+          {detail.job.settlementExplorerUrl ? (
+            <Detail label="Explorer (devnet)" value={detail.job.settlementExplorerUrl} />
+          ) : null}
         </dl>
         <p className="mt-6 font-mono text-[11px] tracking-[0.16em] text-muted uppercase">Result</p>
         <pre className="mt-2 max-h-64 overflow-auto bg-panel-2 p-3 font-mono text-xs text-paper">

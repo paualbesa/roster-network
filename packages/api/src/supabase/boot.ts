@@ -7,7 +7,7 @@ import {
 } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
 import { MemoryReputationLedger } from "@albesa/reputation";
-import type { SolanaEngineConfig } from "@albesa/solana";
+import { createSolanaDevnetWallet, type SolanaEngineConfig } from "@albesa/solana";
 import { createApp, type AppHttpOptions } from "../app.js";
 import { MemoryJobStore } from "../jobs.js";
 import { AgentFinanceService } from "../service.js";
@@ -51,7 +51,10 @@ export async function openSupabaseApp(options: {
   const reputation = new MemoryReputationLedger();
   const registry = new CapabilityRegistry(options.now ? { now: options.now } : {});
   applySnapshot({ snapshot, store, jobs, reputation, registry });
-  const wallets = createWalletProvider(options.walletRail);
+  const wallets =
+    options.walletRail === "solana-devnet"
+      ? createSolanaDevnetWallet()
+      : createWalletProvider(options.walletRail);
   if (isPersistentSandboxWallet(wallets)) wallets.importState(snapshot.wallet);
   const mirror = new SupabaseMirror(io, store, jobs, reputation, registry);
   mirror.rememberWallet(snapshot.wallet);

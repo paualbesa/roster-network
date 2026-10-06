@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { looksLikeSolanaSignature, solanaExplorerTxUrl } from "@albesa/solana";
 import type { CapabilityRegistry } from "@albesa/registry";
 import type { JobStore, StoredJob } from "../jobs.js";
 import type { AgentFinanceService } from "../service.js";
@@ -23,6 +24,10 @@ export interface ActivityItem {
   latencyMs: number | null;
   status: string;
   at: string;
+  chain?: string;
+  settlementProviderRef?: string | null;
+  explorerUrl?: string | null;
+  railLabel?: string | null;
 }
 
 export interface LeaderboardEntry {
@@ -101,7 +106,7 @@ export async function buildActivity(deps: {
   const independent = new Set(deps.registry.list().filter((listing) => listing.status === "active" && !isFirstParty(listing.organizationId, deps.firstParty) && deps.sellers.endpointFor(listing.id)).map((listing) => listing.organizationId));
   return {
     sandbox: true,
-    notice: "Sandbox network: every row is a real job settled with mock USDC. Roster Fleet is Roster's own scheduled buyer.",
+    notice: "Sandbox network: every row is a real job. Settlement rail is mock USDC by default, or Solana Devnet test SPL when ROSTER_RAIL=solana-devnet. Roster Fleet is Roster's own scheduled buyer.",
     items,
     totals: {
       jobs24h: day.length,
@@ -118,6 +123,12 @@ function toItem(job: StoredJob, deps: { firstParty: FirstPartyOrgs; orgNames: Ma
   const buyerOrg = job.organizationId;
   const buyerKind: ActivityItem["buyerKind"] =
     buyerOrg === deps.firstParty.labs ? "roster_fleet" : isFirstParty(buyerOrg, deps.firstParty) ? "first_party" : "sandbox_user";
+  const settlementRef = job.settlementProviderRef ?? null;
+  const chain = job.chain ?? "mock";
+  const explorerUrl =
+    looksLikeSolanaSignature(settlementRef) && chain === "solana-devnet"
+      ? solanaExplorerTxUrl(settlementRef!, "devnet")
+      : null;
   return {
     id: job.id,
     sandbox: true,
@@ -131,6 +142,10 @@ function toItem(job: StoredJob, deps: { firstParty: FirstPartyOrgs; orgNames: Ma
     latencyMs: job.latencyMs,
     status: job.status,
     at: job.settledAt ?? job.createdAt,
+    chain,
+    settlementProviderRef: settlementRef,
+    explorerUrl,
+    railLabel: chain === "solana-devnet" ? "solana-devnet · test SPL" : null,
   };
 }
 

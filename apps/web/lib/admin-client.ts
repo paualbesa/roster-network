@@ -84,6 +84,10 @@ export interface AdminJobDetail {
     takeRateUsdc: string;
     validationErrors: string[] | null;
     result: unknown;
+    chain?: string;
+    lockProviderRef?: string;
+    settlementProviderRef?: string | null;
+    settlementExplorerUrl?: string | null;
   };
   escrow: {
     id: string;

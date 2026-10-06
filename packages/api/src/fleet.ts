@@ -59,6 +59,10 @@ export function appDataCatalog(app: object): DataCatalog | null {
   return runtimes.get(app)?.data ?? null;
 }
 
+export function appService(app: object): AgentFinanceService | null {
+  return runtimes.get(app)?.service ?? null;
+}
+
 /**
  * Idempotent: the Roster Data organization, a funded seller agent, one listing
  * per data product (kind dataset/feed/lookup), and autofill bindings that

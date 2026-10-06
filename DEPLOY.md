@@ -169,3 +169,20 @@ ROSTER_TREASURY_ONCE=1 pnpm --filter @albesa/treasury-worker start
 ```
 
 Set `ROSTER_FEE_PAYER_SOL_BALANCE=0.01` to simulate a low balance. A live swap is refused unless `ROSTER_TREASURY_EXECUTE=1`, `ROSTER_TREASURY_DRY_RUN=0`, `ROSTER_SOLANA_CLUSTER=mainnet-beta`, and `ROSTER_SOLANA_ALLOW_MAINNET=1` are all set, with a fee-payer secret and `SOLANA_RPC_URL`. The worker is not part of `scripts/deploy-roster-api.sh`.
+
+## Solana Devnet settlement rail (optional)
+
+Default remains `mock`. To settle sandbox jobs with **real Solana Devnet** transfers (Roster-minted test SPL, 6 decimals — Circle's Devnet USDC faucet is not automatable):
+
+```bash
+# On the Albesa server (writes chmod 600 files under roster-data; never commit):
+bash scripts/setup-solana-devnet.sh
+# then deploy
+bash scripts/deploy-roster-api.sh
+```
+
+Env (from `roster-data/solana-devnet.env`): `ROSTER_WALLET=solana-devnet` / `ROSTER_RAIL=solana-devnet`, `ROSTER_FEE_PAYER_KEYPAIR`, `SOLANA_RPC_URL`.  
+`GET /health` reports `rail` and a `solana` block (fee-payer pubkey, mint, airdrop status). Job views and `/v1/activity` include Solana Explorer links with `?cluster=devnet`.
+
+If the Devnet airdrop is rate-limited, fund the fee-payer manually via https://faucet.solana.com — mock stays available by removing/renaming `solana-devnet.env`.
+

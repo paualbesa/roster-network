@@ -334,6 +334,10 @@ export class AgentFinanceService implements ReputationHook {
     return this.escrowModeValue;
   }
 
+  get walletProvider(): WalletProvider {
+    return this.wallets;
+  }
+
   get kycLimits(): KycLimits {
     return { ...this.kycLimitsValue };
   }
