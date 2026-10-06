@@ -215,7 +215,21 @@ async function ensureFirstPartySeller(
   const sellerAgentId = seller.id;
   const balance = await runtime.service.getAgentBalance(organizationId, sellerAgentId);
   if (compareUsdc(balance.balanceUsdc, "0.000000") === 0) {
-    await runtime.service.fundAgent(organizationId, sellerAgentId, SANDBOX_FLEET_FUND_USDC);
+    // Soft-fail: solana-devnet with 0 fee-payer SOL cannot transfer treasury→agent.
+    // Escrow release still pays the seller from the buyer lock once SOL is available.
+    try {
+      await runtime.service.fundAgent(organizationId, sellerAgentId, SANDBOX_FLEET_FUND_USDC);
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          t: new Date().toISOString(),
+          msg: "fleet fund skipped (treasury empty or rail cannot settle)",
+          org: orgName,
+          agent: sellerAgentId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
   }
 
   for (const draft of drafts) {
