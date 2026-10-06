@@ -69,3 +69,14 @@ export {
   vaultPda,
   noncustodialVaultAddress,
 } from "./noncustodial-escrow.js";
+
+export {
+  isProgramEscrowRail,
+} from "./program-escrow-rail.js";
+export type {
+  ProgramEscrowFundInput,
+  ProgramEscrowFundResult,
+  ProgramEscrowRail,
+  ProgramEscrowSettleInput,
+  ProgramEscrowSettleResult,
+} from "./program-escrow-rail.js";

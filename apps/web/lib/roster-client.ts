@@ -87,6 +87,15 @@ export interface ConsoleJob {
   sellerAgentId: string;
   createdAt: string;
   settledAt: string | null;
+  holdAddress?: string | null;
+  vaultAddress?: string | null;
+  vaultExplorerUrl?: string | null;
+  programId?: string | null;
+  programExplorerUrl?: string | null;
+  escrowMode?: string | null;
+  lockExplorerUrl?: string | null;
+  settlementExplorerUrl?: string | null;
+  chain?: string | null;
 }
 
 export interface SolanaLockReceipt {
@@ -575,6 +584,15 @@ function readJob(payload: unknown): ConsoleJob {
     sellerAgentId: typeof payload.sellerAgentId === "string" ? payload.sellerAgentId : "",
     createdAt: typeof payload.createdAt === "string" ? payload.createdAt : "",
     settledAt: typeof payload.settledAt === "string" ? payload.settledAt : null,
+    holdAddress: typeof payload.holdAddress === "string" ? payload.holdAddress : null,
+    vaultAddress: typeof payload.vaultAddress === "string" ? payload.vaultAddress : null,
+    vaultExplorerUrl: typeof payload.vaultExplorerUrl === "string" ? payload.vaultExplorerUrl : null,
+    programId: typeof payload.programId === "string" ? payload.programId : null,
+    programExplorerUrl: typeof payload.programExplorerUrl === "string" ? payload.programExplorerUrl : null,
+    escrowMode: typeof payload.escrowMode === "string" ? payload.escrowMode : null,
+    lockExplorerUrl: typeof payload.lockExplorerUrl === "string" ? payload.lockExplorerUrl : null,
+    settlementExplorerUrl: typeof payload.settlementExplorerUrl === "string" ? payload.settlementExplorerUrl : null,
+    chain: typeof payload.chain === "string" ? payload.chain : null,
   };
 }
 
@@ -660,7 +678,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export type EscrowMode = "custodial-mock" | "noncustodial-sim";
+export type EscrowMode = "custodial-mock" | "noncustodial-sim" | "noncustodial-devnet";
 
 export interface RosterHealth {
   version: string;
@@ -673,16 +691,25 @@ export function readHealth(payload: unknown): RosterHealth {
   if (!isRecord(payload)) throw invalidResponse("Health response was incomplete.");
   return {
     version: typeof payload.version === "string" ? payload.version : "dev",
-    escrowMode: payload.escrowMode === "noncustodial-sim" ? "noncustodial-sim" : "custodial-mock",
+    escrowMode:
+      payload.escrowMode === "noncustodial-devnet"
+        ? "noncustodial-devnet"
+        : payload.escrowMode === "noncustodial-sim"
+          ? "noncustodial-sim"
+          : "custodial-mock",
     mode: typeof payload.mode === "string" ? payload.mode : "sandbox",
     rail: typeof payload.rail === "string" ? payload.rail : "mock",
   };
 }
 
 export function describeEscrowMode(mode: EscrowMode): string {
-  return mode === "noncustodial-sim"
-    ? "Non-custodial (simulated): the buyer wallet signs the lock into a program vault; Roster holds no keys."
-    : "Custodial mock: sandbox locks sit on a Roster-minted mock hold address.";
+  if (mode === "noncustodial-devnet") {
+    return "Non-custodial DEVNET: locks sit in the on-chain roster-escrow PDA vault. Roster cannot move funds arbitrarily.";
+  }
+  if (mode === "noncustodial-sim") {
+    return "Non-custodial (simulated): the buyer wallet signs the lock into a program vault; Roster holds no keys.";
+  }
+  return "Custodial mock: sandbox locks sit on a Roster-minted mock hold address.";
 }
 
 export type KycStatus = "none" | "pending" | "approved" | "rejected";

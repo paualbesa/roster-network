@@ -793,7 +793,6 @@ dependencies = [
  "borsh 0.10.4",
  "solana-program",
  "spl-token",
- "thiserror",
 ]
 
 [[package]]

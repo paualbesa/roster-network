@@ -970,6 +970,14 @@ function JobDetail({ detail, onClose }: { detail: AdminJobDetail; onClose: () =>
           <Detail label="Settled" value={formatOperatorTime(detail.escrow.settledAt)} />
           <Detail label="Hold" value={detail.escrow.holdAddress} />
           {detail.job.chain ? <Detail label="Chain" value={detail.job.chain} /> : null}
+          {detail.job.vaultAddress ? <Detail label="Vault PDA (devnet)" value={detail.job.vaultAddress} /> : null}
+          {detail.job.vaultExplorerUrl ? (
+            <Detail label="Vault explorer (devnet)" value={detail.job.vaultExplorerUrl} />
+          ) : null}
+          {detail.job.programId ? <Detail label="Escrow program (devnet)" value={detail.job.programId} /> : null}
+          {detail.job.programExplorerUrl ? (
+            <Detail label="Program explorer (devnet)" value={detail.job.programExplorerUrl} />
+          ) : null}
           {detail.job.settlementProviderRef ? (
             <Detail label="Settlement tx" value={detail.job.settlementProviderRef} />
           ) : null}

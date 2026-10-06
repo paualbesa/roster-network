@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { looksLikeSolanaSignature, solanaExplorerTxUrl } from "@albesa/solana";
+import { looksLikeSolanaSignature, solanaExplorerAddressUrl, solanaExplorerTxUrl, ROSTER_ESCROW_PROGRAM_ID_DEVNET } from "@albesa/solana";
 import type { CapabilityRegistry } from "@albesa/registry";
 import type { JobStore, StoredJob } from "../jobs.js";
 import type { AgentFinanceService } from "../service.js";
@@ -27,6 +27,10 @@ export interface ActivityItem {
   chain?: string;
   settlementProviderRef?: string | null;
   explorerUrl?: string | null;
+  vaultExplorerUrl?: string | null;
+  programExplorerUrl?: string | null;
+  vaultAddress?: string | null;
+  programId?: string | null;
   railLabel?: string | null;
 }
 
@@ -61,7 +65,7 @@ export async function buildActivity(deps: {
 }> {
   const now = (deps.now ?? new Date()).getTime();
   const all = deps.jobs.listAllJobs().sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
-  const items = all.slice(0, deps.limit ?? 50).map((job) => toItem(job, deps));
+  const items = await Promise.all(all.slice(0, deps.limit ?? 50).map((job) => toItem(job, deps)));
   const day = all.filter((job) => now - Date.parse(job.createdAt) <= 86_400_000);
   const released24 = day.filter((job) => job.status === "released");
 
@@ -119,7 +123,15 @@ export async function buildActivity(deps: {
   };
 }
 
-function toItem(job: StoredJob, deps: { firstParty: FirstPartyOrgs; orgNames: Map<string, string>; sellers: SellerDirectory }): ActivityItem {
+async function toItem(
+  job: StoredJob,
+  deps: {
+    firstParty: FirstPartyOrgs;
+    orgNames: Map<string, string>;
+    sellers: SellerDirectory;
+    service: AgentFinanceService;
+  },
+): Promise<ActivityItem> {
   const buyerOrg = job.organizationId;
   const buyerKind: ActivityItem["buyerKind"] =
     buyerOrg === deps.firstParty.labs ? "roster_fleet" : isFirstParty(buyerOrg, deps.firstParty) ? "first_party" : "sandbox_user";
@@ -128,7 +140,26 @@ function toItem(job: StoredJob, deps: { firstParty: FirstPartyOrgs; orgNames: Ma
   const explorerUrl =
     looksLikeSolanaSignature(settlementRef) && chain === "solana-devnet"
       ? solanaExplorerTxUrl(settlementRef!, "devnet")
+      : looksLikeSolanaSignature(job.lockProviderRef) && chain === "solana-devnet"
+        ? solanaExplorerTxUrl(job.lockProviderRef!, "devnet")
+        : null;
+  let programId: string | null =
+    chain === "solana-devnet"
+      ? (process.env.ROSTER_ESCROW_PROGRAM_ID?.trim() || ROSTER_ESCROW_PROGRAM_ID_DEVNET)
       : null;
+  let vaultAddress: string | null = null;
+  if (chain === "solana-devnet") {
+    try {
+      const live = await deps.service.getEscrow(job.organizationId, job.escrowId);
+      const hold = live.escrow.custody?.vault ?? live.escrow.holdAddress;
+      if (typeof hold === "string" && hold.length > 0 && !hold.startsWith("mock:")) {
+        vaultAddress = hold;
+      }
+      if (live.escrow.custody?.programId) programId = live.escrow.custody.programId;
+    } catch {
+      // Escrow missing: keep program link only.
+    }
+  }
   return {
     id: job.id,
     sandbox: true,
@@ -145,7 +176,11 @@ function toItem(job: StoredJob, deps: { firstParty: FirstPartyOrgs; orgNames: Ma
     chain,
     settlementProviderRef: settlementRef,
     explorerUrl,
-    railLabel: chain === "solana-devnet" ? "solana-devnet · test SPL" : null,
+    vaultAddress,
+    vaultExplorerUrl: vaultAddress ? solanaExplorerAddressUrl(vaultAddress, "devnet") : null,
+    programId,
+    programExplorerUrl: programId ? solanaExplorerAddressUrl(programId, "devnet") : null,
+    railLabel: chain === "solana-devnet" ? "solana-devnet · noncustodial escrow" : null,
   };
 }
 

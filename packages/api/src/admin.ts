@@ -84,6 +84,11 @@ export interface AdminJobRecord {
   lockProviderRef?: string;
   settlementProviderRef?: string | null;
   settlementExplorerUrl?: string | null;
+  vaultAddress?: string | null;
+  vaultExplorerUrl?: string | null;
+  programId?: string | null;
+  programExplorerUrl?: string | null;
+  escrowMode?: string | null;
 }
 
 export interface AdminDeps {
@@ -259,6 +264,11 @@ export function toAdminJob(job: JobView, names: ReadonlyMap<string, string>): Ad
       looksLikeSolanaSignature(job.settlementProviderRef) && job.chain === "solana-devnet"
         ? solanaExplorerTxUrl(job.settlementProviderRef!, "devnet")
         : null,
+    vaultAddress: job.vaultAddress ?? null,
+    vaultExplorerUrl: job.vaultExplorerUrl ?? null,
+    programId: job.programId ?? null,
+    programExplorerUrl: job.programExplorerUrl ?? null,
+    escrowMode: job.escrowMode ?? null,
   };
 }
 

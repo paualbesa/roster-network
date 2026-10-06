@@ -686,6 +686,16 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return c.json(result);
   });
 
+  app.post("/v1/escrows/:escrowId/dispute", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const partyAgentId = typeof (body as { partyAgentId?: unknown }).partyAgentId === "string"
+      ? (body as { partyAgentId: string }).partyAgentId.trim()
+      : "";
+    if (!partyAgentId) return c.json({ error: "partyAgentId required" }, 400);
+    const result = await service.disputeEscrow(c.get("orgId"), c.req.param("escrowId"), partyAgentId);
+    return c.json(result);
+  });
+
   app.post("/v1/escrows/:escrowId/result", async (c) => {
     const resultPayload = parseEscrowResult(await readJson(c));
     const result = await service.submitEscrowResult(c.get("orgId"), c.req.param("escrowId"), resultPayload);

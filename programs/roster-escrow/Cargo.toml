@@ -19,7 +19,6 @@ test-sbf = []
 borsh = "0.10"
 solana-program = "=2.1.14"
 spl-token = { version = "7", features = ["no-entrypoint"] }
-thiserror = "1"
 
 [dev-dependencies]
 solana-program = "=2.1.14"

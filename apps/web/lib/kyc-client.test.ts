@@ -40,6 +40,7 @@ describe("KYC client helpers", () => {
 
   it("reads escrow mode from /health and explains kyc_limit_exceeded", () => {
     expect(readHealth({ version: "abc", escrowMode: "noncustodial-sim" }).escrowMode).toBe("noncustodial-sim");
+    expect(readHealth({ version: "abc", escrowMode: "noncustodial-devnet" }).escrowMode).toBe("noncustodial-devnet");
     expect(readHealth({ version: "abc" }).escrowMode).toBe("custodial-mock");
     expect(describeEscrowMode("noncustodial-sim")).toMatch(/no keys/);
     const error = new RosterApiError(403, "kyc_limit_exceeded", "Over the Tier 0 limit.");
