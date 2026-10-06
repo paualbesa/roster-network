@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  DEVNET_ESCROW_PROGRAM_ID,
   formatUsdc,
   parseUsdc,
   SIM_ESCROW_PROGRAM_ID,
@@ -7,6 +8,7 @@ import {
   type EscrowMode,
   type ResultSchema,
 } from "@albesa/core";
+import { noncustodialVaultAddress } from "@albesa/solana";
 
 /** On-chain Roster fee the escrow program would route at release: 1% + 0.003 USDC, capped at the price. */
 export function quoteOnChainEscrowFee(amountUsdc: string): string {
@@ -75,6 +77,33 @@ export function buildEscrowCustody(
       onChainFeeUsdc: null,
     };
   }
+
+  if (mode === "noncustodial-devnet") {
+    const programId = process.env.ROSTER_ESCROW_PROGRAM_ID?.trim() || DEVNET_ESCROW_PROGRAM_ID;
+    let vault: string;
+    try {
+      vault = noncustodialVaultAddress(input.buyerAddress, input.escrowId, programId);
+    } catch {
+      vault = `devnet-pda:${digest("vault", programId, input.escrowId, input.buyerAddress).slice(0, 40)}`;
+    }
+    const message = escrowLockIntent({ ...input, programId, vault });
+    return {
+      mode,
+      custodian: "program",
+      programId,
+      vault,
+      buyerAuthorization: {
+        signer: input.buyerAddress,
+        message,
+        // Server-wallet path fills a real sig when broadcasting; placeholder until then.
+        signature: `pending-buyer-sig:${digest("sig", input.buyerAddress, message).slice(0, 16)}`,
+        signedAt: input.signedAt,
+      },
+      releaseAuthority: "program-rules",
+      onChainFeeUsdc: quoteOnChainEscrowFee(input.amountUsdc),
+    };
+  }
+
   const vault = simulatedEscrowVault(input.escrowId, input.buyerAddress);
   const message = escrowLockIntent({ ...input, programId: SIM_ESCROW_PROGRAM_ID, vault });
   return {

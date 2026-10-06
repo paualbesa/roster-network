@@ -1,0 +1,26 @@
+[package]
+name = "roster-escrow"
+version = "0.1.0"
+description = "Non-custodial Solana PDA escrow for Roster (USDC SPL)"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "roster_escrow"
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+test-sbf = []
+
+[dependencies]
+borsh = "0.10"
+solana-program = "=2.1.14"
+spl-token = { version = "7", features = ["no-entrypoint"] }
+thiserror = "1"
+
+[dev-dependencies]
+solana-program = "=2.1.14"
+

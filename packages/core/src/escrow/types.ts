@@ -44,10 +44,19 @@ export type SchemaValidationHook = (schema: ResultSchema, result: unknown) => Sc
  * - `noncustodial-sim`: models the planned on-chain escrow. The buyer wallet signs a lock
  *   intent, funds sit in a program-derived vault (PDA) that no Roster key can spend, and
  *   release/refund follow program rules. Still the mock rail underneath; nothing is broadcast.
+ * - `noncustodial-devnet`: real `roster-escrow` program on Solana DEVNET. Buyer-signed flows;
+ *   sandbox/Fleet may use the server-held wallet path to co-sign as the buyer agent.
  */
-export type EscrowMode = "custodial-mock" | "noncustodial-sim";
+export type EscrowMode = "custodial-mock" | "noncustodial-sim" | "noncustodial-devnet";
 
-export const ESCROW_MODES: readonly EscrowMode[] = ["custodial-mock", "noncustodial-sim"];
+export const ESCROW_MODES: readonly EscrowMode[] = [
+  "custodial-mock",
+  "noncustodial-sim",
+  "noncustodial-devnet",
+];
+
+/** Live DEVNET program id (programs/roster-escrow). */
+export const DEVNET_ESCROW_PROGRAM_ID = "9kEkd18dibRCwMS7tesWE2nYgg5zR4QqqS7oYYeCFL61";
 
 /** Simulated program that would own non-custodial escrow vaults (never deployed). */
 export const SIM_ESCROW_PROGRAM_ID = "RosterEscrowSim111111111111111111111111111";

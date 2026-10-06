@@ -2,8 +2,8 @@ import { ESCROW_MODES, type EscrowMode } from "./types.js";
 
 /**
  * `ROSTER_ESCROW_MODE` selects the escrow custody model. Unset is `custodial-mock`.
- * Both values run on sandbox rails; `noncustodial-sim` only changes who is modeled
- * as holding the lock (a program vault instead of Roster).
+ * `custodial-mock` / `noncustodial-sim` stay on sandbox rails.
+ * `noncustodial-devnet` uses the on-chain program (see docs/ESCROW_NON_CUSTODIAL.md).
  */
 export function resolveEscrowMode(env: Record<string, string | undefined> = process.env): EscrowMode {
   const raw = env.ROSTER_ESCROW_MODE?.trim();

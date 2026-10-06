@@ -1,7 +1,8 @@
 # Non-custodial escrow: design direction
 
-Status: design only. Nothing in this document is deployed on-chain. Sandbox can
-model the flow today with `ROSTER_ESCROW_MODE=noncustodial-sim`.
+Status: DEVNET program implemented (`programs/roster-escrow`, mode `noncustodial-devnet`).
+Sandbox can still model the flow with `ROSTER_ESCROW_MODE=noncustodial-sim`.
+See `docs/SECURITY_REVIEW_ESCROW.md` before mainnet.
 
 ## Why
 
