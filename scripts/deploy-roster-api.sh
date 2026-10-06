@@ -127,3 +127,16 @@ if [ "$ok" -ne 1 ]; then
   exit 1
 fi
 echo "http://127.0.0.1:7001/health ok"
+
+# Harden secret files (idempotent).
+chmod 600 "$DATA_DIR/solana-devnet-fee-payer.json" 2>/dev/null || true
+chmod 600 "$DATA_DIR/solana-devnet.env" 2>/dev/null || true
+chmod 600 "$DATA_DIR/rosty.env" 2>/dev/null || true
+chmod 600 "$DATA_DIR/.roster-admin-token" 2>/dev/null || true
+
+# Optional Rosty bot when rosty.env is present on the host.
+if [ -f "$DATA_DIR/rosty.env" ]; then
+  echo "== optional rosty deploy =="
+  bash "$ROOT/scripts/deploy-rosty.sh" || echo "WARN: deploy-rosty.sh failed (API still up)"
+fi
+
