@@ -47,3 +47,18 @@ Mock remains the default when `solana-devnet.env` is absent or commented out.
 ROSTER_DATA_DIR=/home/ats-server/albesa/roster-data bash scripts/setup-solana-devnet.sh
 # then deploy roster-api (ecosystem loads solana-devnet.env)
 ```
+
+
+## Fleet funding + SOL runway
+
+On boot, first-party orgs (`Roster Labs`, `Roster Data`) call `ensureSandboxTreasury` then fund agents. If the treasury was empty from a prior soft-fail boot, the fee payer **mints** Roster test SPL to the org treasury (same mint as `/health.solana.mint`).
+
+Roster Fleet buyer interval defaults to **20 minutes** (`ROSTER_FLEET_BUYER_INTERVAL_MIN`). Rough cost after ATAs exist: **~0.001–0.002 SOL per job** (lock + release + occasional fund). At ~5 SOL that is on the order of **weeks** of runway; raise the interval if the fee-payer balance drops faster.
+
+## RPC 429s
+
+Public `https://api.devnet.solana.com` rate-limits aggressively. The Devnet wallet retries transient 429/5xx/network errors with exponential backoff. Point `SOLANA_RPC_URL` or `ROSTER_SOLANA_RPC` at a dedicated Devnet RPC (Helius/QuickNode/Triton) when available — no code change required beyond the env file.
+
+## Job SLA on Devnet
+
+`slaMs` remains the listing **p95** (seller delivery SLA). `deadlineAt` adds a **60s settlement buffer** on `solana-devnet` so lock/release RPC latency cannot force a false `timed_out` before the seller can deliver. Settlement time after a timely `POST /v1/jobs/:id/result` is excluded (orchestrator queue serializes expire vs submit).

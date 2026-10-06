@@ -27,6 +27,19 @@ const FILE_VERSION = 1;
 const MAX_QUERY = 500;
 /** Same ceiling as the reputation ledger. Checked before escrow settles. */
 const MAX_LATENCY_MS = 86_400_000;
+/**
+ * Extra deadline headroom on solana-devnet so on-chain lock/release RPC time cannot
+ * burn the seller delivery window (listing p95 still records true SLA intent).
+ * Seller work is measured against listing p95; this buffer only extends deadlineAt.
+ */
+export const DEVNET_SETTLEMENT_SLA_BUFFER_MS = 60_000;
+
+/** Effective job deadline length: listing p95 plus rail settlement buffer when needed. */
+export function effectiveJobSlaMs(listingP95Ms: number, chain: string | null | undefined): number {
+  const base = Number.isFinite(listingP95Ms) && listingP95Ms > 0 ? Math.trunc(listingP95Ms) : 0;
+  const buffer = chain === "solana-devnet" ? DEVNET_SETTLEMENT_SLA_BUFFER_MS : 0;
+  return Math.min(MAX_LATENCY_MS, base + buffer);
+}
 
 /**
  * Sandbox mapping from a capability listing to the agent that receives escrow.
@@ -373,9 +386,11 @@ export interface JobOrchestratorOptions {
 /**
  * Discover → rank (reputation blend) → lock escrow → deliver → schema check →
  * release or refund → passport.
- * The listing p95 is the job SLA. When that deadline passes with no valid
- * delivery, the buyer is refunded in full, the job is `timed_out`, and the
- * seller passport records a failure. The take-rate is not collected.
+ * The listing p95 is the seller-delivery SLA (`slaMs`). `deadlineAt` may add a
+ * solana-devnet settlement buffer so chain RPC cannot consume the delivery window.
+ * When that deadline passes with no valid delivery, the buyer is refunded in full,
+ * the job is `timed_out`, and the seller passport records a failure. The take-rate
+ * is not collected. On-chain settlement time after a timely result POST is excluded.
  * The buyer may belong to a different organization than the seller. Escrow owns
  * validation and the 1% take-rate. Reputation is recorded on the seller agent.
  */
@@ -536,7 +551,10 @@ export class JobOrchestrator {
       memo: input.memo ?? `Roster job ${top.listing.name}`,
     });
     const createdAt = this.now().toISOString();
+    // slaMs stays the listing p95 (seller delivery SLA). deadlineAt adds a Devnet
+    // settlement buffer so chain RPC latency cannot force a false timeout.
     const slaMs = top.listing.latency.p95Ms;
+    const deadlineMs = effectiveJobSlaMs(slaMs, locked.escrow.chain);
     const job: StoredJob = {
       id: createId("job"),
       organizationId,
@@ -553,7 +571,7 @@ export class JobOrchestrator {
       rankScore: top.score,
       status: "held",
       slaMs,
-      deadlineAt: new Date(Date.parse(createdAt) + slaMs).toISOString(),
+      deadlineAt: new Date(Date.parse(createdAt) + deadlineMs).toISOString(),
       result: null,
       validationErrors: null,
       latencyMs: null,
@@ -668,6 +686,9 @@ export class JobOrchestrator {
     if (this.isPastDeadline(job)) {
       return { job: await this.settleTimeout(job) };
     }
+    // Deadline already passed the check: chain settlement below may take seconds on
+    // Devnet. The orchestrator queue serializes expire/submit so a sweeper cannot
+    // refund mid-settle (settlement time is excluded from the SLA window).
     const latencyMs = this.resolveLatency(job.listingId, input.latencyMs);
     const settled = await this.service.submitEscrowResult(job.organizationId, job.escrowId, input.result);
     const before = await this.service.getPassport(job.sellerAgentId);

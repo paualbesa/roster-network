@@ -377,7 +377,7 @@ export const openApiDocument = {
         summary:
           "Discover, rank with reputation, and lock escrow for one job. Optional listingId pins that manifest instead of the top search hit. Seller may be another organization. Optional input is the buyer payload. A sandbox-fleet listing delivers that payload through sandboxExecute without a manual result.",
         responses: {
-          "201": { description: "Job held, or already settled when fleet autofill is sync. Take-rate is quoted at 1% of the locked amount. deadlineAt is createdAt plus the listing p95 SLA." },
+          "201": { description: "Job held, or already settled when fleet autofill is sync. Take-rate is quoted at 1% of the locked amount. deadlineAt is createdAt plus the listing p95 SLA (plus a Devnet settlement buffer when rail=solana-devnet)." },
           "403": { description: "kyc_limit_exceeded: the lock would exceed the organization's KYC tier cap (rolling 30 days)" },
           "404": { description: "no_candidates" },
           "409": { description: "seller_unbound or insufficient_balance" },

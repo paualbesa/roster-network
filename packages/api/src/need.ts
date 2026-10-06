@@ -22,7 +22,7 @@ const MAX_LIMIT = 20;
 const BUY_WAIT_MS = 9000;
 /** Agent `POST /v1/need/buy` creates (or reuses) when the caller names none. */
 export const NEED_BUYER_AGENT_NAME = "Roster buyer";
-const NEED_BUYER_FLOAT_USDC = "1.00";
+const NEED_BUYER_FLOAT_USDC = "5.00";
 
 export interface NeedRequest {
   need: string;
@@ -335,6 +335,7 @@ async function ensureBuyerAgent(service: AgentFinanceService, organizationId: st
   const balance = await service.getAgentBalance(organizationId, agent.id);
   if (compareUsdc(balance.balanceUsdc, price) < 0) {
     const topUp = compareUsdc(price, NEED_BUYER_FLOAT_USDC) > 0 ? price : NEED_BUYER_FLOAT_USDC;
+    await service.ensureSandboxTreasury(organizationId, topUp);
     await service.fundAgent(organizationId, agent.id, topUp);
   }
   return agent.id;

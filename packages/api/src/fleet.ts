@@ -120,7 +120,11 @@ export async function fleetBuyOnce(app: object, pick: (count: number) => number 
   return { listingName: listing.name, status: result.status };
 }
 
-/** Scheduled Roster Fleet buyer. Interval 0 disables it. */
+/**
+ * Scheduled Roster Fleet buyer. Interval 0 disables it.
+ * Default 20 min keeps Devnet SOL burn low (~0.001–0.002 SOL/job after ATAs exist →
+ * weeks of runway at ~5 SOL). Override with ROSTER_FLEET_BUYER_INTERVAL_MIN.
+ */
 export function startFleetBuyer(app: object, options: { intervalMin: number; afterBuy?: () => Promise<void> }): (() => void) | null {
   if (options.intervalMin <= 0) return null;
   const intervalMs = Math.max(60_000, options.intervalMin * 60_000);
@@ -213,8 +217,22 @@ async function ensureFirstPartySeller(
     seller = created.agent;
   }
   const sellerAgentId = seller.id;
+  // Mint/top up sandbox treasury (solana-devnet test SPL or mock) before funding agents.
+  // Existing first-party orgs created while the fee-payer had 0 SOL often have empty treasuries.
+  try {
+    await runtime.service.ensureSandboxTreasury(organizationId, SANDBOX_FLEET_FUND_USDC);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        t: new Date().toISOString(),
+        msg: "fleet treasury top-up skipped",
+        org: orgName,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
   const balance = await runtime.service.getAgentBalance(organizationId, sellerAgentId);
-  if (compareUsdc(balance.balanceUsdc, "0.000000") === 0) {
+  if (compareUsdc(balance.balanceUsdc, SANDBOX_FLEET_FUND_USDC) < 0) {
     // Soft-fail: solana-devnet with 0 fee-payer SOL cannot transfer treasury→agent.
     // Escrow release still pays the seller from the buyer lock once SOL is available.
     try {

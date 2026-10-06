@@ -31,6 +31,10 @@ export interface ActivityItem {
   amountUsdc?: string;
   latencyMs?: number | null;
   status?: string;
+  chain?: string | null;
+  settlementProviderRef?: string | null;
+  explorerUrl?: string | null;
+  railLabel?: string | null;
 }
 
 export interface ActivityBody {

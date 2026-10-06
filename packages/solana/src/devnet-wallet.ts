@@ -34,7 +34,50 @@ import {
 } from "@solana/web3.js";
 import { keypairFromSecret } from "./keys.js";
 
+
 const DEFAULT_RPC = "https://api.devnet.solana.com";
+const RPC_RETRY_ATTEMPTS = 6;
+const RPC_RETRY_BASE_MS = 400;
+
+function isRetryableRpcError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /429|Too Many Requests|ECONNRESET|ETIMEDOUT|ENETUNREACH|socket hang up|fetch failed|503|502|504/i.test(
+    msg,
+  );
+}
+
+async function sleepMs(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Exponential backoff for public Devnet RPC 429s and transient network errors. */
+export async function withRpcRetry<T>(fn: () => Promise<T>, label = "rpc"): Promise<T> {
+  let delay = RPC_RETRY_BASE_MS;
+  let last: unknown;
+  for (let attempt = 0; attempt < RPC_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      last = error;
+      if (!isRetryableRpcError(error) || attempt === RPC_RETRY_ATTEMPTS - 1) throw error;
+      const wait = delay + Math.floor(Math.random() * 200);
+      console.warn(
+        JSON.stringify({
+          t: new Date().toISOString(),
+          msg: "solana-devnet rpc retry",
+          label,
+          attempt: attempt + 1,
+          waitMs: wait,
+          error: error instanceof Error ? error.message.slice(0, 160) : String(error).slice(0, 160),
+        }),
+      );
+      await sleepMs(wait);
+      delay = Math.min(delay * 2, 8_000);
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last));
+}
+
 const TOKEN_DECIMALS = 6;
 
 export interface SolanaDevnetWalletOptions {
@@ -165,7 +208,7 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
         return { ok: true, sol, error: null };
       }
       const sig = await this.connection.requestAirdrop(this.feePayer.publicKey, Math.ceil(1.5 * LAMPORTS_PER_SOL));
-      await this.connection.confirmTransaction(sig, "confirmed");
+      await withRpcRetry(() => this.connection.confirmTransaction(sig, "confirmed"), "confirmAirdrop");
       sol = (await this.connection.getBalance(this.feePayer.publicKey, "confirmed")) / LAMPORTS_PER_SOL;
       this.airdropOk = true;
       this.airdropError = null;
@@ -192,7 +235,10 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
     if (this.offlineLedger || !this.mint) return formatUsdc(pending);
     try {
       const ata = getAssociatedTokenAddressSync(this.mint, owner, false, TOKEN_PROGRAM_ID);
-      const bal = await this.connection.getTokenAccountBalance(ata, "confirmed");
+      const bal = await withRpcRetry(
+        () => this.connection.getTokenAccountBalance(ata, "confirmed"),
+        "getTokenAccountBalance",
+      );
       const amount = BigInt(bal.value.amount);
       return formatUsdc(amount + pending);
     } catch {
@@ -340,7 +386,7 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
   private async ensureAta(owner: PublicKey): Promise<PublicKey> {
     if (!this.mint) throw new WalletProviderError("Mint unavailable.");
     const ata = getAssociatedTokenAddressSync(this.mint, owner, false, TOKEN_PROGRAM_ID);
-    const info = await this.connection.getAccountInfo(ata, "confirmed");
+    const info = await withRpcRetry(() => this.connection.getAccountInfo(ata, "confirmed"), "getAccountInfo");
     if (info) return ata;
     const tx = new Transaction().add(
       createAssociatedTokenAccountIdempotentInstruction(
@@ -357,13 +403,24 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
 
   private async send(tx: Transaction, signers: Keypair[]): Promise<TransactionSignature> {
     if (this.sender) return this.sender(tx, signers);
-    const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash("confirmed");
-    tx.feePayer = this.feePayer.publicKey;
-    tx.recentBlockhash = blockhash;
-    tx.sign(...signers);
-    const sig = await this.connection.sendRawTransaction(tx.serialize(), { skipPreflight: false });
-    await this.connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-    return sig;
+    // Retry blockhash + send together; confirm separately so a 429 on confirm does not rebroadcast.
+    const { signature, blockhash, lastValidBlockHeight } = await withRpcRetry(async () => {
+      const latest = await this.connection.getLatestBlockhash("confirmed");
+      tx.feePayer = this.feePayer.publicKey;
+      tx.recentBlockhash = latest.blockhash;
+      tx.sign(...signers);
+      const signature = await this.connection.sendRawTransaction(tx.serialize(), { skipPreflight: false });
+      return { signature, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight };
+    }, "send");
+    await withRpcRetry(
+      () =>
+        this.connection.confirmTransaction(
+          { signature, blockhash, lastValidBlockHeight },
+          "confirmed",
+        ),
+      "confirm",
+    );
+    return signature;
   }
 
   private keypairFor(ownerRef: string): Keypair {

@@ -36,10 +36,15 @@ export function txEmbed(input: {
   sandbox: boolean;
   summary?: boolean;
   fleetCount?: number;
+  explorerUrl?: string | null;
+  railLabel?: string | null;
+  chain?: string | null;
 }): EmbedBuilder {
   const title = input.summary
     ? `Fleet loop · ${input.fleetCount ?? 0} jobs`
     : input.product;
+  const isDevnet = input.chain === "solana-devnet" || (input.railLabel ?? "").includes("devnet");
+  const rail = input.railLabel ?? (isDevnet ? "solana-devnet · test SPL" : input.sandbox ? "sandbox · mock USDC" : "live");
   const embed = new EmbedBuilder()
     .setColor(ROSTER_SAGE)
     .setTitle(title.slice(0, 256))
@@ -52,9 +57,13 @@ export function txEmbed(input: {
         inline: true,
       },
     )
-    .setFooter({ text: input.sandbox ? "sandbox · mock USDC · #transaccions" : "#transaccions" })
+    .setFooter({ text: `${rail} · #transaccions` })
     .setTimestamp(new Date());
-  if (input.sandbox) embed.setDescription("sandbox");
+  const lines: string[] = [];
+  if (isDevnet) lines.push("**devnet** settlement");
+  else if (input.sandbox) lines.push("sandbox");
+  if (input.explorerUrl) lines.push(`[View on Solana Explorer](${input.explorerUrl})`);
+  if (lines.length) embed.setDescription(lines.join("\n"));
   return embed;
 }
 

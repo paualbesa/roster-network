@@ -46,6 +46,7 @@ export {
   createSolanaDevnetWallet,
   loadFeePayerSecret,
   testFeePayerSecret,
+  withRpcRetry,
 } from "./devnet-wallet.js";
 export type { SolanaDevnetWalletOptions, SolanaDevnetStatus } from "./devnet-wallet.js";
 export { looksLikeSolanaSignature, solanaExplorerAddressUrl, solanaExplorerTxUrl } from "./explorer.js";

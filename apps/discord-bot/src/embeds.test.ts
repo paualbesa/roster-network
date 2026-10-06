@@ -30,6 +30,23 @@ describe("embeds", () => {
     expect(data.description).toBe("sandbox");
   });
 
+  it("labels devnet explorer links on TX embeds", () => {
+    const embed = txEmbed({
+      product: "Receipt parser E2E",
+      amountUsdc: "1.000000",
+      seller: "Seller",
+      latencyMs: 120,
+      sandbox: true,
+      chain: "solana-devnet",
+      railLabel: "solana-devnet · test SPL",
+      explorerUrl: "https://explorer.solana.com/tx/abc?cluster=devnet",
+    });
+    const data = embed.toJSON();
+    expect(data.description).toContain("devnet");
+    expect(data.description).toContain("explorer.solana.com");
+    expect(data.footer?.text).toContain("devnet");
+  });
+
   it("includes sell link on demand", () => {
     const embed = demandEmbed([{ need: "EU VAT", count: 3, estimateUsdc: "1.5" }]);
     const data = embed.toJSON();
