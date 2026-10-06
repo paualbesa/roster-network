@@ -332,10 +332,16 @@ function readAutofillDelay(raw: string | undefined): number {
  * First-party seller that delivers by name with async work (network, storage).
  * Roster Data uses it: buy → fetch or sign the data → submit through escrow.
  */
+export interface ExternalListingRef {
+  id: string;
+  name: string;
+  organizationId: string;
+}
+
 export interface ExternalFulfiller {
-  handles(listingName: string): boolean;
+  handles(listing: ExternalListingRef): boolean;
   /** Resolve the result. A throw submits `{ error }`, which fails the schema and refunds the buyer. */
-  fulfill(listingName: string, input: Record<string, unknown>): Promise<Record<string, unknown>>;
+  fulfill(listing: ExternalListingRef, input: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
 export interface JobOrchestratorOptions {
@@ -380,8 +386,8 @@ export class JobOrchestrator {
     this.externalFulfiller = fulfiller;
   }
 
-  private isExternalName(name: string): boolean {
-    return this.externalFulfiller?.handles(name) === true;
+  private isExternal(listing: ExternalListingRef): boolean {
+    return this.externalFulfiller?.handles(listing) === true;
   }
 
   bindSeller(
@@ -479,7 +485,7 @@ export class JobOrchestrator {
       organizationId,
       sellerAgentId,
       createdAt: this.now().toISOString(),
-      autofill: options?.autofill === true && (isSandboxFleetName(listing.name) || this.isExternalName(listing.name)),
+      autofill: options?.autofill === true && (isSandboxFleetName(listing.name) || this.isExternal(listing)),
     };
     this.jobs.saveSeller(binding);
     return { ...binding };
@@ -554,7 +560,7 @@ export class JobOrchestrator {
    */
   private async scheduleAutofill(job: StoredJob, binding: ListingSellerBinding): Promise<void> {
     if (!binding.autofill) return;
-    if (this.isExternalName(job.listingName)) {
+    if (this.isExternal(externalRef(job))) {
       await this.scheduleExternal(job);
       return;
     }
@@ -583,7 +589,7 @@ export class JobOrchestrator {
     const resolveResult = async (): Promise<unknown> => {
       try {
         const payload = typeof job.input === "object" && job.input !== null && !Array.isArray(job.input) ? (job.input as Record<string, unknown>) : {};
-        return await fulfiller.fulfill(job.listingName, payload);
+        return await fulfiller.fulfill(externalRef(job), payload);
       } catch (error) {
         return { error: error instanceof Error ? error.message.slice(0, 300) : "delivery failed" };
       }
@@ -998,6 +1004,10 @@ function parseBinding(value: unknown, index: number): ListingSellerBinding {
     createdAt: readText(value.createdAt, `sellers[${index.toString()}].createdAt`),
     autofill: value.autofill === true,
   };
+}
+
+function externalRef(job: StoredJob): ExternalListingRef {
+  return { id: job.listingId, name: job.listingName, organizationId: job.sellerOrganizationId };
 }
 
 function isSandboxFleetName(name: string): boolean {

@@ -67,7 +67,7 @@ import {
 } from "./kyc.js";
 import { MemoryStore, type WaitlistEntry } from "./store.js";
 
-export type ErrorStatus = 400 | 401 | 403 | 404 | 409;
+export type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 502;
 
 export class ServiceError extends Error {
   readonly status: ErrorStatus;
@@ -311,6 +311,8 @@ export class AgentFinanceService implements ReputationHook {
   private readonly escrowModeValue: EscrowMode;
   private readonly kycLimitsValue: KycLimits;
   private queue: Promise<unknown> = Promise.resolve();
+  /** Per-seller take-rate override in bps (founding sellers pay 0). Null keeps the default. */
+  private takeRatePolicy: ((sellerOrganizationId: string) => number | null) | null = null;
 
   constructor(options: ServiceOptions = {}) {
     this.store = options.store ?? new MemoryStore();
@@ -512,6 +514,10 @@ export class AgentFinanceService implements ReputationHook {
 
   createOrganization(name: string): Promise<CreateOrganizationResult> {
     return this.enqueue(() => this.createOrganizationUnlocked(name));
+  }
+
+  setTakeRatePolicy(policy: ((sellerOrganizationId: string) => number | null) | null): void {
+    this.takeRatePolicy = policy;
   }
 
   listOrganizations(): Promise<Organization[]> {
@@ -1373,7 +1379,8 @@ export class AgentFinanceService implements ReputationHook {
       counterparty === "marketplace"
         ? this.requireActiveAgentAnywhere(input.sellerAgentId)
         : this.requireActiveAgent(organization.id, input.sellerAgentId);
-    const quote = quoteEscrowSettlement(canonical);
+    const overrideBps = this.takeRatePolicy?.(seller.organizationId) ?? null;
+    const quote = overrideBps === null ? quoteEscrowSettlement(canonical) : quoteEscrowSettlement(canonical, overrideBps);
     const buyerWallet = this.requireWallet(buyer.walletId);
     const sellerWallet = this.requireWallet(seller.walletId);
     const buyerBalance = await this.wallets.getBalance(buyerWallet.address);

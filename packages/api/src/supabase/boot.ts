@@ -19,6 +19,7 @@ import { SupabaseMirror, createSupabaseTableClient } from "./mirror.js";
 import { KYC_BUCKET, SupabaseKycDocumentStore } from "../kyc.js";
 import { DATA_BUCKET, SupabaseDataStore, type SupabaseDataClientLike } from "../data/store.js";
 import { DemandLog, SupabaseDemandPersistence, type SupabaseDemandClientLike } from "../demand.js";
+import { foundingConfigFromEnv, SellerDirectory, SupabaseSellerPersistence, type SupabaseSellerClientLike } from "../sell/sellers.js";
 import { UPSERT_ORDER, applySnapshot, rowsToSnapshot } from "./rows.js";
 
 export interface SupabaseApp {
@@ -78,6 +79,7 @@ export async function openSupabaseApp(options: {
         ? null
         : new SupabaseDataStore(serviceClient as unknown as SupabaseDataClientLike, process.env.ROSTER_DATA_BUCKET?.trim() || DATA_BUCKET),
     demandLog: new DemandLog(new SupabaseDemandPersistence(serviceClient as unknown as SupabaseDemandClientLike)),
+    sellers: new SellerDirectory(new SupabaseSellerPersistence(serviceClient as unknown as SupabaseSellerClientLike), foundingConfigFromEnv()),
     supabase: {
       verifyAccessToken: (accessToken) => verifySupabaseAccessToken(anonClient, accessToken),
       matchCapabilities: (query, limit) => mirror.matchCapabilities(query, limit),

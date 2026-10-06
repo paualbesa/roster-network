@@ -46,6 +46,20 @@ export default async function ListingPage({ params }: { params: Params }) {
         <Link href="/data" className="hover:text-brass-bright">Roster {product ? "Data" : "Marketplace"}</Link> · {kindLabel(listing.kind)}
       </p>
       <h1 className="mt-4 max-w-4xl font-serif text-4xl leading-[1.05] tracking-[-0.03em] text-balance md:text-5xl">{listing.name}</h1>
+      {listing.founding || listing.proxied ? (
+        <p className="mt-3 flex flex-wrap gap-2">
+          {listing.founding ? (
+            <span className="border border-brass/60 px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-brass uppercase">
+              Founding seller #{listing.founding.number.toString()}
+            </span>
+          ) : null}
+          {listing.proxied ? (
+            <span className="border border-line/20 px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-muted uppercase">
+              {listing.proxied.type === "mcp" ? "MCP" : "API"} · delivered by the seller via Roster proxy
+            </span>
+          ) : null}
+        </p>
+      ) : null}
       <p className="mt-4 max-w-3xl text-base leading-7 text-muted text-pretty">{listing.description}</p>
 
       <div className="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">

@@ -16,9 +16,12 @@ export interface UnmetNeed {
   budgetUsdc: string | null;
   kind: string | null;
   organizationId: string | null;
+  /** Most recent request timestamps (capped), for "this week" counts. */
+  recentSeenAt: string[];
 }
 
 export const MAX_UNMET_NEEDS = 2000;
+export const MAX_RECENT_SEEN = 100;
 
 export function normalizeNeed(text: string): string {
   return text
@@ -83,6 +86,7 @@ export class DemandLog {
           budgetUsdc: input.budgetUsdc ?? current.budgetUsdc,
           kind: input.kind ?? current.kind,
           organizationId: input.organizationId ?? current.organizationId,
+          recentSeenAt: [...(current.recentSeenAt ?? []), at].slice(-MAX_RECENT_SEEN),
         }
       : {
           id,
@@ -96,6 +100,7 @@ export class DemandLog {
           budgetUsdc: input.budgetUsdc,
           kind: input.kind,
           organizationId: input.organizationId,
+          recentSeenAt: [at],
         };
     this.entries.set(id, entry);
     const evicted = this.evict();
@@ -112,7 +117,7 @@ export class DemandLog {
     return [...this.entries.values()]
       .sort((left, right) => right.count - left.count || right.lastSeenAt.localeCompare(left.lastSeenAt))
       .slice(0, limit)
-      .map((entry) => ({ ...entry }));
+      .map((entry) => ({ ...entry, recentSeenAt: [...(entry.recentSeenAt ?? [])] }));
   }
 
   async dismiss(id: string): Promise<boolean> {
@@ -152,7 +157,7 @@ export class FileDemandPersistence implements DemandPersistence {
 
   async load(): Promise<UnmetNeed[]> {
     if (!existsSync(this.filePath)) return [];
-    const rows = JSON.parse(readFileSync(this.filePath, "utf8")) as UnmetNeed[];
+    const rows = (JSON.parse(readFileSync(this.filePath, "utf8")) as UnmetNeed[]).map((row) => ({ ...row, recentSeenAt: Array.isArray(row.recentSeenAt) ? row.recentSeenAt : [] }));
     this.cache = new Map(rows.map((row) => [row.id, row]));
     return rows;
   }
@@ -204,6 +209,7 @@ export class SupabaseDemandPersistence implements DemandPersistence {
           budgetUsdc: typeof row.budget_usdc === "string" ? row.budget_usdc : null,
           kind: typeof row.kind === "string" ? row.kind : null,
           organizationId: typeof row.organization_id === "string" ? row.organization_id : null,
+          recentSeenAt: Array.isArray(row.recent_seen) ? row.recent_seen.filter((value): value is string => typeof value === "string") : [],
         },
       ];
     });
@@ -223,6 +229,7 @@ export class SupabaseDemandPersistence implements DemandPersistence {
         budget_usdc: entry.budgetUsdc,
         kind: entry.kind,
         organization_id: entry.organizationId,
+        recent_seen: entry.recentSeenAt,
       },
       { onConflict: "id" },
     );

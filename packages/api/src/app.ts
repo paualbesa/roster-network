@@ -64,6 +64,12 @@ import { DataCatalog } from "./data/catalog.js";
 import { LocalDataStore, type DataStore } from "./data/store.js";
 import { DATA_DOWNLOAD_TOKEN_RE, registerDataAdminRoutes, registerDataRoutes } from "./data-routes.js";
 import { DemandLog } from "./demand.js";
+import type { ExternalFulfiller } from "./jobs.js";
+import type { FirstPartyOrgs } from "./sell/activity.js";
+import { createSafeFetcher, type SafeFetcher } from "./sell/net.js";
+import { SellerProxy } from "./sell/proxy.js";
+import { registerSellRoutes } from "./sell/routes.js";
+import { foundingConfigFromEnv, SellerDirectory } from "./sell/sellers.js";
 
 type AppEnv = {
   Variables: {
@@ -120,6 +126,12 @@ export interface AppOptions extends AppHttpOptions {
   dataCatalog?: DataCatalog | null;
   /** Unmet-demand log for `POST /v1/need`. Omit it to keep it in memory. */
   demandLog?: DemandLog;
+  /** Seller profiles and private endpoints of imported listings. Omit it to keep them in memory. */
+  sellers?: SellerDirectory;
+  /** Outbound HTTP for imports and the seller proxy. Omit it for the SSRF-guarded default. */
+  egressFetcher?: SafeFetcher;
+  /** Tests only: accept http:// seller URLs. */
+  allowHttpEgress?: boolean;
   /**
    * Test double for passport lookup. When set, search uses it instead of the
    * reputation ledger. Return null when the seller has no events (neutral).
@@ -188,16 +200,29 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
         ? new DataCatalog(dataStore, options.now ? { now: options.now } : {})
         : null;
   const demand = options.demandLog ?? new DemandLog(null, options.now ?? (() => new Date()));
+  const firstParty: FirstPartyOrgs = { labs: null, data: null };
+  const sellers = options.sellers ?? new SellerDirectory(null, foundingConfigFromEnv(), undefined, options.now ?? (() => new Date()));
+  sellers.setFirstPartyCheck((org) => org === firstParty.labs || org === firstParty.data);
+  const egress = options.egressFetcher ?? createSafeFetcher({ allowHttp: options.allowHttpEgress === true });
+  const proxy = new SellerProxy(sellers, egress, (listingId) => registry.get(listingId)?.latency.p95Ms ?? 30_000);
+  // The data catalog matches by name, so it only serves listings of the real Roster Data org.
+  const ownsData = (listing: { name: string; organizationId: string }) =>
+    data !== null && firstParty.data !== null && listing.organizationId === firstParty.data && data.handles(listing.name);
+  const fulfiller: ExternalFulfiller = {
+    handles: (listing) => proxy.handles(listing) || ownsData(listing),
+    fulfill: (listing, input) => (proxy.handles(listing) ? proxy.fulfill(listing, input) : data!.fulfill(listing.name, input)),
+  };
+  service.setTakeRatePolicy((org) => sellers.takeRateBpsFor(org));
   const orchestrator = new JobOrchestrator({
     service,
     registry,
     jobs,
     autofill,
     ...(options.now ? { now: options.now } : {}),
-    ...(data ? { externalFulfiller: data } : {}),
+    externalFulfiller: fulfiller,
   });
   const app = new Hono<AppEnv>();
-  attachAppRuntime(app, { mode, service, registry, jobs, orchestrator, data });
+  attachAppRuntime(app, { mode, service, registry, jobs, orchestrator, data, firstParty, sellers });
   const clock = options.clock ?? Date.now;
   const limits = options.rateLimit ?? null;
   const limiter = new RateLimiter(clock);
@@ -589,7 +614,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
 
   app.get("/v1/agents/:agentId/passport", async (c) => {
     const passport = await service.getPassport(c.req.param("agentId"));
-    return c.json({ passport });
+    const founding = sellers.badge(passport.organizationId);
+    return c.json({ passport, ...(founding ? { founding } : {}) });
   });
 
   app.post("/v1/escrows", async (c) => {
@@ -662,7 +688,14 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     if (!listing) throw new RegistryError(404, "not_found", "Capability listing not found.");
     const slug = listing.data?.slug;
     const dataProduct = slug && data ? data.info(slug) : null;
-    return c.json({ listing, ...(dataProduct ? { dataProduct } : {}) });
+    const founding = sellers.badge(listing.organizationId);
+    const imported = sellers.endpointFor(listing.id);
+    return c.json({
+      listing,
+      ...(dataProduct ? { dataProduct } : {}),
+      ...(founding ? { founding } : {}),
+      ...(imported ? { proxied: { type: imported.endpoint.type } } : {}),
+    });
   });
 
   app.get("/v1/registry/search", async (c) => {
@@ -739,6 +772,20 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     optionalOrg,
     orgOf: (c) => (c as Context<AppEnv>).get("orgId"),
     ...(options.supabase?.matchCapabilities ? { matchCapabilities: options.supabase.matchCapabilities } : {}),
+  });
+
+  registerSellRoutes(app, {
+    registry,
+    service,
+    orchestrator,
+    jobs,
+    sellers,
+    demand,
+    fetcher: egress,
+    firstParty,
+    orgOf: (c) => (c as Context<AppEnv>).get("orgId"),
+    allowHttp: options.allowHttpEgress === true,
+    ...(options.now ? { now: options.now } : {}),
   });
 
   registerAdminRoutes(app, adminDeps);
@@ -945,6 +992,9 @@ export function isPublicRoute(method: string, path: string): boolean {
     LISTING_PATH_RE.test(path) ||
     PASSPORT_PATH_RE.test(path) ||
     KYC_DOCUMENT_TOKEN_RE.test(path) ||
+    path === "/v1/founding" ||
+    path === "/v1/demand" ||
+    path === "/v1/activity" ||
     path === "/v1/data/products" ||
     DATA_PRODUCT_PATH_RE.test(path) ||
     DATA_DOWNLOAD_TOKEN_RE.test(path)

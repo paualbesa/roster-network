@@ -90,12 +90,18 @@ importers:
       '@hono/node-server':
         specifier: ^1.19.5
         version: 1.19.17(hono@4.13.9)
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
       '@supabase/supabase-js':
         specifier: ^2.117.2
         version: 2.117.2
       hono:
         specifier: ^4.9.8
         version: 4.13.9
+      js-yaml:
+        specifier: 4.3.2
+        version: 4.3.2
       ws:
         specifier: ^8.22.0
         version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
