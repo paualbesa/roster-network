@@ -9,6 +9,7 @@ import { SessionProvider, useSandboxSession } from "./session";
 import { SupabaseSessionBridge } from "./supabase-bridge";
 
 const LINKS = [
+  { href: "/console/keys", label: "Keys" },
   { href: "/console/dashboard", label: "Dashboard" },
   { href: "/console/marketplace", label: "Marketplace" },
   { href: "/console/hire", label: "Hire" },

@@ -197,10 +197,15 @@ describe("Roster accounts", () => {
     });
     expect(treasury.status).toBe(200);
     expect(((await treasury.json()) as { balanceUsdc: string }).balanceUsdc).toBe("1000.000000");
-    const missing = await legacy.request("/v1/account", {
+    const orphan = await legacy.request("/v1/account", {
       headers: { authorization: `Bearer ${body.apiKey}` },
     });
-    expect(missing.status).toBe(404);
+    // Org key without a user row is treated as a claimable anonymous sandbox.
+    expect(orphan.status).toBe(200);
+    const view = (await orphan.json()) as { user: null; claimable: boolean; anonymous: boolean };
+    expect(view.user).toBeNull();
+    expect(view.claimable).toBe(true);
+    expect(view.anonymous).toBe(true);
   });
 
   it("does not grant demo credits outside sandbox mode", async () => {
@@ -212,5 +217,138 @@ describe("Roster accounts", () => {
     });
     expect(response.status).toBe(201);
     expect(((await response.json()) as AccountBody).treasury.balanceUsdc).toBe("0.000000");
+  });
+});
+
+describe("anonymous sandbox keys", () => {
+  it("creates a claimable org, hashes the key, and supports claim + rotate + revoke", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "roster-anon-"));
+    const dataFile = join(dir, "sandbox.json");
+    const app = createApp({ mode: "sandbox", dataFile });
+
+    const created = await app.request("/v1/accounts/anonymous", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.40" },
+      body: "{}",
+    });
+    expect(created.status).toBe(201);
+    const body = (await created.json()) as {
+      apiKey: string;
+      claimable: boolean;
+      anonymous: boolean;
+      organization: { id: string; name: string };
+      treasury: { balanceUsdc: string };
+    };
+    expect(body.apiKey.startsWith("sk_sandbox_")).toBe(true);
+    expect(body.claimable).toBe(true);
+    expect(body.anonymous).toBe(true);
+    expect(body.organization.name).toBe("Anonymous sandbox");
+    expect(body.treasury.balanceUsdc).toBe("1000.000000");
+
+    const onDisk = readFileSync(dataFile, "utf8");
+    expect(onDisk.includes(body.apiKey)).toBe(false);
+    expect(onDisk.includes(createHash("sha256").update(body.apiKey, "utf8").digest("hex"))).toBe(true);
+
+    const auth = { authorization: `Bearer ${body.apiKey}`, "content-type": "application/json" };
+    const account = await app.request("/v1/account", { headers: auth });
+    expect(account.status).toBe(200);
+    const view = (await account.json()) as { user: null; claimable: boolean; anonymous: boolean };
+    expect(view.user).toBeNull();
+    expect(view.claimable).toBe(true);
+    expect(view.anonymous).toBe(true);
+
+    const claim = await app.request("/v1/account/claim", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ email: "anon@example.com", password: PASSWORD, name: "Anon" }),
+    });
+    expect(claim.status).toBe(201);
+    const claimed = (await claim.json()) as AccountBody;
+    expect(claimed.user.email).toBe("anon@example.com");
+    expect(claimed.apiKey).not.toBe(body.apiKey);
+    expect(claimed.organization.id).toBe(body.organization.id);
+
+    const oldKey = await app.request("/v1/account", { headers: auth });
+    expect(oldKey.status).toBe(200);
+
+    const claimedAuth = { authorization: `Bearer ${claimed.apiKey}`, "content-type": "application/json" };
+    const rotate = await app.request("/v1/account/api-key/rotate", { method: "POST", headers: claimedAuth });
+    expect(rotate.status).toBe(200);
+    const rotated = (await rotate.json()) as { apiKey: string };
+    expect(rotated.apiKey.startsWith("sk_sandbox_")).toBe(true);
+    expect(rotated.apiKey).not.toBe(claimed.apiKey);
+
+    const dead = await app.request("/v1/account", { headers: claimedAuth });
+    expect(dead.status).toBe(401);
+
+    const rotatedAuth = { authorization: `Bearer ${rotated.apiKey}` };
+    expect((await app.request("/v1/account", { headers: rotatedAuth })).status).toBe(200);
+
+    const revoked = await app.request("/v1/account/api-key", { method: "DELETE", headers: rotatedAuth });
+    expect(revoked.status).toBe(200);
+    expect((await app.request("/v1/account", { headers: rotatedAuth })).status).toBe(401);
+  });
+
+  it("rate-limits anonymous creation per IP more tightly than email signup", async () => {
+    const now = 2_000_000;
+    const app = createApp({
+      mode: "sandbox",
+      rateLimit: {
+        auth: { limit: 20, windowMs: 60_000 },
+        anonymous: { limit: 2, windowMs: 60 * 60_000 },
+        waitlist: { limit: 10, windowMs: 60_000 },
+        authFailures: { limit: 30, windowMs: 10 * 60_000 },
+        organization: { limit: 1200, windowMs: 60_000 },
+        publicRead: { limit: 300, windowMs: 60_000 },
+      },
+      clock: () => now,
+    });
+    const headers = { "content-type": "application/json", "x-forwarded-for": "203.0.113.90" };
+    expect((await app.request("/v1/accounts/anonymous", { method: "POST", headers, body: "{}" })).status).toBe(201);
+    expect((await app.request("/v1/accounts/anonymous", { method: "POST", headers, body: "{}" })).status).toBe(201);
+    const limited = await app.request("/v1/accounts/anonymous", { method: "POST", headers, body: "{}" });
+    expect(limited.status).toBe(429);
+    expect(((await limited.json()) as ErrorBody).error.code).toBe("rate_limited");
+
+    const other = await app.request("/v1/accounts/anonymous", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.91" },
+      body: "{}",
+    });
+    expect(other.status).toBe(201);
+  });
+
+  it("rejects claiming an already-claimed org and duplicate emails", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const { body: first } = await signup(app, "taken@example.com", "Taken");
+    const anon = await app.request("/v1/accounts/anonymous", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    const anonBody = (await anon.json()) as { apiKey: string };
+    const auth = { authorization: `Bearer ${anonBody.apiKey}`, "content-type": "application/json" };
+
+    const dupEmail = await app.request("/v1/account/claim", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ email: "taken@example.com", password: PASSWORD }),
+    });
+    expect(dupEmail.status).toBe(409);
+
+    const ok = await app.request("/v1/account/claim", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ email: "fresh@example.com", password: PASSWORD }),
+    });
+    expect(ok.status).toBe(201);
+
+    const again = await app.request("/v1/account/claim", {
+      method: "POST",
+      headers: { authorization: `Bearer ${((await ok.json()) as AccountBody).apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ email: "other@example.com", password: PASSWORD }),
+    });
+    expect(again.status).toBe(409);
+    expect(first.user.email).toBe("taken@example.com");
   });
 });

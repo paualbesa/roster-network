@@ -69,6 +69,7 @@ import type { FirstPartyOrgs } from "./sell/activity.js";
 import { createSafeFetcher, type SafeFetcher } from "./sell/net.js";
 import { SellerProxy } from "./sell/proxy.js";
 import { registerSellRoutes } from "./sell/routes.js";
+
 import { foundingConfigFromEnv, SellerDirectory } from "./sell/sellers.js";
 
 type AppEnv = {
@@ -325,6 +326,7 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     }),
   );
 
+
   app.get("/openapi.json", (c) => c.json(openApiDocument));
   app.get("/v1/openapi.json", (c) => c.json(openApiDocument));
 
@@ -375,12 +377,18 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     }
     if (isPublicRoute(c.req.method, c.req.path)) {
       if (limits) {
-        const rule = isAuthRoute(c.req.method, c.req.path)
-          ? limits.auth
-          : c.req.path === "/v1/waitlist"
-            ? limits.waitlist
-            : limits.publicRead;
-        const bucket = isAuthRoute(c.req.method, c.req.path) ? "auth" : c.req.path === "/v1/waitlist" ? "waitlist" : "public";
+        let rule = limits.publicRead;
+        let bucket = "public";
+        if (isAnonymousAuthRoute(c.req.method, c.req.path)) {
+          rule = limits.anonymous;
+          bucket = "anonymous";
+        } else if (isAuthRoute(c.req.method, c.req.path)) {
+          rule = limits.auth;
+          bucket = "auth";
+        } else if (c.req.path === "/v1/waitlist") {
+          rule = limits.waitlist;
+          bucket = "waitlist";
+        }
         const blocked = limit(c, `${bucket}:${address}`, rule);
         if (blocked) return blocked;
       }
@@ -536,8 +544,29 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     return c.json(result);
   });
 
+  /** Instant sandbox org without email. Rate-limited per IP more tightly than email signup. */
+  app.post("/v1/accounts/anonymous", async (c) => {
+    const result = await service.createAnonymousAccount();
+    return c.json(result, 201);
+  });
+
   app.get("/v1/account", async (c) => {
     const result = await service.getAccount(c.get("orgId"));
+    return c.json(result);
+  });
+
+  app.post("/v1/account/claim", async (c) => {
+    const input = parseCreateAccount(await readJson(c));
+    const result = await service.claimAccount(c.get("orgId"), input);
+    return c.json(result, 201);
+  });
+
+  app.post("/v1/account/api-key/rotate", async (c) => {
+    const token = /^Bearer\s+(\S+)$/.exec(c.req.header("authorization") ?? "")?.[1] ?? "";
+    if (!token || looksLikeJwt(token)) {
+      throw new ServiceError(400, "invalid_request", "Only Roster API keys can be rotated. Sign in with a sandbox key.");
+    }
+    const result = await service.rotateApiKey(token);
     return c.json(result);
   });
 
@@ -972,9 +1001,14 @@ function isAuthRoute(method: string, path: string): boolean {
     method === "POST" &&
     (path === "/v1/organizations" ||
       path === "/v1/accounts" ||
+      path === "/v1/accounts/anonymous" ||
       path === "/v1/accounts/login" ||
       path === "/v1/accounts/session")
   );
+}
+
+function isAnonymousAuthRoute(method: string, path: string): boolean {
+  return method === "POST" && path === "/v1/accounts/anonymous";
 }
 
 /**

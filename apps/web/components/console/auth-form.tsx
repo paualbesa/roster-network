@@ -1,27 +1,47 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createRosterClient, rosterErrorMessage } from "@/lib/roster-client";
 import { createConsoleSupabase } from "@/lib/supabase/browser";
 import { readPublicSupabaseEnv } from "@/lib/supabase/config";
 import { describeSignedInAccount, humanOAuthSignIn, oauthRedirectTo, readHumanAuthProvider } from "@/lib/supabase/oauth";
-import { ApiKeyPanel } from "./api-key-panel";
 import { useSandboxSession } from "./session";
 import { ConsolePage, StatusLine, buttonClass, fieldClass, ghostClass } from "./ui";
 
 export function AuthForm({ mode }: { mode: "signup" | "login" }) {
-  const { session, ready, linking, save, acknowledge, clear } = useSandboxSession();
+  const router = useRouter();
+  const { session, ready, linking, save, clear } = useSandboxSession();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [freshKey, setFreshKey] = useState<string | null>(null);
+  const [tab, setTab] = useState<"instant" | "email">(mode === "login" ? "email" : "instant");
   const signup = mode === "signup";
   const supabaseConfigured =
     readPublicSupabaseEnv({
       NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
       NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     }) !== null;
+
+  async function finish(apiKey: string, email: string, provider: "email" | "github" | "google" | "anonymous") {
+    save({ apiKey, email, revealed: false, provider });
+    router.push("/console/keys");
+  }
+
+  async function onInstant() {
+    setPending(true);
+    setError("");
+    setNote("");
+    try {
+      const account = await createRosterClient().anonymous();
+      await finish(account.apiKey, "", "anonymous");
+    } catch (cause) {
+      setError(readableAuthError(cause));
+    } finally {
+      setPending(false);
+    }
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -52,8 +72,7 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
           }
           const account = await createRosterClient().adoptSession(signedUp.session.access_token);
           const provider = readHumanAuthProvider(signedUp.session.user) ?? "email";
-          save({ apiKey: account.apiKey, email: account.email, revealed: false, provider });
-          setFreshKey(account.apiKey);
+          await finish(account.apiKey, account.email, provider === "anonymous" ? "email" : provider);
           return;
         }
         const { data: signedIn, error: authError } = await supabase.auth.signInWithPassword({
@@ -64,16 +83,41 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
         if (!signedIn.session) throw new Error("Supabase did not return a session.");
         const account = await createRosterClient().adoptSession(signedIn.session.access_token);
         const provider = readHumanAuthProvider(signedIn.session.user) ?? "email";
-        save({ apiKey: account.apiKey, email: account.email, revealed: false, provider });
-        setFreshKey(account.apiKey);
+        await finish(account.apiKey, account.email, provider === "anonymous" ? "email" : provider);
         return;
       }
       const client = createRosterClient();
       const account = signup
         ? await client.signup({ email, password, ...(name.trim() ? { name } : {}) })
         : await client.login({ email, password });
-      save({ apiKey: account.apiKey, email: account.email, revealed: false, provider: "email" });
-      setFreshKey(account.apiKey);
+      await finish(account.apiKey, account.email, "email");
+    } catch (cause) {
+      setError(readableAuthError(cause));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function onMagicLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const email = String(data.get("magic-email") ?? "").trim();
+    if (!email) {
+      setError("Enter an email for the magic link.");
+      return;
+    }
+    setPending(true);
+    setError("");
+    setNote("");
+    try {
+      const supabase = createConsoleSupabase();
+      if (!supabase) throw new Error("Magic link needs Supabase Auth on this site.");
+      const { error: authError } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: oauthRedirectTo(window.location.origin) },
+      });
+      if (authError) throw authError;
+      setNote("Check your inbox for the sign-in link.");
     } catch (cause) {
       setError(readableAuthError(cause));
     } finally {
@@ -82,6 +126,7 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
   }
 
   async function onOAuth(provider: "github" | "google") {
+    if (!supabaseConfigured) return;
     setPending(true);
     setError("");
     setNote("");
@@ -102,7 +147,7 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
       <ConsolePage
         eyebrow="Account"
         title="Restoring your session."
-        lede="Checking this browser for a GitHub or Google sign-in. Agents are not signed in here."
+        lede="Checking this browser for an existing sandbox key or OAuth session."
       >
         <StatusLine tone="muted">Restoring your session…</StatusLine>
       </ConsolePage>
@@ -111,57 +156,18 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
 
   if (session) {
     const account = describeSignedInAccount(session);
-    const key = freshKey ?? (!session.revealed ? session.apiKey : null);
     return (
       <ConsolePage eyebrow="Account" title="You are signed in." lede={account.headline}>
-        <div className="grid gap-10 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
-          <div className="flex flex-col gap-6">
-            <section className="border border-line/10 bg-panel p-6" aria-labelledby="signed-in-heading">
-              <p className="font-mono text-[11px] tracking-[0.18em] text-brass uppercase">Signed in</p>
-              <h2 id="signed-in-heading" className="mt-3 font-serif text-3xl tracking-[-0.03em]">
-                {account.headline}
-              </h2>
-              <dl className="mt-5 space-y-3 text-sm">
-                <div>
-                  <dt className="text-muted">Email</dt>
-                  <dd className="mt-1 text-paper">{account.email || "No email on this session"}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted">Provider</dt>
-                  <dd className="mt-1 text-paper">{account.providerLabel ?? "Sandbox session"}</dd>
-                </div>
-              </dl>
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                <Link href="/console/dashboard" className={buttonClass}>
-                  Continue to dashboard
-                </Link>
-                <button type="button" className={ghostClass} onClick={clear}>
-                  Sign out
-                </button>
-              </div>
-              <p className="mt-4 text-xs leading-5 text-muted">
-                This is a human account. Agents do not use email or a password. They call the API with the sandbox key as{" "}
-                <code className="font-mono text-paper">ROSTER_API_KEY</code>.
-              </p>
-            </section>
-            {key ? (
-              <ApiKeyPanel
-                apiKey={key}
-                onHide={() => {
-                  acknowledge();
-                  setFreshKey(null);
-                }}
-              />
-            ) : null}
-          </div>
-          <aside className="text-sm leading-6 text-muted">
-            <p>The sandbox treasury is mock USDC. Sign out clears this browser and the Supabase session.</p>
-            <p className="mt-4">
-              <Link href="/console/guide" className="text-brass underline decoration-brass/40 underline-offset-4">
-                MCP and OpenAPI tips
-              </Link>
-            </p>
-          </aside>
+        <div className="flex flex-col gap-4 sm:flex-row">
+          <Link href="/console/keys" className={buttonClass}>
+            Your keys
+          </Link>
+          <Link href="/console/dashboard" className={ghostClass}>
+            Dashboard
+          </Link>
+          <button type="button" className={ghostClass} onClick={clear}>
+            Sign out
+          </button>
         </div>
       </ConsolePage>
     );
@@ -169,91 +175,151 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
 
   return (
     <ConsolePage
-      eyebrow={signup ? "Signup" : "Login"}
-      title={signup ? "Open a sandbox account." : "Return to your sandbox account."}
-      lede="Humans sign in with GitHub or Google. The sandbox API key stays in this browser. Agents keep using that key."
+      eyebrow="Console"
+      title={signup ? "Start in one click." : "Welcome back."}
+      lede="Get a sandbox API key for agents, or sign in as a human. Mock USDC only. Keys are hashed on the server and shown in full only once."
     >
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
-        <form
-          method="post"
-          action={signup ? "/console" : "/console/login"}
-          onSubmit={onSubmit}
-          className="flex flex-col gap-4 border border-line/10 bg-panel p-6"
-        >
-          {supabaseConfigured ? (
-            <div className="flex flex-col gap-3">
-              <button type="button" className={buttonClass} disabled={pending} onClick={() => void onOAuth("github")}>
-                Continue with GitHub
-              </button>
-              <button type="button" className={buttonClass} disabled={pending} onClick={() => void onOAuth("google")}>
-                Continue with Google
-              </button>
-              <p className="text-xs leading-5 text-muted">
-                GitHub and Google use Supabase Auth. Email below is a human fallback. Agents do not sign in on this form.
-              </p>
-            </div>
-          ) : (
-            <p className="text-xs leading-5 text-muted">
-              GitHub and Google are off until this site is built with NEXT_PUBLIC_SUPABASE_URL and
-              NEXT_PUBLIC_SUPABASE_ANON_KEY. Email and password still open a sandbox account for a human.
-            </p>
-          )}
-          <div className="flex flex-col gap-2">
-            <label htmlFor="email" className="text-sm text-paper">
-              Email
-            </label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              maxLength={254}
-              placeholder="ada@example.com"
-              className={fieldClass}
-            />
-          </div>
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-6 border border-line/10 bg-panel p-6">
           {signup ? (
-            <div className="flex flex-col gap-2">
-              <label htmlFor="name" className="text-sm text-paper">
-                Display name <span className="text-muted">(optional)</span>
-              </label>
-              <input
-                id="name"
-                name="name"
-                type="text"
-                autoComplete="name"
-                maxLength={80}
-                placeholder="Ada"
-                className={fieldClass}
-              />
+            <div className="flex gap-2 border-b border-line/10 pb-3">
+              <button
+                type="button"
+                className={tab === "instant" ? "text-sm text-brass" : "text-sm text-muted hover:text-paper"}
+                onClick={() => setTab("instant")}
+              >
+                Instant key
+              </button>
+              <button
+                type="button"
+                className={tab === "email" ? "text-sm text-brass" : "text-sm text-muted hover:text-paper"}
+                onClick={() => setTab("email")}
+              >
+                Email
+              </button>
             </div>
           ) : null}
-          <div className="flex flex-col gap-2">
-            <label htmlFor="password" className="text-sm text-paper">
-              Password
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete={signup ? "new-password" : "current-password"}
-              required
-              minLength={8}
-              maxLength={128}
-              className={fieldClass}
-            />
-          </div>
-          <button type="submit" className={supabaseConfigured ? ghostClass : buttonClass} disabled={pending}>
-            {pending ? "Contacting sandbox…" : signup ? "Create sandbox account" : "Sign in with email"}
-          </button>
-          <p className="text-xs leading-5 text-muted">
-            {supabaseConfigured
-              ? "Sandbox only. Mock USDC. Email and password go to Supabase Auth for a human. Agents keep using API keys."
-              : "Sandbox only. Mock USDC. The password is sent to the Roster API and stored as a hash. This form does not take a card."}
-          </p>
+
+          {signup && tab === "instant" ? (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm leading-6 text-muted">
+                For agents and developers who want to call the API without creating an account. You can add an email later
+                from <span className="text-paper">Your keys</span>.
+              </p>
+              <button type="button" className={buttonClass} disabled={pending} onClick={() => void onInstant()}>
+                {pending ? "Creating key…" : "Get an API key instantly"}
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-3">
+                <OAuthButton
+                  label="Continue with GitHub"
+                  disabled={pending || !supabaseConfigured}
+                  {...(!supabaseConfigured
+                    ? {
+                        title:
+                          "GitHub sign-in needs Supabase OAuth on this deployment (Site URL + GitHub provider).",
+                      }
+                    : {})}
+                  onClick={() => void onOAuth("github")}
+                />
+                <OAuthButton
+                  label="Continue with Google"
+                  disabled={pending || !supabaseConfigured}
+                  {...(!supabaseConfigured
+                    ? {
+                        title:
+                          "Google sign-in needs Supabase OAuth on this deployment (Site URL + Google provider).",
+                      }
+                    : {})}
+                  onClick={() => void onOAuth("google")}
+                />
+                {!supabaseConfigured ? (
+                  <p className="text-xs leading-5 text-muted">
+                    GitHub and Google stay available in the UI but are disabled until OAuth is configured. Email and
+                    password still work against the Roster API.
+                  </p>
+                ) : null}
+              </div>
+
+              {supabaseConfigured ? (
+                <form onSubmit={onMagicLink} className="flex flex-col gap-3 border-t border-line/10 pt-4">
+                  <label htmlFor="magic-email" className="text-sm text-paper">
+                    Magic link
+                  </label>
+                  <input
+                    id="magic-email"
+                    name="magic-email"
+                    type="email"
+                    autoComplete="email"
+                    maxLength={254}
+                    placeholder="ada@example.com"
+                    className={fieldClass}
+                  />
+                  <button type="submit" className={ghostClass} disabled={pending}>
+                    {pending ? "Sending…" : "Email me a sign-in link"}
+                  </button>
+                </form>
+              ) : null}
+
+              <form method="post" onSubmit={onSubmit} className="flex flex-col gap-4 border-t border-line/10 pt-4">
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="email" className="text-sm text-paper">
+                    Email
+                  </label>
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    maxLength={254}
+                    placeholder="ada@example.com"
+                    className={fieldClass}
+                  />
+                </div>
+                {signup ? (
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="name" className="text-sm text-paper">
+                      Display name <span className="text-muted">(optional)</span>
+                    </label>
+                    <input
+                      id="name"
+                      name="name"
+                      type="text"
+                      autoComplete="name"
+                      maxLength={80}
+                      placeholder="Ada"
+                      className={fieldClass}
+                    />
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="password" className="text-sm text-paper">
+                    Password
+                  </label>
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autoComplete={signup ? "new-password" : "current-password"}
+                    required
+                    minLength={8}
+                    maxLength={128}
+                    className={fieldClass}
+                  />
+                </div>
+                <button type="submit" className={buttonClass} disabled={pending}>
+                  {pending ? "Contacting sandbox…" : signup ? "Create account" : "Sign in with email"}
+                </button>
+              </form>
+            </>
+          )}
+
           {note ? <StatusLine tone="ok">{note}</StatusLine> : null}
           {error ? <StatusLine tone="error">{error}</StatusLine> : null}
+
           <p className="text-sm text-muted">
             {signup ? (
               <>
@@ -266,24 +332,48 @@ export function AuthForm({ mode }: { mode: "signup" | "login" }) {
               <>
                 New here?{" "}
                 <Link href="/console" className="text-brass underline decoration-brass/40 underline-offset-4">
-                  Create an account
+                  Get a key
                 </Link>
               </>
             )}
           </p>
-        </form>
+        </div>
         <aside className="text-sm leading-6 text-muted">
-          <p>
-            After signup, fund a buyer from the treasury, publish the sample catalog, bind a seller agent, then hire from the marketplace.
-          </p>
+          <p>After you have a key, open Your keys for MCP configs, SDK snippets, and a live <code className="text-paper">need</code> call.</p>
           <p className="mt-4">
             <Link href="/console/guide" className="text-brass underline decoration-brass/40 underline-offset-4">
-              MCP and OpenAPI tips
+              Console guide
             </Link>
           </p>
         </aside>
       </div>
     </ConsolePage>
+  );
+}
+
+function OAuthButton({
+  label,
+  disabled,
+  title,
+  onClick,
+}: {
+  label: string;
+  disabled: boolean;
+  title?: string | undefined;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={disabled && title ? `${ghostClass} cursor-not-allowed opacity-60` : buttonClass}
+      disabled={disabled}
+      {...(title ? { title } : {})}
+      aria-disabled={disabled}
+      onClick={onClick}
+    >
+      {label}
+      {disabled && title ? <span className="sr-only">. {title}</span> : null}
+    </button>
   );
 }
 

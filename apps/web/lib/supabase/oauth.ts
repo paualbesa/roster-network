@@ -4,7 +4,7 @@ export const HUMAN_OAUTH_PROVIDERS = ["github", "google"] as const;
 export type HumanOAuthProvider = (typeof HUMAN_OAUTH_PROVIDERS)[number];
 
 /** Stored only as a label on the sandbox session. Not an authorization claim. */
-export type HumanAuthProvider = HumanOAuthProvider | "email";
+export type HumanAuthProvider = HumanOAuthProvider | "email" | "anonymous";
 
 export interface AuthUserLike {
   app_metadata?: { provider?: unknown } | null;
@@ -86,17 +86,24 @@ export function describeSignedInAccount(session: { email: string; provider?: str
   const provider = isHumanAuthProvider(session.provider) ? session.provider : null;
   const providerLabel = provider === null ? null : providerLabelFor(provider);
   const who = email || "this browser";
-  const headline =
-    provider === "github" || provider === "google" ? `Signed in as ${who} with ${providerLabel}` : `Signed in as ${who}`;
+  let headline: string;
+  if (provider === "anonymous" || (!email && provider !== "github" && provider !== "google")) {
+    headline = "Anonymous sandbox key in this browser";
+  } else if (provider === "github" || provider === "google") {
+    headline = `Signed in as ${who} with ${providerLabel}`;
+  } else {
+    headline = `Signed in as ${who}`;
+  }
   return { email, provider, providerLabel, headline };
 }
 
 function providerLabelFor(provider: HumanAuthProvider): string {
   if (provider === "github") return "GitHub";
   if (provider === "google") return "Google";
+  if (provider === "anonymous") return "Anonymous";
   return "Email";
 }
 
 function isHumanAuthProvider(value: unknown): value is HumanAuthProvider {
-  return value === "github" || value === "google" || value === "email";
+  return value === "github" || value === "google" || value === "email" || value === "anonymous";
 }

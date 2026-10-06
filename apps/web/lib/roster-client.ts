@@ -29,6 +29,8 @@ export interface AccountSnapshot {
   organizationId: string;
   balanceUsdc: string;
   address: string;
+  claimable: boolean;
+  anonymous: boolean;
 }
 
 export interface TreasurySnapshot {
@@ -200,8 +202,25 @@ export function createRosterClient(options: RosterClientOptions = {}) {
     adoptSession(accessToken: string): Promise<SignupResult> {
       return request<unknown>("POST", "/v1/accounts/session", undefined, false, accessToken).then(readSignup);
     },
+    /** Instant sandbox org with no email. Key shown once. */
+    anonymous(): Promise<SignupResult> {
+      return request<unknown>("POST", "/v1/accounts/anonymous", {}, false).then(readAnonymousSignup);
+    },
     account(): Promise<AccountSnapshot> {
       return request<unknown>("GET", "/v1/account").then(readAccount);
+    },
+    claim(input: { email: string; password: string; name?: string }): Promise<SignupResult> {
+      const body: Record<string, string> = { email: input.email.trim(), password: input.password };
+      if (input.name?.trim()) body.name = input.name.trim();
+      return request<unknown>("POST", "/v1/account/claim", body).then(readSignup);
+    },
+    rotateKey(): Promise<{ apiKey: string }> {
+      return request<unknown>("POST", "/v1/account/api-key/rotate").then((payload) => {
+        if (!isRecord(payload) || typeof payload.apiKey !== "string" || !payload.apiKey.trim()) {
+          throw invalidResponse("Rotate response did not include an API key.");
+        }
+        return { apiKey: payload.apiKey.trim() };
+      });
     },
     treasury(): Promise<TreasurySnapshot> {
       return request<unknown>("GET", "/v1/treasury").then(readTreasury);
@@ -375,20 +394,55 @@ function readSignup(payload: unknown): SignupResult {
   };
 }
 
+function readAnonymousSignup(payload: unknown): SignupResult {
+  if (!isRecord(payload) || typeof payload.apiKey !== "string" || !payload.apiKey.trim()) {
+    throw invalidResponse("The account response did not include an API key.");
+  }
+  const organization = payload.organization;
+  if (!isRecord(organization) || typeof organization.id !== "string") {
+    throw invalidResponse("The anonymous response did not include an organization.");
+  }
+  const treasury = payload.treasury;
+  const balance = isRecord(treasury) && typeof treasury.balanceUsdc === "string" ? treasury.balanceUsdc : "";
+  return {
+    apiKey: payload.apiKey.trim(),
+    email: "",
+    userId: "",
+    organizationId: organization.id,
+    displayName: typeof organization.name === "string" ? organization.name : "Anonymous sandbox",
+    treasuryBalanceUsdc: balance,
+  };
+}
+
 function readAccount(payload: unknown): AccountSnapshot {
-  if (!isRecord(payload) || !isRecord(payload.user) || !isRecord(payload.treasury)) {
+  if (!isRecord(payload) || !isRecord(payload.treasury) || !isRecord(payload.organization)) {
     throw invalidResponse("Account response was incomplete.");
   }
   const wallet = payload.treasury.wallet;
-  if (typeof payload.user.email !== "string" || typeof payload.user.organizationId !== "string") {
-    throw invalidResponse("Account response was incomplete.");
-  }
+  const organizationId =
+    typeof payload.organization.id === "string"
+      ? payload.organization.id
+      : isRecord(payload.user) && typeof payload.user.organizationId === "string"
+        ? payload.user.organizationId
+        : "";
+  if (!organizationId) throw invalidResponse("Account response was incomplete.");
+  const claimable = payload.claimable === true || payload.user === null;
+  const user = payload.user;
+  const email = isRecord(user) && typeof user.email === "string" ? user.email : "";
+  const displayName =
+    isRecord(user) && typeof user.displayName === "string"
+      ? user.displayName
+      : typeof payload.organization.name === "string"
+        ? payload.organization.name
+        : "Anonymous sandbox";
   return {
-    email: payload.user.email,
-    displayName: typeof payload.user.displayName === "string" ? payload.user.displayName : payload.user.email,
-    organizationId: payload.user.organizationId,
+    email,
+    displayName,
+    organizationId,
     balanceUsdc: typeof payload.treasury.balanceUsdc === "string" ? payload.treasury.balanceUsdc : "",
     address: isRecord(wallet) && typeof wallet.address === "string" ? wallet.address : "",
+    claimable,
+    anonymous: payload.anonymous === true || claimable,
   };
 }
 

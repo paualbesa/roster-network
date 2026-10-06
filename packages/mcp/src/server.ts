@@ -231,6 +231,32 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
   );
 
   server.registerTool(
+    "roster_listing",
+    {
+      title: "Roster listing details",
+      description: "Fetch one capability listing by id (schemas, price, tags, data product metadata).",
+      inputSchema: {
+        listingId: z.string().describe("Listing id from roster_need or roster_search."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ listingId }) => runTool(() => client.registry.get(listingId)),
+  );
+
+  server.registerTool(
+    "roster_job",
+    {
+      title: "Roster job status",
+      description: "Read one marketplace job by id: status, amounts, escrow, validation errors.",
+      inputSchema: {
+        jobId: z.string().describe("Job id from roster_buy or roster_create_job."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ jobId }) => runTool(() => client.jobs.get(jobId)),
+  );
+
+  server.registerTool(
     "roster_passport",
     {
       title: "Read a Roster passport",
