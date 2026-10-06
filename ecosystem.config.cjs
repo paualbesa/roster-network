@@ -65,25 +65,49 @@ function supabaseWebEnv() {
 
 /** Commit reported by /health. Set by scripts/deploy-roster-api.sh. */
 
-/** Devnet settlement rail. Only whitelisted keys from solana-devnet.env / shell. */
+/** Devnet settlement rail. Loads roster-data/solana-devnet.env when present. */
 function solanaDevnetEnv() {
-  const rail = trimmed(process.env.ROSTER_WALLET) || trimmed(process.env.ROSTER_RAIL);
+  const filePath = path.join(dataDir, "solana-devnet.env");
+  const fromFile = {};
+  if (fs.existsSync(filePath)) {
+    for (const line of fs.readFileSync(filePath, "utf8").split("\n")) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine || trimmedLine.startsWith("#")) continue;
+      const eq = trimmedLine.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmedLine.slice(0, eq).trim();
+      let value = trimmedLine.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (key) fromFile[key] = value;
+    }
+  }
+  const rail =
+    trimmed(process.env.ROSTER_WALLET) ||
+    trimmed(process.env.ROSTER_RAIL) ||
+    trimmed(fromFile.ROSTER_WALLET) ||
+    trimmed(fromFile.ROSTER_RAIL);
   if (rail !== "solana-devnet" && rail !== "solana_devnet" && rail !== "devnet") return {};
+  const pick = (key, fallback) =>
+    trimmed(process.env[key]) || trimmed(fromFile[key]) || fallback || "";
   const env = {
     ROSTER_WALLET: "solana-devnet",
     ROSTER_RAIL: "solana-devnet",
-    ROSTER_SOLANA_CLUSTER: trimmed(process.env.ROSTER_SOLANA_CLUSTER) || "devnet",
+    ROSTER_SOLANA_CLUSTER: pick("ROSTER_SOLANA_CLUSTER", "devnet"),
   };
-  const keyFile = trimmed(process.env.ROSTER_FEE_PAYER_KEYPAIR);
-  const pubkey = trimmed(process.env.ROSTER_FEE_PAYER_PUBKEY);
-  const rpc = trimmed(process.env.SOLANA_RPC_URL);
-  const mint = trimmed(process.env.ROSTER_SOLANA_MINT_STATE);
+  const keyFile = pick("ROSTER_FEE_PAYER_KEYPAIR", path.join(dataDir, "solana-devnet-fee-payer.json"));
+  const pubkey = pick("ROSTER_FEE_PAYER_PUBKEY", "");
+  const rpc = pick("SOLANA_RPC_URL", "https://api.devnet.solana.com");
+  const mint = pick("ROSTER_SOLANA_MINT_STATE", path.join(dataDir, "solana-devnet-mint.json"));
   if (keyFile) env.ROSTER_FEE_PAYER_KEYPAIR = keyFile;
   if (pubkey) env.ROSTER_FEE_PAYER_PUBKEY = pubkey;
   if (rpc) env.SOLANA_RPC_URL = rpc;
   if (mint) env.ROSTER_SOLANA_MINT_STATE = mint;
-  // Never forward ROSTER_FEE_PAYER_SECRET from a random shell into PM2 unless explicitly set for this rail.
-  const secret = trimmed(process.env.ROSTER_FEE_PAYER_SECRET);
+  const secret = pick("ROSTER_FEE_PAYER_SECRET", "");
   if (secret) env.ROSTER_FEE_PAYER_SECRET = secret;
   return env;
 }
