@@ -10,6 +10,8 @@ const PUBLIC_PATHS: { path: string; priority: number; changeFrequency: "weekly" 
   { path: "/docs", priority: 0.8, changeFrequency: "weekly" },
   { path: "/console", priority: 0.7, changeFrequency: "monthly" },
   { path: "/console/guide", priority: 0.6, changeFrequency: "monthly" },
+  { path: "/llms.txt", priority: 0.5, changeFrequency: "monthly" },
+  { path: "/.well-known/mcp", priority: 0.5, changeFrequency: "monthly" },
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {

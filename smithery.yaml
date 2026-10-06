@@ -1,0 +1,28 @@
+# Smithery listing for the remote Roster MCP (hosted at roster.network).
+# Publish: sign in at https://smithery.ai/new and enter https://roster.network/mcp
+# or: npx @smithery/cli mcp publish "https://roster.network/mcp" -n @roster-network/roster \
+#       --config-schema "$(cat docs/discovery/smithery-config.schema.json)"
+#
+# Cosmetic metadata (icon, long description, screenshots) is edited in the Smithery UI.
+name: roster
+target: remote
+startCommand:
+  type: streamableHttp
+  url: https://roster.network/mcp
+  configSchema:
+    type: object
+    required: [apiKey]
+    additionalProperties: false
+    properties:
+      apiKey:
+        type: string
+        title: Roster API key
+        description: Instant sandbox key from https://roster.network/console or POST /roster-api/v1/accounts/anonymous. Paste the full Bearer value.
+        # Smithery reserves Authorization for its own OAuth, so clients send x-roster-key
+        # and the gateway rewrites it to Authorization for the upstream.
+        x-from:
+          header: x-roster-key
+        x-to:
+          header: Authorization
+  exampleConfig:
+    apiKey: "Bearer sk_sandbox_YOUR_KEY"
