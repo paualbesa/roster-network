@@ -54,7 +54,26 @@ chmod 700 "$DATA_DIR"
 
 # Sandbox only. Do not forward a shell key or a mainnet switch into PM2.
 # ROSTER_ADMIN_TOKEN is kept when the operator exported it. The value is not printed.
-unset ROSTER_API_KEY ALBESA_API_KEY ROSTER_WALLET ALBESA_WALLET ALBESA_MODE || true
+# Optional Devnet rail: source roster-data/solana-devnet.env when present.
+SOLANA_ENV="$DATA_DIR/solana-devnet.env"
+if [ -f "$SOLANA_ENV" ]; then
+  # shellcheck disable=SC1090
+  set -a
+  # shellcheck disable=SC1091
+  source "$SOLANA_ENV"
+  set +a
+  echo "note: sourced solana-devnet.env (rail=${ROSTER_WALLET:-${ROSTER_RAIL:-unset}})"
+fi
+unset ROSTER_API_KEY ALBESA_API_KEY ALBESA_MODE || true
+case "${ROSTER_WALLET:-${ROSTER_RAIL:-mock}}" in
+  solana-devnet|solana_devnet|devnet)
+    export ROSTER_WALLET=solana-devnet
+    export ROSTER_RAIL=solana-devnet
+    ;;
+  *)
+    unset ROSTER_WALLET ALBESA_WALLET ROSTER_RAIL || true
+    ;;
+esac
 if [ -z "${ROSTER_ADMIN_TOKEN:-}" ]; then
   echo "note: ROSTER_ADMIN_TOKEN is unset, so /v1/admin stays disabled"
 else

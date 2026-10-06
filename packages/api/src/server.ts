@@ -2,11 +2,12 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { resolveRuntimeMode, resolveWalletRail } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
-import { createApp, type AppHttpOptions } from "./app.js";
+import { createApp, warmSolanaDevnetRail, type AppHttpOptions } from "./app.js";
 import { LocalKycDocumentStore } from "./kyc.js";
 import {
   appDataCatalog,
   bootstrapDataProducts,
+  appService,
   bootstrapSandboxFleet,
   initSellers,
   resolveFleetBuyerIntervalMin,
@@ -88,6 +89,11 @@ async function main(): Promise<void> {
   }
   const { attachRosterMcp } = await import("../../mcp/dist/index.js");
   attachRosterMcp(app as unknown as Parameters<typeof attachRosterMcp>[0], { mode });
+  if (walletRail === "solana-devnet") {
+    const service = appService(app);
+    if (service) await warmSolanaDevnetRail(service.walletProvider);
+  }
+
   serve({ fetch: app.fetch, hostname, port }, (info) => {
     console.log(
       `Roster API on http://${hostname}:${info.port.toString()} (${mode}, ${walletRail} USDC, ${where}, rate limits ${http.rateLimit ? "on" : "off"}, SLA sweep ${expireIntervalMs > 0 ? `${expireIntervalMs.toString()} ms` : "off"})`,

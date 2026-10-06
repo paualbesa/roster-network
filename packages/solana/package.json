@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@albesa/core": "workspace:*",
+    "@solana/spl-token": "0.4.13",
     "@solana/web3.js": "^1.98.4"
   },
   "devDependencies": {

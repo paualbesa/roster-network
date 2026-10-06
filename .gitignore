@@ -17,3 +17,8 @@ rosty.env
 **/rosty.env
 rosty-state.json
 **/rosty-state.json
+solana-devnet.env
+solana-devnet-fee-payer.json
+solana-devnet-mint.json
+**/solana-devnet*.json
+**/solana-devnet.env

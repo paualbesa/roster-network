@@ -1,3 +1,4 @@
+import { looksLikeSolanaSignature, solanaExplorerTxUrl } from "@albesa/solana";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createId, EscrowSchemaError, parseResultSchema, parseUsdc } from "@albesa/core";
@@ -83,6 +84,10 @@ export interface StoredJob {
   input: unknown;
   createdAt: string;
   settledAt: string | null;
+  /** Settlement rail chain id (optional on older job files). */
+  chain?: string;
+  lockProviderRef?: string;
+  settlementProviderRef?: string | null;
 }
 
 export interface JobView {
@@ -105,6 +110,11 @@ export interface JobView {
   takeRateUsdc: string;
   sellerNetUsdc: string;
   holdAddress: string;
+  chain: string;
+  lockProviderRef: string;
+  settlementProviderRef: string | null;
+  /** Solana Explorer URL when settlement ref is a real Devnet signature. */
+  settlementExplorerUrl: string | null;
   result: unknown;
   validationErrors: string[] | null;
   latencyMs: number | null;
@@ -551,6 +561,9 @@ export class JobOrchestrator {
       input: input.input,
       createdAt,
       settledAt: null,
+      chain: locked.escrow.chain,
+      lockProviderRef: locked.escrow.lockProviderRef,
+      settlementProviderRef: null,
     };
     this.jobs.saveJob(job);
     await this.scheduleAutofill(job, binding);
@@ -691,6 +704,9 @@ export class JobOrchestrator {
         scoreAfter: after.score,
       },
       settledAt: settled.escrow.settledAt,
+      chain: settled.escrow.chain,
+      lockProviderRef: settled.escrow.lockProviderRef,
+      settlementProviderRef: settled.escrow.settlementProviderRef,
     };
     this.jobs.saveJob(next);
     return { job: await this.toView(next) };
@@ -731,6 +747,9 @@ export class JobOrchestrator {
         scoreAfter: after.score,
       },
       settledAt: settled.escrow.settledAt,
+      chain: settled.escrow.chain,
+      lockProviderRef: settled.escrow.lockProviderRef,
+      settlementProviderRef: settled.escrow.settlementProviderRef,
     };
     this.jobs.saveJob(next);
     return this.toView(next);
@@ -834,6 +853,13 @@ export class JobOrchestrator {
       takeRateUsdc: live.escrow.takeRateUsdc,
       sellerNetUsdc: live.escrow.sellerNetUsdc,
       holdAddress: live.escrow.holdAddress,
+      chain: live.escrow.chain,
+      lockProviderRef: live.escrow.lockProviderRef,
+      settlementProviderRef: live.escrow.settlementProviderRef,
+      settlementExplorerUrl:
+        looksLikeSolanaSignature(live.escrow.settlementProviderRef)
+          ? solanaExplorerTxUrl(live.escrow.settlementProviderRef!, live.escrow.chain === "solana-devnet" ? "devnet" : "mock")
+          : null,
       result: job.result,
       validationErrors: job.validationErrors ? job.validationErrors.slice() : null,
       latencyMs: job.latencyMs,

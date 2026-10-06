@@ -26,10 +26,10 @@ export interface TransferResult {
 /**
  * Settlement adapter. The API defaults to the mock rail.
  * `base-usdc` is the in-process Base simulator. `solana-usdc` is a sandbox stub.
- * Adapters must not require committed keys, mnemonics, or seeds.
+ * `solana-devnet` settles on Solana Devnet (test SPL / test-USDC). Secrets stay on the host.
  */
 export interface WalletProvider {
-  readonly id: "mock" | "base-usdc" | "solana-usdc";
+  readonly id: "mock" | "base-usdc" | "solana-usdc" | "solana-devnet";
   readonly chain: ChainId;
   createAddress(ownerRef: string): Promise<{ address: string }>;
   getBalance(address: string): Promise<string>;

@@ -85,6 +85,9 @@ describe("resolveWalletRail", () => {
     expect(resolveWalletRail({ ROSTER_WALLET: "base-sim" })).toBe("base-sim");
     expect(resolveWalletRail({ ALBESA_WALLET: "BASE-SIM" })).toBe("base-sim");
     expect(resolveWalletRail({ ROSTER_WALLET: "solana-sim", ALBESA_WALLET: "solana-sim" })).toBe("solana-sim");
+    expect(resolveWalletRail({ ROSTER_WALLET: "solana-devnet" })).toBe("solana-devnet");
+    expect(resolveWalletRail({ ROSTER_RAIL: "solana-devnet" })).toBe("solana-devnet");
+    expect(() => createWalletProvider("solana-devnet")).toThrow(/fee-payer/);
     expect(createWalletProvider("mock")).toBeInstanceOf(MockWalletProvider);
     expect(createWalletProvider("base-sim").id).toBe("base-usdc");
     expect(createWalletProvider("base-sim").chain).toBe("base-sepolia-sim");
