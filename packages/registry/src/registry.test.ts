@@ -280,3 +280,16 @@ describe("browse order", () => {
     expect(listed).toHaveLength(2);
   });
 });
+
+describe("admin remove", () => {
+  it("hard-deletes a listing from the index", () => {
+    const registry = new CapabilityRegistry({ now: clock() });
+    const listing = registry.register("org_a", body());
+    expect(registry.get(listing.id)?.id).toBe(listing.id);
+    const removed = registry.remove(listing.id);
+    expect(removed.id).toBe(listing.id);
+    expect(registry.get(listing.id)).toBeNull();
+    expect(registry.list()).toHaveLength(0);
+    expect(() => registry.remove(listing.id)).toThrow(RegistryError);
+  });
+});

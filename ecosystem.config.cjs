@@ -6,6 +6,7 @@
  *   bash scripts/deploy-roster-web.sh
  *
  * roster-api  Roster HTTP API on 127.0.0.1:7001
+ * rosty       Discord bot (Rosty). bash scripts/deploy-rosty.sh
  *   Suggested Cloudflare hostname: api.roster.network → http://127.0.0.1:7001
  *   bash scripts/deploy-roster-api.sh
  *
@@ -70,6 +71,36 @@ function releaseEnv() {
 
 const dataDir = rosterDataDir();
 
+function loadRostyEnv() {
+  const envPath = path.join(dataDir, "rosty.env");
+  const env = {
+    NODE_ENV: "production",
+    TZ: "Europe/Madrid",
+    ROSTER_DATA_DIR: dataDir,
+    ROSTY_STATE_FILE: path.join(dataDir, "rosty-state.json"),
+    ROSTY_API_BASE: process.env.ROSTY_API_BASE || "http://127.0.0.1:7001",
+  };
+  if (!fs.existsSync(envPath)) return env;
+  const raw = fs.readFileSync(envPath, "utf8");
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key) env[key] = value;
+  }
+  return env;
+}
+
+
 module.exports = {
   apps: [
     {
@@ -130,6 +161,22 @@ module.exports = {
         ...supabaseServerEnv(),
         ...releaseEnv(),
       },
+    },
+    {
+      name: "rosty",
+      cwd: path.join(__dirname, "apps", "discord-bot"),
+      script: path.join(__dirname, "apps", "discord-bot", "dist", "index.js"),
+      interpreter: "node",
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      watch: false,
+      max_restarts: 100,
+      min_uptime: 8000,
+      restart_delay: 5000,
+      exp_backoff_restart_delay: 200,
+      max_memory_restart: "220M",
+      env: loadRostyEnv(),
     },
   ],
 };

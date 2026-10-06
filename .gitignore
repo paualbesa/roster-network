@@ -13,3 +13,7 @@ data/
 !.env.example
 *.log
 .DS_Store
+rosty.env
+**/rosty.env
+rosty-state.json
+**/rosty-state.json

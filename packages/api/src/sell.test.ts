@@ -276,6 +276,16 @@ describe("founding program", () => {
     now = new Date("2027-01-05T00:00:01Z");
     expect(sellers.takeRateBpsFor("org_a")).toBeNull();
   });
+
+  it("releases a founding seat when the seller profile is removed", async () => {
+    const sellers = new SellerDirectory(null, { limit: 2, days: 90 });
+    expect((await sellers.upsertProfile("org_a", { enrolFounding: true })).foundingNumber).toBe(1);
+    expect(sellers.foundingTaken()).toBe(1);
+    const removed = await sellers.removeProfile("org_a");
+    expect(removed?.foundingNumber).toBe(1);
+    expect(sellers.foundingTaken()).toBe(0);
+    expect((await sellers.upsertProfile("org_b", { enrolFounding: true })).foundingNumber).toBe(1);
+  });
 });
 
 describe("demand board", () => {

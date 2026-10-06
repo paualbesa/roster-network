@@ -3,7 +3,8 @@ import { addUsdc, type RuntimeMode, type WalletRail } from "@albesa/core";
 import type { CapabilityListing, CapabilityRegistry } from "@albesa/registry";
 import type { Context, Env, Hono } from "hono";
 import { appDataCatalog, bootstrapDataProducts, bootstrapSandboxFleet, SANDBOX_FLEET_ORG_NAME } from "./fleet.js";
-import type { JobOrchestrator, JobStatus, JobView, ListingSellerBinding } from "./jobs.js";
+import type { JobOrchestrator, JobStatus, JobStore, JobView, ListingSellerBinding } from "./jobs.js";
+import type { SellerDirectory } from "./sell/sellers.js";
 import {
   AgentFinanceService,
   ServiceError,
@@ -86,6 +87,8 @@ export interface AdminDeps {
   service: AgentFinanceService;
   registry: CapabilityRegistry;
   orchestrator: JobOrchestrator;
+  jobs: JobStore;
+  sellers: SellerDirectory;
   /** The Hono app `bootstrapSandboxFleet` was attached to. */
   appHandle: object;
   /**
@@ -388,6 +391,86 @@ export function registerAdminRoutes<E extends Env>(app: Hono<E>, deps: AdminDeps
     const fleet = await bootstrapSandboxFleet(deps.appHandle);
     const data = appDataCatalog(deps.appHandle) ? await bootstrapDataProducts(deps.appHandle) : null;
     return c.json({ fleet, data });
+  });
+
+  /**
+   * Hard-delete a capability listing. Releases the seller endpoint binding and,
+   * when the org has no remaining listings, drops its seller profile (founding seat).
+   */
+  app.delete("/v1/admin/listings/:id", async (c) => {
+    assertSandboxOps(deps.mode);
+    const id = c.req.param("id");
+    const listing = deps.registry.get(id);
+    if (!listing) {
+      throw new ServiceError(404, "not_found", "Capability listing not found.");
+    }
+    const removed = deps.registry.remove(id);
+    await deps.sellers.removeEndpoint(id);
+    deps.jobs.removeSeller(id);
+    const remaining = deps.registry.list().filter((row) => row.organizationId === listing.organizationId);
+    let foundingReleased = false;
+    let profileRemoved = false;
+    if (remaining.length === 0) {
+      const profile = await deps.sellers.removeProfile(listing.organizationId);
+      profileRemoved = profile !== null;
+      foundingReleased = profile?.foundingNumber !== null && profile?.foundingNumber !== undefined;
+    }
+    return c.json({
+      deleted: true,
+      listing: { id: removed.id, name: removed.name, organizationId: removed.organizationId },
+      profileRemoved,
+      foundingReleased,
+      founding: deps.sellers.foundingSummary(),
+    });
+  });
+
+  /** Purge an organization and its account rows (keys, users, agents, wallets). */
+  app.delete("/v1/admin/organizations/:organizationId", async (c) => {
+    assertSandboxOps(deps.mode);
+    const organizationId = c.req.param("organizationId");
+    const listings = deps.registry.list().filter((row) => row.organizationId === organizationId);
+    for (const listing of listings) {
+      deps.registry.remove(listing.id);
+      await deps.sellers.removeEndpoint(listing.id);
+      deps.jobs.removeSeller(listing.id);
+    }
+    const profile = await deps.sellers.removeProfile(organizationId);
+    const purged = await deps.service.purgeOrganization(organizationId);
+    return c.json({
+      ...purged,
+      listingsRemoved: listings.map((row) => row.id),
+      profileRemoved: profile !== null,
+      foundingReleased: profile?.foundingNumber != null,
+      founding: deps.sellers.foundingSummary(),
+    });
+  });
+
+  /** Purge by email (e2e / operator cleanup). */
+  app.delete("/v1/admin/accounts", async (c) => {
+    assertSandboxOps(deps.mode);
+    const email = (c.req.query("email") ?? "").trim();
+    if (!email) {
+      throw new ServiceError(400, "invalid_request", "Query email is required.");
+    }
+    const organizationId = await deps.service.findOrganizationIdByEmail(email);
+    if (!organizationId) {
+      throw new ServiceError(404, "not_found", "No account with that email.");
+    }
+    const listings = deps.registry.list().filter((row) => row.organizationId === organizationId);
+    for (const listing of listings) {
+      deps.registry.remove(listing.id);
+      await deps.sellers.removeEndpoint(listing.id);
+      deps.jobs.removeSeller(listing.id);
+    }
+    const profile = await deps.sellers.removeProfile(organizationId);
+    const purged = await deps.service.purgeOrganization(organizationId);
+    return c.json({
+      ...purged,
+      listingsRemoved: listings.map((row) => row.id),
+      profileRemoved: profile !== null,
+      foundingReleased: profile?.foundingNumber != null,
+      founding: deps.sellers.foundingSummary(),
+    });
   });
 }
 

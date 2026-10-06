@@ -151,6 +151,7 @@ export interface JobStore {
   readSeller(listingId: string): ListingSellerBinding | null;
   listSellerBindings(): ListingSellerBinding[];
   saveSeller(binding: ListingSellerBinding): void;
+  removeSeller(listingId: string): void;
 }
 
 export class JobStoreError extends Error {
@@ -216,6 +217,11 @@ export class MemoryJobStore implements JobStore {
     this.onChange?.();
   }
 
+  removeSeller(listingId: string): void {
+    if (!this.sellers.delete(listingId)) return;
+    this.onChange?.();
+  }
+
   /** Hydrate from Postgres without marking the store dirty. */
   replaceAll(jobs: readonly StoredJob[], sellers: readonly ListingSellerBinding[]): void {
     this.jobs.clear();
@@ -255,6 +261,11 @@ export class JsonJobStore extends MemoryJobStore {
 
   override saveSeller(binding: ListingSellerBinding): void {
     super.saveSeller(binding);
+    this.write();
+  }
+
+  override removeSeller(listingId: string): void {
+    super.removeSeller(listingId);
     this.write();
   }
 
