@@ -8,7 +8,6 @@ export const runtime = "nodejs";
 
 const MAX_BODY_CHARS = 2048;
 
-/** Validates the landing form and stores the address through the Roster API (`POST /v1/waitlist`). */
 export async function POST(request: Request) {
   let text: string;
   try {

@@ -397,7 +397,7 @@ export interface ListingSellerBinding {
   organizationId: string;
   sellerAgentId: string;
   createdAt: string;
-  /** True only for the sandbox fleet. Those jobs deliver without a seller submit. */
+  /** True when Roster delivers for the seller (fleet, data products, imported listings): no seller submit needed. */
   autofill: boolean;
 }
 

@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { readPublicSupabaseEnv } from "@/lib/supabase/config";
 import { safeConsoleNextPath } from "@/lib/supabase/oauth";
 
-/** OAuth landing. Exchanges the code, then sends the browser back to the console. */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const next = safeConsoleNextPath(url.searchParams.get("next"));

@@ -155,7 +155,6 @@ export class SellerDirectory {
     return { limit: this.founding.limit, taken, remaining: Math.max(0, this.founding.limit - taken), days: this.founding.days, takeRateBps: 0 };
   }
 
-  /** Public badge data for a listing's or passport's organization. */
   badge(organizationId: string): { number: number; until: string; active: boolean } | null {
     const profile = this.profiles.get(organizationId);
     if (!profile?.foundingNumber || !profile.foundingUntil) return null;
@@ -163,7 +162,6 @@ export class SellerDirectory {
   }
 }
 
-/** JSON file (json storage mode). */
 export class FileSellerPersistence implements SellerPersistence {
   private cache = new Map<string, SellerRecord>();
 

@@ -104,7 +104,6 @@ export class DataCatalog {
     return this.metas.get(slug);
   }
 
-  /** Registry drafts for the Roster Data seller. */
   drafts(): SandboxCapabilityDraft[] {
     return this.specs.map((spec) => dataProductDraft(spec));
   }
@@ -158,7 +157,6 @@ export class DataCatalog {
     });
   }
 
-  /** Stored rows for one product, loaded lazily from the store and cached. */
   async rows(slug: string): Promise<Row[]> {
     const cached = this.cache.get(slug);
     if (cached) return cached;
@@ -566,7 +564,6 @@ export function dataProductInfo(spec: DataProductSpec): DataProductInfo {
   };
 }
 
-/** Registry draft for one data product (`kind` + `data` set). */
 export function dataProductDraft(spec: DataProductSpec): SandboxCapabilityDraft & { kind: DataProductSpec["kind"]; data: DataProductInfo } {
   const inputSchema = dataInputSchema(spec);
   const outputSchema = dataOutputSchema(spec);

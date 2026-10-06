@@ -47,7 +47,6 @@ export class MemoryStore {
   readonly escrows = new Map<string, Escrow>();
   readonly transactions: Transaction[] = [];
   readonly ledger: LedgerEntry[] = [];
-  /** Developer waitlist keyed by lowercase email. */
   readonly waitlist = new Map<string, WaitlistEntry>();
   /** KYC profile per organization (absent = tier 0, never submitted). */
   readonly kycProfiles = new Map<string, KycProfile>();

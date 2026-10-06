@@ -17,21 +17,17 @@ export interface AdminOverview {
     mode: string;
     rail: string;
     asset: string;
-    /** Commit the API runs. Older APIs omit it. */
     version?: string;
     /** custodial-mock or noncustodial-sim. Older APIs omit it. */
     escrowMode?: string;
     uptimeS?: number;
   };
-  /** KYC review counts. Older APIs omit it. */
   kyc?: { pending: number; approved: number; limits: { tier0Usdc: string; tier1Usdc: string } };
-  /** Developer waitlist counts. Older APIs omit it. */
   waitlist?: { total: number; last7d: number };
   counts: {
     accounts: number;
     organizations: number;
     agents: number;
-    /** Agents whose status is `active`. */
     agentsOnline: number;
     listings: number;
     jobs: { locked: number; released: number; timedOut: number; failed: number };
@@ -306,7 +302,6 @@ export interface AdminDataCatalog {
   products: AdminDataProduct[];
 }
 
-/** Unmet needs as CSV for planning the next data products. */
 export function demandCsv(entries: readonly AdminUnmetNeed[]): string {
   const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
   const lines = ["need,count,last_seen_at,best_match,best_score,budget_usdc"];

@@ -37,11 +37,7 @@ export interface LeaderboardEntry {
   successRate: string | null;
 }
 
-/**
- * Honest activity: every row is a real sandbox job in the job store (mock
- * USDC). Buyers are labelled by who they are: Roster Fleet (our own scheduled
- * buyer), a first-party org, or an anonymous sandbox user. Nothing is invented.
- */
+/** Only real jobs from the job store (mock USDC). Never add synthetic rows here. */
 export async function buildActivity(deps: {
   jobs: JobStore;
   registry: CapabilityRegistry;

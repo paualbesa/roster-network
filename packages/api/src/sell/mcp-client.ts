@@ -1,6 +1,5 @@
 import { EgressError, type SafeFetcher } from "./net.js";
 
-/** Minimal MCP Streamable HTTP client (JSON-RPC over POST, JSON or SSE answers). */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 export class McpError extends Error {

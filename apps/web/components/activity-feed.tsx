@@ -6,7 +6,6 @@ import { relativeTime, sellRequest, trimUsdc, type ActivityFeed as Feed } from "
 
 const STATUS_TONE: Record<string, string> = { released: "text-sage", refunded: "text-brass-bright", timed_out: "text-brass-bright", held: "text-muted" };
 
-/** Live sandbox jobs. Polls the public feed; every row is a real job settled with mock USDC. */
 export function ActivityFeed({ initial, limit = 12, compact = false }: { initial: Feed | null; limit?: number; compact?: boolean }) {
   const [feed, setFeed] = useState<Feed | null>(initial);
   const [now, setNow] = useState(() => Date.now());

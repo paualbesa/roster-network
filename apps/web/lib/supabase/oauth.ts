@@ -25,10 +25,6 @@ export interface SignedInAccount {
 
 const CONSOLE_NEXT = "/console";
 
-/**
- * `redirectTo` for `signInWithOAuth`. The callback exchanges the code and
- * returns the browser to `/console`.
- */
 export function oauthRedirectTo(origin: string): string {
   const trimmed = origin.trim();
   let url: URL;

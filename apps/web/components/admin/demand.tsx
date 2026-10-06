@@ -26,7 +26,6 @@ function useAdminHandler(onUnauthorized: () => void, setError: (message: string)
   );
 }
 
-/** "Demanda no coberta": needs agents asked for that Roster could not sell yet. */
 export function DemandSection({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [demand, setDemand] = useState<AdminDemand | null>(null);
   const [busy, setBusy] = useState("");
@@ -126,7 +125,6 @@ function statusTone(product: AdminDataProduct): PillTone {
   return "muted";
 }
 
-/** Data products: freshness, rows, last error, and a manual refresh. */
 export function DataProductsSection({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [catalog, setCatalog] = useState<AdminDataCatalog | null>(null);
   const [busy, setBusy] = useState("");

@@ -148,7 +148,6 @@ export function daysAgo(now: Date, days: number): Date {
   return new Date(now.getTime() - days * 86_400_000);
 }
 
-/** Read one member of a ZIP archive (stored or deflated). */
 export function unzipEntry(archive: Uint8Array, name: string): Uint8Array {
   const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
   let end = -1;
@@ -249,7 +248,6 @@ export function intIn(input: Record<string, unknown>, key: string, fallback: num
   return Math.min(max, Math.max(min, Math.trunc(parsed)));
 }
 
-/** Decode the five XML entities plus numeric references. */
 export function xmlDecode(value: string): string {
   return value
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
@@ -262,19 +260,16 @@ export function xmlDecode(value: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** Split an Atom feed into `<entry>` bodies. */
 export function atomEntries(xml: string): string[] {
   return [...xml.matchAll(/<entry[\s>][\s\S]*?<\/entry>/g)].map((match) => match[0]);
 }
 
-/** Text of the first `<tag>` in an XML fragment, decoded and whitespace-collapsed. */
 export function xmlTag(fragment: string, tag: string): string | null {
   const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`).exec(fragment);
   if (!match?.[1]) return null;
   return textOrNull(xmlDecode(match[1]));
 }
 
-/** Every `<tag>` text in an XML fragment. */
 export function xmlTags(fragment: string, tag: string): string[] {
   return [...fragment.matchAll(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "g"))]
     .map((match) => textOrNull(xmlDecode(match[1] ?? "")))

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { fetchPublicListings, formatListingPrice } from "@/lib/public-listings";
 
-/** Live listings from the public registry. Renders nothing if the API is unreachable. */
 export async function LiveMarketplace() {
   const listings = await fetchPublicListings(6);
   if (listings.length === 0) return null;

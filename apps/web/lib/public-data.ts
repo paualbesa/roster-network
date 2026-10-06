@@ -18,7 +18,6 @@ export interface ListingDetail {
   proxied: { type: string } | null;
 }
 
-/** Parse `GET /v1/registry/listings/:id` (listing + optional dataProduct). */
 export function parseListingDetail(payload: unknown): ListingDetail | null {
   if (!isRecord(payload) || !isRecord(payload.listing)) return null;
   const listing = payload.listing;

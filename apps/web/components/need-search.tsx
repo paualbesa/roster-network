@@ -17,10 +17,6 @@ import { createRosterClient, rosterErrorMessage } from "@/lib/roster-client";
 import { readBrowserSession } from "@/lib/session";
 import { BuyReceipt, useBuy } from "./buy-receipt";
 
-/**
- * "Què necessites? / What do you need?" box. Posts the need to Roster and shows ranked
- * data products and services as cards with a one-click Buy.
- */
 export function NeedSearch({ variant = "hero", autoFocus = false }: { variant?: "hero" | "console"; autoFocus?: boolean }) {
   const inputId = useId();
   const [need, setNeed] = useState("");

@@ -1,6 +1,5 @@
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
-/** Encode bytes as Bitcoin base58. Leading zero bytes become leading "1"s. */
 export function encodeBase58(bytes: Uint8Array): string {
   let zeroCount = 0;
   while (zeroCount < bytes.length && bytes[zeroCount] === 0) zeroCount += 1;

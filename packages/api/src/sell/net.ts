@@ -186,7 +186,6 @@ function guardedLookup(hostname: string, options: { all?: boolean } | number | u
   });
 }
 
-/** The production fetcher. Tests inject their own SafeFetcher. */
 export function createSafeFetcher(options: { allowHttp?: boolean } = {}): SafeFetcher {
   return async (rawUrl, request = {}) => {
     const started = Date.now();

@@ -24,7 +24,6 @@ export function clientAddress(headers: Headers): string {
 }
 
 export interface RateLimitRule {
-  /** Requests allowed per window. */
   limit: number;
   windowMs: number;
 }
@@ -118,7 +117,6 @@ export function resolveRateLimitConfig(env: NodeJS.ProcessEnv = process.env): Ra
   return DEFAULT_RATE_LIMITS;
 }
 
-/** `ROSTER_ACCESS_LOG=1` prints one JSON line per request. */
 export function resolveAccessLog(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.ROSTER_ACCESS_LOG?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";

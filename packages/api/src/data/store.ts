@@ -27,7 +27,6 @@ export interface DataSignedUrl {
   expiresAt: string;
 }
 
-/** Where data product files and their freshness records live. */
 export interface DataStore {
   readonly kind: "memory" | "local" | "supabase";
   put(path: string, body: Uint8Array, contentType: string): Promise<void>;
@@ -152,7 +151,6 @@ export interface SupabaseDataClientLike {
   };
 }
 
-/** Private Supabase Storage bucket plus the `data_products` freshness table. */
 export class SupabaseDataStore implements DataStore {
   readonly kind = "supabase" as const;
 

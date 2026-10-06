@@ -219,7 +219,6 @@ export function sandboxDocQaListing(): SandboxCapabilityDraft {
   });
 }
 
-/** Cheap compute quote picker. Compares sandbox numbers only. */
 export function sandboxComputeArbListing(): SandboxCapabilityDraft {
   return tool({
     name: "Compute arb",
