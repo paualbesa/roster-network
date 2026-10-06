@@ -649,7 +649,8 @@ function requiredChain(value: unknown): Wallet["chain"] {
     value === "mock" ||
     value === "base-sepolia" ||
     value === "base-sepolia-sim" ||
-    value === "solana-devnet-sim"
+    value === "solana-devnet-sim" ||
+    value === "solana-devnet"
   ) {
     return value;
   }
