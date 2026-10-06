@@ -41,6 +41,11 @@ async function main(): Promise<void> {
     const opened = await openSupabaseApp({ config: supabase, mode, walletRail, http: { ...http, storage: "supabase" } });
     app = opened.app;
     where = "supabase";
+    // Warm Devnet fee-payer (airdrop) BEFORE fleet fund so mint/ATA can succeed when SOL is available.
+    if (walletRail === "solana-devnet") {
+      const service = appService(opened.app);
+      if (service) await warmSolanaDevnetRail(service.walletProvider);
+    }
     if (mode === "sandbox") {
       const fleet = await bootstrapSandboxFleet(opened.app);
       console.log(
@@ -76,6 +81,10 @@ async function main(): Promise<void> {
       sellers: new SellerDirectory(new FileSellerPersistence(join(process.cwd(), "data", "sellers.json")), foundingConfigFromEnv()),
     });
     app = jsonApp;
+    if (walletRail === "solana-devnet") {
+      const service = appService(jsonApp);
+      if (service) await warmSolanaDevnetRail(service.walletProvider);
+    }
     if (mode === "sandbox") {
       const fleet = await bootstrapSandboxFleet(jsonApp);
       console.log(
@@ -89,10 +98,6 @@ async function main(): Promise<void> {
   }
   const { attachRosterMcp } = await import("../../mcp/dist/index.js");
   attachRosterMcp(app as unknown as Parameters<typeof attachRosterMcp>[0], { mode });
-  if (walletRail === "solana-devnet") {
-    const service = appService(app);
-    if (service) await warmSolanaDevnetRail(service.walletProvider);
-  }
 
   serve({ fetch: app.fetch, hostname, port }, (info) => {
     console.log(

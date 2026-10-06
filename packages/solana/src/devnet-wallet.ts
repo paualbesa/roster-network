@@ -194,7 +194,7 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
       const ata = getAssociatedTokenAddressSync(this.mint, owner, false, TOKEN_PROGRAM_ID);
       const bal = await this.connection.getTokenAccountBalance(ata, "confirmed");
       const amount = BigInt(bal.value.amount);
-      return formatUsdc(amount);
+      return formatUsdc(amount + pending);
     } catch {
       return formatUsdc(pending);
     }
@@ -212,14 +212,30 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
       }
       return;
     }
-    await this.ensureMint();
-    if (!this.mint) throw new WalletProviderError("Mint unavailable.");
-    const ata = await this.ensureAta(owner);
-    const tx = new Transaction().add(
-      createMintToInstruction(this.mint, ata, this.feePayer.publicKey, amount, [], TOKEN_PROGRAM_ID),
-    );
-    await this.send(tx, [this.feePayer]);
-    this.pendingCredits.delete(owner.toBase58());
+    try {
+      await this.ensureMint();
+      if (!this.mint) throw new WalletProviderError("Mint unavailable.");
+      const ata = await this.ensureAta(owner);
+      const tx = new Transaction().add(
+        createMintToInstruction(this.mint, ata, this.feePayer.publicKey, amount, [], TOKEN_PROGRAM_ID),
+      );
+      await this.send(tx, [this.feePayer]);
+      this.pendingCredits.delete(owner.toBase58());
+    } catch (error) {
+      // Soft ledger when RPC/airdrop/SOL is unavailable so sandbox boot (fleet fund)
+      // does not hard-crash. Transfers still require on-chain fee-payer SOL.
+      const key = owner.toBase58();
+      this.pendingCredits.set(key, (this.pendingCredits.get(key) ?? 0n) + amount);
+      this.airdropError = error instanceof Error ? error.message : "on-chain credit failed";
+      console.warn(
+        JSON.stringify({
+          t: new Date().toISOString(),
+          msg: "solana-devnet soft credit (on-chain mint failed)",
+          address: `${key.slice(0, 8)}…`,
+          error: this.airdropError,
+        }),
+      );
+    }
   }
 
   async transfer(request: TransferRequest): Promise<TransferResult> {
@@ -292,16 +308,10 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
    * sandbox grants do not hard-fail boot. Transfers still require RPC.
    */
   async creditSoftOrChain(address: string, amountUsdc: string): Promise<"chain" | "soft"> {
-    try {
-      await this.credit(address, amountUsdc);
-      return "chain";
-    } catch (error) {
-      const amount = parseUsdc(amountUsdc);
-      const owner = this.resolveOwner(address).toBase58();
-      this.pendingCredits.set(owner, (this.pendingCredits.get(owner) ?? 0n) + amount);
-      this.airdropError = error instanceof Error ? error.message : "credit failed";
-      return "soft";
-    }
+    const before = this.pendingCredits.get(this.resolveOwner(address).toBase58()) ?? 0n;
+    await this.credit(address, amountUsdc);
+    const after = this.pendingCredits.get(this.resolveOwner(address).toBase58()) ?? 0n;
+    return after > before ? "soft" : "chain";
   }
 
   private async ensureMint(): Promise<PublicKey> {
