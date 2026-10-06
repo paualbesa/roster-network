@@ -69,7 +69,7 @@ import {
 } from "./kyc.js";
 import { MemoryStore, type WaitlistEntry } from "./store.js";
 
-export type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 502;
+export type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 502 | 503;
 
 export class ServiceError extends Error {
   readonly status: ErrorStatus;
@@ -1670,7 +1670,9 @@ export class AgentFinanceService implements ReputationHook {
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : "program fund failed";
-        throw new ServiceError(502, "chain_unavailable", `Non-custodial lock failed: ${message}`);
+        console.error(JSON.stringify({ t: new Date().toISOString(), msg: "noncustodial_lock_failed", error: message }));
+        // Use 503 so reverse proxies do not replace the JSON body the way some CDNs do for 502.
+        throw new ServiceError(503, "chain_unavailable", `Non-custodial lock failed: ${message}`);
       }
     } else {
       const minted = await this.wallets.createAddress(`escrow:${escrowId}`);
