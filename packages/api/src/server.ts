@@ -86,6 +86,8 @@ async function main(): Promise<void> {
     if (mode === "sandbox") startFleetBuyer(jsonApp, { intervalMin: resolveFleetBuyerIntervalMin() });
     startExpirySweeper({ app: jsonApp, intervalMs: expireIntervalMs });
   }
+  const { attachRosterMcp } = await import("../../mcp/dist/index.js");
+  attachRosterMcp(app as unknown as Parameters<typeof attachRosterMcp>[0], { mode });
   serve({ fetch: app.fetch, hostname, port }, (info) => {
     console.log(
       `Roster API on http://${hostname}:${info.port.toString()} (${mode}, ${walletRail} USDC, ${where}, rate limits ${http.rateLimit ? "on" : "off"}, SLA sweep ${expireIntervalMs > 0 ? `${expireIntervalMs.toString()} ms` : "off"})`,

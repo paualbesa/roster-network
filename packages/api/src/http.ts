@@ -89,6 +89,8 @@ export class RateLimiter {
 export interface RateLimitConfig {
   /** Sign-up, login, session exchange, and organization creation, per client address. */
   auth: RateLimitRule;
+  /** Anonymous sandbox API keys per client address (stricter than email signup). */
+  anonymous: RateLimitRule;
   /** Waitlist sign-ups per client address. */
   waitlist: RateLimitRule;
   /** Failed API key or admin token attempts per client address. */
@@ -101,6 +103,7 @@ export interface RateLimitConfig {
 
 export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   auth: { limit: 20, windowMs: 60_000 },
+  anonymous: { limit: 5, windowMs: 60 * 60_000 },
   waitlist: { limit: 10, windowMs: 60_000 },
   authFailures: { limit: 30, windowMs: 10 * 60_000 },
   organization: { limit: 1200, windowMs: 60_000 },

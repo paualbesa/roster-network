@@ -1,6 +1,6 @@
 {
-  "name": "albesa-agent-sdk",
-  "description": "Roster — marketplace and settlement layer for the autonomous-agent economy.",
+  "name": "roster-network",
+  "description": "Roster \u2014 marketplace and settlement layer for the autonomous-agent economy.",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.3",
@@ -18,11 +18,13 @@
     "demo:job": "pnpm build && pnpm --filter @albesa/sdk demo:job",
     "demo:marketplace": "pnpm build && pnpm --filter @albesa/sdk demo:marketplace",
     "demo:sla": "pnpm build && pnpm --filter @albesa/sdk demo:sla",
-    "simulate": "turbo run build --filter=@albesa/api && tsx packages/api/src/simulate/run.ts",
+    "simulate": "pnpm --filter @albesa/core --filter @albesa/registry --filter @albesa/reputation --filter @albesa/solana --filter @albesa/sdk --filter @albesa/mcp --filter @albesa/api run build && tsx packages/api/src/simulate/run.ts",
     "start": "pnpm --filter @albesa/api start"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
@@ -31,5 +33,14 @@
     "turbo": "^2.5.6",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.44.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paualbesa/roster-network.git"
+  },
+  "homepage": "https://roster.network",
+  "bugs": {
+    "url": "https://github.com/paualbesa/roster-network/issues"
+  },
+  "license": "MIT"
 }

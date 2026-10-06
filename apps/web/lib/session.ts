@@ -5,6 +5,7 @@ export const SANDBOX_SESSION_STORAGE_KEY = "roster.sandbox.session";
 /** Sandbox API key kept in localStorage. Not a wallet and not valid for real payments. */
 export interface SandboxSession {
   apiKey: string;
+  /** Empty string for anonymous (unclaimed) sandbox orgs. */
   email: string;
   /** False until the human dismisses the one-time key panel. */
   revealed: boolean;

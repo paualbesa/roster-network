@@ -122,8 +122,13 @@ export interface LoginAccountResult {
 }
 
 export interface AccountView {
-  user: UserAccount;
+  /** Null when the organization was created anonymously and has not been claimed. */
+  user: UserAccount | null;
   treasury: TreasuryResult;
+  organization: Organization;
+  /** True when there is no human user yet; the key holder can claim with email + password. */
+  claimable: boolean;
+  anonymous: boolean;
 }
 
 export interface CreateAgentInput {
@@ -654,11 +659,58 @@ export class AgentFinanceService implements ReputationHook {
 
   getAccount(organizationId: string): Promise<AccountView> {
     return this.enqueue(async () => {
-      const user = this.userForOrganization(organizationId);
-      if (!user) {
-        throw new ServiceError(404, "not_found", "No Roster account is linked to this API key.");
+      const organization = this.requireOrganization(organizationId);
+      const user = this.userForOrganization(organizationId) ?? null;
+      const claimable = user === null;
+      return {
+        user,
+        treasury: await this.readTreasury(organizationId),
+        organization: { ...organization },
+        claimable,
+        anonymous: claimable,
+      };
+    });
+  }
+
+  /** Instant sandbox org with no email. Key is shown once; stored hashed. */
+  createAnonymousAccount(): Promise<CreateOrganizationResult & { claimable: true; anonymous: true }> {
+    return this.enqueue(async () => {
+      const created = await this.createOrganizationUnlocked("Anonymous sandbox");
+      return { ...created, claimable: true as const, anonymous: true as const };
+    });
+  }
+
+  /**
+   * Attach email + password to an anonymous organization. Fails if the org already
+   * has a user or the email is taken.
+   */
+  async claimAccount(
+    organizationId: string,
+    input: CreateAccountInput,
+  ): Promise<CreateAccountResult> {
+    const passwordHash =
+      input.password.length >= PASSWORD_MIN && input.password.length <= PASSWORD_MAX
+        ? await hashPassword(input.password)
+        : "";
+    return this.enqueue(() => this.claimAccountUnlocked(organizationId, input, passwordHash));
+  }
+
+  /**
+   * Replace the presented API key with a new one. The old key stops working.
+   * The new plaintext key is returned once.
+   */
+  rotateApiKey(apiKey: string): Promise<{ apiKey: string }> {
+    return this.enqueue(async () => {
+      const hash = hashSandboxApiKey(apiKey);
+      const organizationId = this.store.apiKeys.get(hash);
+      if (!organizationId) {
+        throw new ServiceError(401, "unauthorized", "Unknown API key.");
       }
-      return { user, treasury: await this.readTreasury(organizationId) };
+      this.store.apiKeys.delete(hash);
+      const next = createSandboxApiKey();
+      this.store.apiKeys.set(hashSandboxApiKey(next), organizationId);
+      this.commit();
+      return { apiKey: next };
     });
   }
 
@@ -812,6 +864,64 @@ export class AgentFinanceService implements ReputationHook {
       if (wallet.organizationId !== organizationId) throw this.notFound("Wallet not found.");
       return this.store.ledger.filter((entry) => entry.walletId === walletId).slice();
     });
+  }
+
+  private async claimAccountUnlocked(
+    organizationId: string,
+    input: CreateAccountInput,
+    passwordHash: string,
+  ): Promise<CreateAccountResult> {
+    this.requireOrganization(organizationId);
+    if (this.userForOrganization(organizationId)) {
+      throw new ServiceError(409, "account_exists", "This sandbox organization already has an email account.");
+    }
+    const email = canonicalEmail(input.email);
+    if (!email) {
+      throw new ServiceError(400, "invalid_request", "email must be an address like ada@example.com.");
+    }
+    if (input.password.length < PASSWORD_MIN || input.password.length > PASSWORD_MAX) {
+      throw new ServiceError(
+        400,
+        "invalid_request",
+        `password must be ${PASSWORD_MIN.toString()}-${PASSWORD_MAX.toString()} characters.`,
+      );
+    }
+    if (!passwordHash) {
+      throw new ServiceError(
+        400,
+        "invalid_request",
+        `password must be ${PASSWORD_MIN.toString()}-${PASSWORD_MAX.toString()} characters.`,
+      );
+    }
+    if (this.store.usersByEmail.has(email)) {
+      throw new ServiceError(409, "account_exists", "An account with this email already exists.");
+    }
+    const displayName = accountDisplayName(email, input.displayName);
+    const organization = this.requireOrganization(organizationId);
+    if (organization.name === "Anonymous sandbox") {
+      organization.name = displayName;
+      this.store.organizations.set(organization.id, organization);
+    }
+    const user: UserAccount = {
+      id: createId("usr"),
+      email,
+      displayName,
+      organizationId,
+      createdAt: this.now().toISOString(),
+    };
+    this.store.users.set(user.id, user);
+    this.store.usersByEmail.set(email, user.id);
+    this.store.passwordHashes.set(user.id, passwordHash);
+    this.commit();
+    const apiKey = createSandboxApiKey();
+    this.store.apiKeys.set(hashSandboxApiKey(apiKey), organizationId);
+    this.commit();
+    return {
+      user,
+      organization: { ...organization },
+      apiKey,
+      treasury: await this.readTreasury(organizationId),
+    };
   }
 
   private async createAccountUnlocked(input: CreateAccountInput, passwordHash: string): Promise<CreateAccountResult> {

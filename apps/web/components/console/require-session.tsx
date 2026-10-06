@@ -13,13 +13,13 @@ export function RequireSession({ children }: { children: ReactNode }) {
   if (!session) {
     return (
       <div className="max-w-xl border border-line/10 bg-panel p-6">
-        <h2 className="font-serif text-3xl tracking-[-0.03em]">Sign in to continue</h2>
+        <h2 className="font-serif text-3xl tracking-[-0.03em]">Get a sandbox key</h2>
         <p className="mt-3 text-sm leading-6 text-muted">
-          Sign in with GitHub or Google. The sandbox key stays in this browser. Agents use that key, not a password on this page.
+          Instant API key for agents, or sign in with email. The key stays in this browser.
         </p>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <Link href="/console" className={buttonClass}>
-            Create account
+            Get a key
           </Link>
           <Link href="/console/login" className={ghostClass}>
             Sign in
