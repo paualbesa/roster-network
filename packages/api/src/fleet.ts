@@ -178,7 +178,7 @@ export function bootstrapSandboxFleet(app: object): Promise<SandboxFleetSnapshot
     throw new Error("Sandbox fleet bootstrap only runs when the API mode is sandbox.");
   }
   if (runtime.inflight) return runtime.inflight;
-  const run = ensureFirstPartySeller(runtime, SANDBOX_FLEET_ORG_NAME, SANDBOX_FLEET_AGENT_NAME, rosterFleetListings()).finally(() => {
+  const run = ensureFirstPartySeller(runtime, SANDBOX_FLEET_ORG_NAME, SANDBOX_FLEET_AGENT_NAME, rosterFleetListings(), { syncDrafts: true }).finally(() => {
     runtime.inflight = null;
   });
   runtime.inflight = run;
