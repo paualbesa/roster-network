@@ -867,6 +867,15 @@ export class Albesa {
           readRetryAfter(response),
         );
       }
+      if (payload === null || payload === undefined) {
+        throw new AlbesaError(
+          response.status || 502,
+          "empty_response",
+          `Roster API returned an empty JSON body for ${method} ${path}.`,
+          response.headers?.get?.("x-request-id") ?? null,
+          null,
+        );
+      }
       return payload as T;
     }
   }

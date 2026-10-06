@@ -175,7 +175,7 @@ export const referenceProducts: DataProductSpec[] = [
     sources: [SOURCES.wikidata],
     cadence: "weekly",
     intervalS: 7 * DAY,
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 6000,
     columns: [
       { name: "code", type: "string", description: "ISO 4217 alphabetic code." },
@@ -208,7 +208,7 @@ export const referenceProducts: DataProductSpec[] = [
     sources: [SOURCES.wikidata],
     cadence: "weekly",
     intervalS: 7 * DAY,
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 6000,
     columns: [
       { name: "iso639_1", type: "string", description: "Two-letter code." },
@@ -245,7 +245,7 @@ export const referenceProducts: DataProductSpec[] = [
     sources: [SOURCES.iana],
     cadence: "daily",
     intervalS: DAY,
-    priceUsdc: "0.002",
+    priceUsdc: "0.01",
     p95Ms: 6000,
     columns: [
       { name: "zone", type: "string", description: "IANA zone id, e.g. Europe/Madrid." },
@@ -355,7 +355,7 @@ export const referenceProducts: DataProductSpec[] = [
     sources: [SOURCES.geonames],
     cadence: "weekly",
     intervalS: 7 * DAY,
-    priceUsdc: "0.001",
+    priceUsdc: "0.01",
     p95Ms: 6000,
     columns: [
       { name: "name", type: "string", description: "City." },
@@ -435,7 +435,7 @@ export const referenceProducts: DataProductSpec[] = [
     sources: [SOURCES.ourAirports],
     cadence: "weekly",
     intervalS: 7 * DAY,
-    priceUsdc: "0.001",
+    priceUsdc: "0.01",
     p95Ms: 6000,
     columns: [
       { name: "iata", type: "string", description: "IATA." },
@@ -468,7 +468,7 @@ export const referenceProducts: DataProductSpec[] = [
     sources: [SOURCES.govUk],
     cadence: "weekly",
     intervalS: 7 * DAY,
-    priceUsdc: "0.002",
+    priceUsdc: "0.01",
     p95Ms: 6000,
     columns: [
       { name: "date", type: "date", description: "Holiday date." },

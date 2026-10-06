@@ -257,7 +257,7 @@ export function sandboxComputeArbListing(): SandboxCapabilityDraft {
         savedUsdc: { type: "string", minLength: 1, maxLength: 16 },
       },
     },
-    amountUsdc: "0.005",
+    amountUsdc: "0.01",
     p95Ms: 60,
     p50Ms: 20,
     tags: ["compute", "arb"],
@@ -444,7 +444,7 @@ function executeDocQa(input: unknown): Record<string, unknown> {
 }
 
 function executeComputeArb(input: unknown): Record<string, unknown> {
-  const fallback = { provider: "spot-a", priceUsdc: "0.004000", savedUsdc: "0.002000" };
+  const fallback = { provider: "spot-a", priceUsdc: "0.01", savedUsdc: "0.000000" };
   const quotes = readQuotes(input);
   if (!quotes) return fallback;
   const sorted = [...quotes].sort((left, right) => compareMicros(left.priceMicros, right.priceMicros));

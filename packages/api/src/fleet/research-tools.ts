@@ -115,7 +115,7 @@ export const researchTools: FleetTool[] = [
       "Format a reference in APA 7, MLA 9, Chicago or Harvard style from structured fields (authors, year, title, journal or " +
       "publisher, volume, pages, DOI, URL). Bibliographies for papers, reports and theses.",
     tags: ["citations", "bibliography", "apa", "academic", "research"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: {

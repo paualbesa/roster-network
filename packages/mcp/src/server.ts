@@ -144,11 +144,11 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
       },
     },
     async ({ listingId, input, buyerAgentId }) =>
-      runTool(() => {
+      runTool(async () => {
         const body: BuyInput = { listingId };
         if (input !== undefined) body.input = input;
         if (buyerAgentId !== undefined) body.buyerAgentId = buyerAgentId;
-        return client.buy(body);
+        return summarizeBuyResult(await client.buy(body));
       }),
   );
 
@@ -196,7 +196,7 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
           .describe("Buyer payload for a first-party sandbox fixture. Omit it for the schema-valid sample."),
       },
     },
-    async (args) => runTool(() => client.jobs.create(jobInput(args))),
+    async (args) => runTool(async () => summarizeJobResult(await client.jobs.create(jobInput(args)))),
   );
 
   server.registerTool(
@@ -253,7 +253,7 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ jobId }) => runTool(() => client.jobs.get(jobId)),
+    async ({ jobId }) => runTool(async () => summarizeJobResult(await client.jobs.get(jobId))),
   );
 
   server.registerTool(
@@ -276,6 +276,12 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
 async function runTool(work: () => Promise<unknown>): Promise<CallToolResult> {
   try {
     const value = await work();
+    if (value === null || value === undefined) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: "empty_tool_result: Roster tool returned no payload." }],
+      };
+    }
     return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
   } catch (error) {
     const message = error instanceof AlbesaError
@@ -284,6 +290,73 @@ async function runTool(work: () => Promise<unknown>): Promise<CallToolResult> {
         ? error.message
         : "Roster tool failed.";
     return { isError: true, content: [{ type: "text", text: message }] };
+  }
+}
+
+/** Compact hire/settlement summary for MCP (avoids huge result payloads / null text). */
+export function summarizeBuyResult(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new AlbesaError(502, "empty_tool_result", "Roster buy returned an empty response.");
+  }
+  const job = isRecord(value.job) ? value.job : {};
+  const receipt = isRecord(value.receipt) ? value.receipt : null;
+  return {
+    status: value.status ?? job.status ?? null,
+    delivered: value.delivered ?? (value.status === "released" || job.status === "released"),
+    jobId: typeof job.id === "string" ? job.id : null,
+    escrowId: typeof job.escrowId === "string" ? job.escrowId : receipt && typeof receipt.escrowId === "string" ? receipt.escrowId : null,
+    amountUsdc: typeof job.amountUsdc === "string" ? job.amountUsdc : receipt && typeof receipt.amountUsdc === "string" ? receipt.amountUsdc : null,
+    escrowMode: typeof job.escrowMode === "string" ? job.escrowMode : null,
+    vaultAddress: typeof job.vaultAddress === "string" ? job.vaultAddress : null,
+    vaultExplorerUrl: typeof job.vaultExplorerUrl === "string" ? job.vaultExplorerUrl : null,
+    programId: typeof job.programId === "string" ? job.programId : null,
+    programExplorerUrl: typeof job.programExplorerUrl === "string" ? job.programExplorerUrl : null,
+    lockProviderRef: typeof job.lockProviderRef === "string" ? job.lockProviderRef : null,
+    settlementProviderRef: typeof job.settlementProviderRef === "string" ? job.settlementProviderRef : null,
+    lockExplorerUrl: typeof job.lockExplorerUrl === "string" ? job.lockExplorerUrl : null,
+    settlementExplorerUrl: typeof job.settlementExplorerUrl === "string" ? job.settlementExplorerUrl : null,
+    receipt,
+    resultPreview: previewUnknown(value.result ?? job.result),
+  };
+}
+
+export function summarizeJobResult(value: unknown): Record<string, unknown> {
+  const job = isRecord(value) && isRecord(value.job) ? value.job : isRecord(value) ? value : null;
+  if (!job) {
+    throw new AlbesaError(502, "empty_tool_result", "Roster job tool returned an empty response.");
+  }
+  return {
+    id: typeof job.id === "string" ? job.id : null,
+    status: typeof job.status === "string" ? job.status : null,
+    listingId: typeof job.listingId === "string" ? job.listingId : null,
+    amountUsdc: typeof job.amountUsdc === "string" ? job.amountUsdc : null,
+    escrowId: typeof job.escrowId === "string" ? job.escrowId : null,
+    escrowMode: typeof job.escrowMode === "string" ? job.escrowMode : null,
+    vaultAddress: typeof job.vaultAddress === "string" ? job.vaultAddress : null,
+    vaultExplorerUrl: typeof job.vaultExplorerUrl === "string" ? job.vaultExplorerUrl : null,
+    programId: typeof job.programId === "string" ? job.programId : null,
+    programExplorerUrl: typeof job.programExplorerUrl === "string" ? job.programExplorerUrl : null,
+    lockProviderRef: typeof job.lockProviderRef === "string" ? job.lockProviderRef : null,
+    settlementProviderRef: typeof job.settlementProviderRef === "string" ? job.settlementProviderRef : null,
+    lockExplorerUrl: typeof job.lockExplorerUrl === "string" ? job.lockExplorerUrl : null,
+    settlementExplorerUrl: typeof job.settlementExplorerUrl === "string" ? job.settlementExplorerUrl : null,
+    resultPreview: previewUnknown(job.result),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function previewUnknown(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  try {
+    const raw = JSON.stringify(value);
+    if (raw === undefined) return null;
+    if (raw.length <= 500) return value;
+    return { truncated: true, bytes: raw.length, preview: `${raw.slice(0, 400)}…` };
+  } catch {
+    return { unserializable: true };
   }
 }
 

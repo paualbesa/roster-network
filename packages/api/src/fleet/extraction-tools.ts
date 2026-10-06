@@ -66,7 +66,7 @@ export const extractionTools: FleetTool[] = [
       "Find and deduplicate every email address in text, HTML or a document dump, with domains. Lead list building, " +
       "contact discovery and CRM import cleanup.",
     tags: ["email", "extract", "contacts", "leads"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { text: s.str(20_000, 1) },
@@ -90,7 +90,7 @@ export const extractionTools: FleetTool[] = [
       "Extract all links (http and https URLs) from text, markdown or HTML, deduplicated, with host names. For link audits, " +
       "crawl seeds, citation lists and phishing triage.",
     tags: ["urls", "links", "extract", "crawl"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { text: s.str(20_000, 1) },
@@ -122,7 +122,7 @@ export const extractionTools: FleetTool[] = [
       "Find phone numbers in free text and normalize them to digits with an international prefix when present. Contact " +
       "enrichment, CRM cleanup and call-center routing.",
     tags: ["phone", "extract", "contacts", "normalize"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { text: s.str(20_000, 1), defaultCountryCode: s.str(4) },
@@ -154,7 +154,7 @@ export const extractionTools: FleetTool[] = [
       "Detect dates in text (ISO 2026-10-05, 05/10/2026, October 5, 2026, 5 Oct 2026) and normalize them to ISO-8601. For " +
       "deadline tracking, contract dates, event parsing and timeline building.",
     tags: ["dates", "extract", "normalize", "calendar"],
-    priceUsdc: "0.008",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 50,
     input: { text: s.str(20_000, 1), dayFirst: s.bool() },
@@ -199,7 +199,7 @@ export const extractionTools: FleetTool[] = [
       "Extract #hashtags, @mentions and cashtags ($TICKER) from social media posts, tweets and comments with counts. Social " +
       "listening, influencer tracking and campaign analytics.",
     tags: ["social", "hashtags", "mentions", "extract", "marketing"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { text: s.str(20_000, 1) },
@@ -397,7 +397,7 @@ export const extractionTools: FleetTool[] = [
       "Split a full name into title, first, middle and last name and suffix, including \"Last, First\" order and Spanish " +
       "double surnames. Clean CRM imports, personalize emails, deduplicate contacts.",
     tags: ["names", "parse", "crm", "contacts", "normalize"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { name: s.str(200, 1) },

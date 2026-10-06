@@ -1,7 +1,7 @@
 import { looksLikeSolanaSignature, solanaExplorerAddressUrl, solanaExplorerTxUrl } from "@albesa/solana";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { createId, EscrowSchemaError, parseResultSchema, parseUsdc } from "@albesa/core";
+import { compareUsdc, createId, EscrowSchemaError, MIN_PAID_LISTING_USDC, parseResultSchema, parseUsdc } from "@albesa/core";
 import { CapabilityRegistry, type CapabilityListing } from "@albesa/registry";
 import {
   isRosterFleetName,
@@ -813,6 +813,13 @@ export class JobOrchestrator {
       if (micros <= 0n) throw new Error("non-positive");
     } catch {
       throw new ServiceError(400, "invalid_request", "amountUsdc must be greater than zero.");
+    }
+    if (compareUsdc(input.amountUsdc, MIN_PAID_LISTING_USDC) < 0) {
+      throw new ServiceError(
+        400,
+        "price_too_low",
+        `amountUsdc must be at least ${MIN_PAID_LISTING_USDC} USDC (Roster fee is 1% + 0.003 USDC).`,
+      );
     }
     try {
       parseResultSchema(input.schema);

@@ -223,7 +223,7 @@ export const codeTools: FleetTool[] = [
       "Pretty-print SQL queries: uppercase keywords, one clause per line (SELECT, FROM, JOIN, WHERE, GROUP BY, ORDER BY) and " +
       "indented column lists. Readable queries for code review, docs and debugging slow queries.",
     tags: ["sql", "formatter", "database", "postgres", "code"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { sql: s.str(50_000, 1) },
@@ -301,7 +301,7 @@ export const codeTools: FleetTool[] = [
       "Recommend the next semantic version (major, minor or patch) from a list of changes or commit messages, following " +
       "SemVer and Conventional Commits (BREAKING CHANGE, feat, fix). Release automation and changelog grouping.",
     tags: ["semver", "release", "versioning", "changelog", "code"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { currentVersion: s.str(32, 1), changes: s.arr(s.str(300), 500, 1) },
@@ -447,7 +447,7 @@ export const codeTools: FleetTool[] = [
       "Parse a browser User-Agent string into browser name and version, operating system, device type (desktop, mobile, " +
       "tablet, bot) and bot detection. Analytics, fraud signals and support diagnostics.",
     tags: ["user-agent", "analytics", "bots", "parse", "web"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { userAgent: s.str(1000, 1) },

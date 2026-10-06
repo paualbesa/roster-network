@@ -34,6 +34,7 @@ import {
   type UserAccount,
   type Wallet,
   type WalletProvider,
+  MIN_PAID_LISTING_USDC,
 } from "@albesa/core";
 import {
   applyReputationEvent,
@@ -1599,6 +1600,13 @@ export class AgentFinanceService implements ReputationHook {
   ): Promise<CreateEscrowResult> {
     const organization = this.requireOrganization(organizationId);
     const canonical = this.parsePositiveAmount(input.amountUsdc);
+    if (compareUsdc(canonical, MIN_PAID_LISTING_USDC) < 0) {
+      throw new ServiceError(
+        400,
+        "price_too_low",
+        `amountUsdc must be at least ${MIN_PAID_LISTING_USDC} USDC (Roster fee is 1% + 0.003 USDC).`,
+      );
+    }
     const schema = this.parseEscrowSchema(input.schema);
     const memo = normalizeMemo(input.memo);
     if (input.buyerAgentId === input.sellerAgentId) {

@@ -113,7 +113,7 @@ describe("capability registry", () => {
         name: "General utilities",
         description: "Misc helpers. One note mentions invoices in passing.",
         tags: ["utility"],
-        pricing: { model: "per_call", amountUsdc: "0.001" },
+        pricing: { model: "per_call", amountUsdc: "0.01" },
         latency: { p95Ms: 50 },
       }),
     );
@@ -291,5 +291,12 @@ describe("admin remove", () => {
     expect(registry.get(listing.id)).toBeNull();
     expect(registry.list()).toHaveLength(0);
     expect(() => registry.remove(listing.id)).toThrow(RegistryError);
+  });
+
+  it("rejects paid listings below the 0.01 USDC floor", () => {
+    const registry = new CapabilityRegistry();
+    expect(() =>
+      registry.register("org_a", body({ pricing: { model: "per_call", amountUsdc: "0.009" } })),
+    ).toThrow(/at least 0.010000/);
   });
 });

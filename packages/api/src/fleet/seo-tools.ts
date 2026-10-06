@@ -114,7 +114,7 @@ export const seoTools: FleetTool[] = [
       "Check and improve an HTML title tag: length and estimated pixel width against Google truncation, keyword position, " +
       "brand placement and duplicate words, with a suggested rewrite. On-page SEO quick wins.",
     tags: ["seo", "title-tag", "on-page", "serp", "audit"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { title: s.str(300, 1), keyword: s.str(120), brand: s.str(60) },
@@ -225,7 +225,7 @@ export const seoTools: FleetTool[] = [
       "Measure keyword density and term frequency in an article or landing page, check a target keyword and its placement " +
       "(title, first paragraph), and warn about keyword stuffing. Content optimization for SEO writers.",
     tags: ["seo", "keyword-density", "content", "optimization"],
-    priceUsdc: "0.008",
+    priceUsdc: "0.01",
     p95Ms: 250,
     p50Ms: 60,
     input: { text: s.str(50_000, 1), keyword: s.str(120), limit: s.int(1, 30) },
@@ -266,7 +266,7 @@ export const seoTools: FleetTool[] = [
       "Build campaign tracking URLs with UTM parameters (source, medium, campaign, term, content), normalized to lowercase " +
       "and URL-encoded, for Google Analytics, Plausible or Matomo. Marketing attribution for ads, newsletters and social posts.",
     tags: ["utm", "analytics", "marketing", "campaigns", "tracking"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { url: s.str(2048, 1), source: s.str(100, 1), medium: s.str(100, 1), campaign: s.str(100, 1), term: s.str(100), content: s.str(100) },
@@ -295,7 +295,7 @@ export const seoTools: FleetTool[] = [
       "Score an email subject line for opens and deliverability: length, mobile truncation, spam trigger words, ALL CAPS, " +
       "excess punctuation, emoji, personalization and urgency, with suggestions. Newsletter and cold outreach optimization.",
     tags: ["email-marketing", "subject-line", "deliverability", "copywriting", "marketing"],
-    priceUsdc: "0.008",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { subject: s.str(300, 1) },

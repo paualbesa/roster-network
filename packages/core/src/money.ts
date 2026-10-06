@@ -36,3 +36,6 @@ export function compareUsdc(left: string, right: string): -1 | 0 | 1 {
   if (delta > 0n) return 1;
   return 0;
 }
+
+/** Paid listing / hire floor so amount clears Roster fee (1% + 0.003 USDC). */
+export const MIN_PAID_LISTING_USDC = "0.010000";

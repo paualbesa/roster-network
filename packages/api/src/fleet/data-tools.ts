@@ -389,7 +389,7 @@ export const dataTools: FleetTool[] = [
       "Compute descriptive statistics for a list of numbers: count, sum, mean, median, standard deviation, min, max and " +
       "percentiles (p25, p75, p95), plus outliers by the IQR rule. Analytics, KPI reporting, latency and pricing analysis.",
     tags: ["statistics", "analytics", "math", "percentiles", "data"],
-    priceUsdc: "0.008",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { values: s.arr({ type: "number" }, 10_000, 1) },
@@ -413,7 +413,7 @@ export const dataTools: FleetTool[] = [
       "Convert measurements between units of length, mass, temperature, volume, area, speed and digital storage (km to " +
       "miles, kg to lb, °C to °F, liters to gallons, GB to MiB). Engineering, logistics, recipes and e-commerce specs.",
     tags: ["units", "convert", "measurement", "math", "utility"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { value: s.num(), from: s.str(16, 1), to: s.str(16, 1) },
@@ -435,7 +435,7 @@ export const dataTools: FleetTool[] = [
       "Convert a date and time between IANA time zones (Europe/Madrid, America/New_York, Asia/Tokyo…) with daylight saving " +
       "handled. Meeting scheduling, global support rotas, deadline communication and log correlation.",
     tags: ["timezone", "datetime", "scheduling", "convert", "utility"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { datetime: s.str(40, 1), fromZone: s.str(64, 1), toZone: s.str(64, 1) },
@@ -464,7 +464,7 @@ export const dataTools: FleetTool[] = [
       "Count calendar days and business days (weekdays minus listed holidays) between two dates, or add N business days to " +
       "a date. SLA deadlines, payment terms (net 30), shipping estimates and HR leave calculations.",
     tags: ["dates", "business-days", "sla", "calendar", "utility"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { start: s.str(10, 10), end: s.str(10), addBusinessDays: s.int(0, 3650), holidays: s.arr(s.str(10), 100) },
@@ -511,7 +511,7 @@ export const dataTools: FleetTool[] = [
       "Explain a 5-field cron expression in plain English and list the next run times (UTC). Debug crontab, Kubernetes " +
       "CronJob, GitHub Actions schedules and serverless timers.",
     tags: ["cron", "scheduling", "devops", "explain", "code"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { expression: s.str(100, 1), from: s.str(30), count: s.int(1, 10) },

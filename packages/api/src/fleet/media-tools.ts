@@ -63,7 +63,7 @@ export const mediaTools: FleetTool[] = [
       "Read image metadata from base64 bytes without decoding pixels: format (PNG, JPEG, GIF, WebP, BMP), width, height, " +
       "aspect ratio, orientation and file size. Validate uploads, enforce dimension rules and pick responsive sizes.",
     tags: ["images", "metadata", "validation", "uploads", "media"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { base64: s.str(200_000, 1) },
@@ -106,7 +106,7 @@ export const mediaTools: FleetTool[] = [
       "Convert Markdown (headings, paragraphs, bold, italic, inline code, code blocks, lists, links, blockquotes) to safe, " +
       "escaped HTML with no script injection. Render READMEs, release notes, emails and CMS content.",
     tags: ["markdown", "html", "convert", "content", "docs"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { markdown: s.str(100_000, 1) },
@@ -185,7 +185,7 @@ export const mediaTools: FleetTool[] = [
       "Strip HTML to clean readable plain text: removes scripts, styles and tags, decodes entities, keeps paragraph breaks " +
       "and lists links separately. Prepare web pages and emails for LLMs, search indexing, summarization or text-to-speech.",
     tags: ["html", "text", "scraping", "cleaning", "llm"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { html: s.str(300_000, 1) },

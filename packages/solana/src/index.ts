@@ -29,7 +29,8 @@ export { prepareLock, settleEscrow, submitSignedTransaction } from "./engine.js"
 export type { PrepareLockInput, PrepareLockResult, SettleInput, SettleResult, SolanaCallOptions } from "./engine.js";
 export { SolanaFeeError } from "./errors.js";
 export type { SolanaFeeStatus } from "./errors.js";
-export { jobPriceMicros, quoteRosterNetworkFee } from "./fees.js";
+export { MIN_PAID_LISTING_USDC } from "@albesa/core";
+export { assertPaidListingPrice, jobPriceMicros, quoteRosterNetworkFee } from "./fees.js";
 export type { RosterNetworkFeeQuote } from "./fees.js";
 export {
   feePayerSigner,

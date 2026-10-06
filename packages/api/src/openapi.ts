@@ -507,7 +507,7 @@ export const openApiDocument = {
           "Build a VersionedTransaction that locks buyer USDC into an escrow ATA. Roster is the fee payer and returns a partially signed base64 transaction. Mock cluster by default; the buyer co-signs and submits. No broadcast.",
         responses: {
           "201": { description: "Partially signed lock transaction and the 1% + 0.003 USDC quote." },
-          "400": { description: "invalid_request or fee_exceeds_price" },
+          "400": { description: "invalid_request, price_too_low, or fee_exceeds_price" },
         },
       },
     },

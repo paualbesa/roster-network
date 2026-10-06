@@ -19,7 +19,7 @@ export type {
 export { quoteSandboxFee, SANDBOX_FEE_SCHEDULE, SANDBOX_MAX_ACTIVE_AGENTS, SANDBOX_TREASURY_GRANT_USDC } from "./fees.js";
 export { createId, createSandboxApiKey, hashSandboxApiKey } from "./ids.js";
 export { resolveRuntimeMode } from "./mode.js";
-export { addUsdc, compareUsdc, formatUsdc, MoneyError, parseUsdc } from "./money.js";
+export { addUsdc, compareUsdc, formatUsdc, MIN_PAID_LISTING_USDC, MoneyError, parseUsdc } from "./money.js";
 export { evaluateSpend, sumSpentTodayUsdc } from "./policy/engine.js";
 export type { PolicyDecision, SpendEvaluationInput } from "./policy/engine.js";
 export type {

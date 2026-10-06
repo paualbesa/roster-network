@@ -1,4 +1,4 @@
-import { formatUsdc, MoneyError, parseUsdc } from "@albesa/core";
+import { formatUsdc, MIN_PAID_LISTING_USDC, MoneyError, parseUsdc } from "@albesa/core";
 import { ROSTER_BASE_FEE_USDC, ROSTER_PERCENT_FEE } from "./constants.js";
 import { SolanaFeeError } from "./errors.js";
 
@@ -52,4 +52,26 @@ export function quoteRosterNetworkFee(jobPriceUsdc: string): RosterNetworkFeeQuo
 
 export function jobPriceMicros(jobPriceUsdc: string): bigint {
   return parseUsdc(quoteRosterNetworkFee(jobPriceUsdc).jobPriceUsdc);
+}
+
+/** Reject paid amounts below the public listing floor (also covers the Roster fee). */
+export function assertPaidListingPrice(amountUsdc: string): RosterNetworkFeeQuote {
+  let price: bigint;
+  try {
+    price = parseUsdc(amountUsdc);
+  } catch (error) {
+    if (error instanceof MoneyError) {
+      throw new SolanaFeeError(400, "invalid_request", error.message);
+    }
+    throw error;
+  }
+  const min = parseUsdc(MIN_PAID_LISTING_USDC);
+  if (price < min) {
+    throw new SolanaFeeError(
+      400,
+      "price_too_low",
+      `Listing price must be at least ${MIN_PAID_LISTING_USDC} USDC (Roster fee is 1% + 0.003 USDC).`,
+    );
+  }
+  return quoteRosterNetworkFee(amountUsdc);
 }
