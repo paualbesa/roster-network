@@ -714,6 +714,54 @@ export class AgentFinanceService implements ReputationHook {
     });
   }
 
+  /**
+   * Operator teardown: drop an organization, its users, keys, agents, wallets,
+   * policies, and KYC rows. Escrows/transactions/ledger stay for audit.
+   */
+  purgeOrganization(organizationId: string): Promise<{ purged: true; organizationId: string; email: string | null }> {
+    return this.enqueue(async () => {
+      const organization = this.store.organizations.get(organizationId);
+      if (!organization) {
+        throw new ServiceError(404, "not_found", "Organization not found.");
+      }
+      const user = this.userForOrganization(organizationId);
+      const email = user?.email ?? null;
+      for (const [hash, orgId] of [...this.store.apiKeys.entries()]) {
+        if (orgId === organizationId) this.store.apiKeys.delete(hash);
+      }
+      if (user) {
+        this.store.users.delete(user.id);
+        this.store.usersByEmail.delete(user.email);
+        this.store.passwordHashes.delete(user.id);
+        for (const [authId, linked] of [...this.store.authUsersById.entries()]) {
+          if (linked === user.id) this.store.authUsersById.delete(authId);
+        }
+      }
+      for (const [agentId, agent] of [...this.store.agents.entries()]) {
+        if (agent.organizationId !== organizationId) continue;
+        this.store.agents.delete(agentId);
+        this.store.wallets.delete(agent.walletId);
+        this.store.policies.delete(agent.policyId);
+      }
+      this.store.wallets.delete(organization.treasuryWalletId);
+      this.store.kycProfiles.delete(organizationId);
+      this.store.organizations.delete(organizationId);
+      this.commit();
+      return { purged: true as const, organizationId, email };
+    });
+  }
+
+  /** Look up an organization id by canonical email, or null. */
+  findOrganizationIdByEmail(email: string): Promise<string | null> {
+    return this.enqueue(async () => {
+      const canonical = canonicalEmail(email);
+      if (!canonical) return null;
+      const userId = this.store.usersByEmail.get(canonical);
+      if (!userId) return null;
+      return this.store.users.get(userId)?.organizationId ?? null;
+    });
+  }
+
   createAgent(organizationId: string, input: CreateAgentInput): Promise<CreateAgentResult> {
     return this.enqueue(() => this.createAgentUnlocked(organizationId, input));
   }

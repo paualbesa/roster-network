@@ -336,6 +336,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     service,
     registry,
     orchestrator,
+    jobs,
+    sellers,
     appHandle: app,
     ...(options.adminToken !== undefined ? { adminToken: options.adminToken } : {}),
   };

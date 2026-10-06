@@ -107,6 +107,16 @@ export class SellerDirectory {
     await this.persistence?.remove(`endpoint:${listingId}`);
   }
 
+  /** Drop a seller profile and free its founding seat (if any). */
+  async removeProfile(organizationId: string): Promise<SellerProfile | null> {
+    await this.init();
+    const profile = this.profiles.get(organizationId) ?? null;
+    if (!profile) return null;
+    this.profiles.delete(organizationId);
+    await this.persistence?.remove(`profile:${organizationId}`);
+    return { ...profile };
+  }
+
   /** Create or update the profile; enrols the founding program on first publish. */
   async upsertProfile(organizationId: string, patch: { payout?: PayoutWallet | null; enrolFounding?: boolean }): Promise<SellerProfile> {
     await this.init();

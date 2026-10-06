@@ -276,6 +276,62 @@ describe("admin operator API", () => {
     expect(expire.status).toBe(403);
     const boot = await app.request("/v1/admin/fleet/bootstrap", { method: "POST", headers: adminHeaders(TOKEN) });
     expect(boot.status).toBe(403);
+    const del = await app.request("/v1/admin/listings/cap_x", { method: "DELETE", headers: adminHeaders(TOKEN) });
+    expect(del.status).toBe(403);
+  });
+
+  it("deletes a listing and purges an account by email", async () => {
+    const app = createApp({ mode: "sandbox", adminToken: TOKEN });
+    const seller = await signupAccount(app, "e2e-x-1@example.com", "E2E One");
+    const listed = await app.request("/v1/registry/listings", {
+      method: "POST",
+      headers: { authorization: `Bearer ${seller.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify(sandboxReceiptListing()),
+    });
+    expect(listed.status).toBe(201);
+    const listingId = ((await listed.json()) as { listing: { id: string } }).listing.id;
+
+    const missing = await app.request("/v1/admin/listings/cap_missing", {
+      method: "DELETE",
+      headers: adminHeaders(TOKEN),
+    });
+    expect(missing.status).toBe(404);
+
+    const deleted = await app.request(`/v1/admin/listings/${listingId}`, {
+      method: "DELETE",
+      headers: adminHeaders(TOKEN),
+    });
+    expect(deleted.status).toBe(200);
+    const body = (await deleted.json()) as {
+      deleted: boolean;
+      listing: { id: string; name: string };
+    };
+    expect(body.deleted).toBe(true);
+    expect(body.listing.id).toBe(listingId);
+    expect((await app.request(`/v1/registry/listings/${listingId}`)).status).toBe(404);
+
+    const other = await signupAccount(app, "e2e-x-2@example.com", "E2E Two");
+    expect(other.apiKey).toBeTruthy();
+    const purged = await app.request("/v1/admin/accounts?email=e2e-x-2%40example.com", {
+      method: "DELETE",
+      headers: adminHeaders(TOKEN),
+    });
+    expect(purged.status).toBe(200);
+    const purgeBody = (await purged.json()) as { purged: boolean; email: string | null };
+    expect(purgeBody.purged).toBe(true);
+    expect(purgeBody.email).toBe("e2e-x-2@example.com");
+
+    const again = await app.request("/v1/admin/accounts?email=e2e-x-2%40example.com", {
+      method: "DELETE",
+      headers: adminHeaders(TOKEN),
+    });
+    expect(again.status).toBe(404);
+
+    const first = await app.request("/v1/admin/accounts?email=e2e-x-1%40example.com", {
+      method: "DELETE",
+      headers: adminHeaders(TOKEN),
+    });
+    expect(first.status).toBe(200);
   });
 });
 

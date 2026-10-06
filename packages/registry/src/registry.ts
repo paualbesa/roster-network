@@ -159,6 +159,23 @@ export class CapabilityRegistry {
     return structuredClone(listing);
   }
 
+  /** Hard-delete a listing from the index (admin / seller teardown). */
+  remove(id: string): CapabilityListing {
+    const listing = this.entries.get(id);
+    if (!listing) throw new RegistryError(404, "not_found", "Capability listing not found.");
+    const vector = this.vectors.get(id);
+    this.entries.delete(id);
+    this.vectors.delete(id);
+    try {
+      this.persist();
+    } catch (error) {
+      this.entries.set(id, listing);
+      if (vector) this.vectors.set(id, vector);
+      throw error;
+    }
+    return structuredClone(listing);
+  }
+
   get(id: string): CapabilityListing | null {
     const listing = this.entries.get(id);
     return listing ? structuredClone(listing) : null;
