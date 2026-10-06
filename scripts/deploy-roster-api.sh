@@ -27,7 +27,12 @@ echo "== pnpm install =="
 pnpm install --frozen-lockfile
 
 echo "== build packages/api =="
-pnpm --filter "@albesa/api..." build
+# The API serves remote MCP at /mcp from packages/mcp/dist, and @albesa/mcp only
+# dev-depends on @albesa/api, so build its workspace deps, then mcp, then the API.
+pnpm --filter "@albesa/api^..." build
+pnpm --filter "@albesa/sdk" build
+pnpm --filter "@albesa/mcp" build
+pnpm --filter "@albesa/api" build
 
 SERVER_JS="$ROOT/packages/api/dist/server.js"
 if [ ! -f "$SERVER_JS" ]; then
