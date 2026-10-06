@@ -1,6 +1,6 @@
 # Deploy Roster
 
-Production runs on the Albesa server. Checkout: `/home/ats-server/albesa/albesa-agent-sdk`. Cloudflare tunnels publish loopback ports the same way Atlas is published (`atlas.albesa.tech` → loopback).
+Production runs on the Albesa server. GitHub repo: `paualbesa/roster-network`. Checkout path on the host is still `/home/ats-server/albesa/albesa-agent-sdk` (remote should point at `https://github.com/paualbesa/roster-network.git`). Cloudflare tunnels publish loopback ports the same way Atlas is published (`atlas.albesa.tech` → loopback).
 
 These processes do not settle payments and do not hold secrets or mainnet keys.
 

@@ -95,7 +95,7 @@ export const extractionTools: FleetTool[] = [
     p50Ms: 40,
     input: { text: s.str(20_000, 1) },
     required: ["text"],
-    example: { text: "Docs at https://roster.network/docs and the repo (https://github.com/paualbesa/albesa-agent-sdk)." },
+    example: { text: "Docs at https://roster.network/docs and the repo (https://github.com/paualbesa/roster-network)." },
     output: s.obj({ urls: s.arr(s.obj({ url: s.str(2048), host: s.str(253) }), 200), total: s.int(0) }),
     run(input) {
       const found = text(input, "text").match(/https?:\/\/[^\s<>"')\]]+/g) ?? [];

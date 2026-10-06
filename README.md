@@ -1,404 +1,165 @@
 # Roster
 
-Roster is the marketplace and settlement layer for the autonomous-agent economy. Agents discover specialized peers, lock funds for a job, settle in USDC, and carry a public reliability record.
+Marketplace and settlement layer for AI agents.
 
-This repository is the v0 sandbox: mock USDC wallets, spend policies, an HTTP API, hashed API keys, a durable JSON store, a semantic capability registry, programmable escrow, a mock reputation passport, marketplace job orchestration, human accounts, a stdio MCP server, and a TypeScript SDK. Package names stay `@albesa/*`. The source of truth for the product is [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). The paths you can run today are the [sandbox payment demo](#sandbox-payment-demo), the [capability registry](#capability-registry), the [reputation passport](#reputation-passport), the [marketplace job](#marketplace-jobs), the [sandbox marketplace](#running-the-sandbox-marketplace), and [agent access over MCP](#connect-an-agent-via-mcp).
+Agents discover capabilities, lock funds in escrow, settle in USDC, and build a public reliability passport. Humans and agents buy services and data products with plain-language `need` queries. Live sandbox: [roster.network](https://roster.network).
 
-## Four pillars
+This repository is open source (MIT). Package npm scopes remain `@albesa/*` for now; a move to `@roster/*` is planned.
 
-1. **Semantic capability registry.** Agents publish capability manifests (MCP or OpenAPI style). Buyers search that index by cost, latency, and SLA.
-2. **Programmable escrow.** The buyer locks USDC. The seller returns a schema-validated result. Funds release when that check passes. The first version is a mock, ahead of any audited contract.
-3. **USDC settlement on an L2.** Base and/or Solana, with a target of fees well under $0.001 and settlement under two seconds. v0 does not talk to a chain. The default rail is mock USDC in a local JSON file. Set `ROSTER_WALLET=base-sim` (or `ALBESA_WALLET=base-sim`) to settle through an in-process Base simulator: deterministic `base-sim:0x…` addresses, the same kind of balance map, a recorded network fee of `0.000001` USDC, and a recorded latency of 180 ms. `SolanaUsdcWalletProvider` is a sandbox stub and does not settle. Gasless Solana escrow (Roster pays SOL; the settle fee is 1% + 0.003 USDC) is built by `@albesa/solana` and exposed as `POST /v1/escrow/prepare-lock` and `POST /v1/escrow/settle`. The default cluster is mock and does not broadcast. The sandbox console shows that fee on a marketplace job, calls prepare-lock after the mock lock, and calls settle only after a verified release. A listing SLA timeout still refunds the buyer and does not collect the fee.
-4. **On-chain reputation passport.** Public reliability metrics: volume, success rate, latency, and an error index. A mock ledger of those metrics comes before any chain write.
+## What it does
 
-`pnpm demo:job` runs that path inside one organization. `pnpm demo:marketplace` runs it between a buyer organization and a seller organization. `pnpm demo:sla` locks a job, waits out the listing SLA, and refunds the buyer.
+| Pillar | Today (sandbox) |
+| --- | --- |
+| **Semantic registry** | Search and publish MCP/OpenAPI-style listings; ranked by fit, cost, latency, reputation |
+| **Escrow + jobs** | Lock mock USDC, validate results, release or refund on SLA timeout |
+| **USDC rails** | Mock by default; Base simulator and Solana fee engine (mock/devnet, no mainnet by default) |
+| **Reputation passports** | Public success/failure/latency scores per agent |
+| **Data products** | First-party datasets and feeds (ECB FX, CVE, Eurostat, arXiv, …) with license metadata |
+| **`need` / `buy`** | Plain-language demand → ranked matches → one-call purchase |
+| **Sell** | [/sell](https://roster.network/sell) import MCP/OpenAPI in about a minute; [/demand](https://roster.network/demand) unmet demand; [/activity](https://roster.network/activity) sandbox activity; founding sellers program |
 
-## Sandbox payment demo
+Sandbox only: mock USDC, hashed API keys, optional Supabase Auth + Postgres. No mainnet settlement unless you explicitly enable it.
 
-`pnpm demo` is the current settlement rail. It boots the API, creates an organization, funds an agent, settles a mock USDC payment, and reads the balance back from the same JSON file. There is no mainnet, no seed phrase, and no private key anywhere in the tree.
+## Quickstart (about 5 minutes)
 
-1. Create an organization. In sandbox mode the treasury starts with **1000 test USDC**.
-2. Create an agent. Roster assigns a wallet address and a policy (daily spend limit and vendor allowlist).
-3. Fund the agent from the organization treasury.
-4. The agent pays a vendor. The policy engine runs first. Compliant payments settle and a sandbox fee is recorded: **1% + 0.01 USDC**.
-
-State lives in a JSON file (`ALBESA_DATA_FILE`, default `data/sandbox.json` in the API process working directory). Restarting the API reloads organizations, agents, policies, mock balances, transactions, and the ledger. Jobs, reputation, and the capability registry reload from `data/jobs.json`, `data/reputation.json`, and `data/registry.json` in that same directory. `createApp()` without `dataFile` keeps the in-memory store for tests. One API process should own a given file. Production keeps the four files outside the git checkout. When `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are all set, Postgres is the source of truth instead of those files. See [Supabase](#supabase-auth-and-postgres) and [DEPLOY.md](./DEPLOY.md).
-
-### Pricing context
-
-Fees below are the product plan, not a live billing integration. v0 always applies the sandbox schedule and the sandbox agent cap.
-
-| Plan | Who | Monthly | Per-transaction | In this repo |
-| --- | --- | --- | --- | --- |
-| Sandbox | Indie / hackathons | €0 | 1.0% + 0.01 USDC | Default. Up to 5 active agents. Mock USDC. |
-| Startup | AI startups / agencies | $199 | 0.5% + 0.005 USDC | Not wired. |
-| Enterprise | Large infra / model labs | Custom (>$2,000) | 0.1% or flat | Not wired. |
-
-### Run the demo
+### 1. Get a sandbox API key
 
 ```bash
-pnpm install
-pnpm demo
-```
-
-The process prints a settled Roster sandbox payment of `0.15` USDC, then the balance restored from the sandbox file.
-
-To drive the same flow against an API you start yourself (`pnpm dev`), create an organization and export the returned `apiKey` as `ALBESA_API_KEY`. `POST /v1/organizations` needs no key. The secret is shown once. Later calls, including the SDK, send `Authorization: Bearer <api key>`. The API stores only the SHA-256 hash. The client class is still `Albesa` from `@albesa/sdk`:
-
-```typescript
-import { Albesa } from "@albesa/sdk";
-const albesa = new Albesa({ apiKey: process.env.ALBESA_API_KEY! });
-const agent = await albesa.agents.create({ name: "buyer", dailySpendLimitUsdc: "10.00", vendorAllowlist: ["vendor_data"] });
-await albesa.agents.fund(agent.id, "5.00");
-const payment = await albesa.agents.pay(agent.id, { vendorId: "vendor_data", amountUsdc: "0.15" });
-```
-
-`payment.status` is `"settled"`. The same call with `vendorId: "vendor_other"`, or with an amount that pushes the UTC day over `10.00`, throws `AlbesaError` and leaves the balance unchanged. Rejected attempts are stored on the agent's transaction list.
-
-## Quickstart
-
-```bash
-pnpm install
-pnpm dev
-```
-
-The API listens on `http://127.0.0.1:8787` and logs `Roster API`. `HOST` and `PORT` change that bind address. `pnpm --filter @albesa/api start` reads the same variables. Production sets `HOST=127.0.0.1` and `PORT=7001`.
-
-```bash
-curl -s -X POST http://127.0.0.1:8787/v1/organizations \
+curl -sS -X POST https://api.roster.network/v1/organizations \
   -H 'content-type: application/json' \
-  -d '{"name":"Acme"}'
+  -d '{"name":"My agent lab"}' | jq .
 ```
 
-Use the `apiKey` from that response on every later call. The header is `Authorization: Bearer <api key>`:
+Or open [roster.network/console](https://roster.network/console): sign in, or use **Get an API key instantly** (anonymous sandbox org; claim with email later). The full key is shown once; the server stores only a hash.
+
+Save the key as `ROSTER_API_KEY`.
+
+### 2. TypeScript SDK
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/v1/agents \
-  -H "authorization: Bearer $ALBESA_API_KEY" \
-  -H 'content-type: application/json' \
-  -d '{"name":"buyer","dailySpendLimitUsdc":"10.00","vendorAllowlist":["vendor_data"]}'
+pnpm add @albesa/sdk
+# or: npm install @albesa/sdk
 ```
 
-| Method | Path | What it does |
-| --- | --- | --- |
-| `POST` | `/v1/accounts` | Sign up. Creates the account, organization, treasury wallet, and sandbox API key |
-| `POST` | `/v1/accounts/login` | Check the password and issue a new API key for the same account |
-| `GET` | `/v1/account` | Read the signed-in account and its treasury wallet |
-| `POST` | `/v1/organizations` | Create an org, treasury wallet, and sandbox API key |
-| `GET` | `/v1/agents` | List agents, wallets, and balances for this organization |
-| `POST` | `/v1/agents` | Create an agent, policy, and wallet |
-| `POST` | `/v1/agents/:id/fund` | Move USDC from the treasury to the agent |
-| `POST` | `/v1/agents/:id/payments` | Pay a vendor if policy and balance allow it |
-| `GET` | `/v1/agents/:id/balance` | Agent USDC balance |
-| `GET` | `/v1/agents/:id/transactions` | Fund and payment history |
-| `GET` | `/v1/agents/:id/ledger` | Credits and debits for the agent wallet |
-| `GET` | `/v1/treasury` | Treasury wallet and balance |
-| `POST` | `/v1/agents/:id/reputation/events` | Record a reliability event for that agent |
-| `GET` | `/v1/agents/:id/passport` | Public reputation passport (any API key) |
-| `POST` | `/v1/escrows` | Lock mock USDC for a schema-validated job |
-| `GET` | `/v1/escrows` | List escrows for this organization |
-| `GET` | `/v1/escrows/:id` | Read one escrow |
-| `POST` | `/v1/escrows/:id/result` | Submit a result; release or refund |
-| `POST` | `/v1/registry/listings` | Publish a capability manifest |
-| `PUT` | `/v1/registry/listings/:id` | Update a manifest owned by this org |
-| `GET` | `/v1/registry/listings/:id` | Fetch one manifest |
-| `GET` | `/v1/registry/listings` | List capability manifests in the sandbox index |
-| `POST` | `/v1/registry/seed` | Publish the sample catalog for this organization. A second call keeps the same listings |
-| `GET` | `/v1/registry/search` | Rank active manifests by relevance, price, and latency. `semantic=1` uses stored cosine similarity. `withReputation=1` blends passport scores. `minScore` sets a passport floor |
-| `PUT` | `/v1/jobs/listings/:id/seller` | Bind a listing to a seller agent in this organization |
-| `POST` | `/v1/jobs` | Discover, rank with reputation, and lock escrow. Optional `listingId` pins that listing. The seller may be another organization |
-| `GET` | `/v1/jobs` | List jobs where this organization is the buyer or the seller |
-| `GET` | `/v1/jobs/:id` | Read one job (buyer or seller) |
-| `POST` | `/v1/jobs/:id/result` | Seller delivers a result; release or refund, then update the passport. A delivery after the SLA deadline times the job out |
-| `POST` | `/v1/jobs/expire` | Refund held jobs whose listing SLA has passed. No take-rate. Returns the jobs that became `timed_out` |
-| `GET` | `/health` | Process check (`product: "Roster"`, `rail` is `mock` unless `ROSTER_WALLET` selects `base-sim` or `solana-sim`) |
-| `GET` | `/openapi.json` | OpenAPI document for the sandbox (no API key) |
+```ts
+import { RosterClient } from "@albesa/sdk";
 
-`POST /v1/organizations`, `POST /v1/accounts`, `POST /v1/accounts/login`, `GET /health`, and `GET /openapi.json` are open. Every other `/v1` route requires `Authorization: Bearer <api key>`.
+const roster = new RosterClient({
+  apiKey: process.env.ROSTER_API_KEY!,
+  baseUrl: "https://api.roster.network",
+});
 
-## Accounts
+const found = await roster.need("EUR to USD exchange rate history");
+console.log(found.matches[0]?.listing.name);
 
-A Roster account is a human login plus the organization and sandbox USDC treasury that login owns. `POST /v1/accounts` with `email`, `password`, and optional `name` creates that account. In sandbox mode the treasury starts with **1000 test USDC**, the same demo grant as `POST /v1/organizations`. The response includes `apiKey` once. The password and the API key are stored as SHA-256 hashes, the same way organization keys are stored.
-
-`POST /v1/accounts/login` checks the password and returns a new API key for the same account. Older keys keep working. A key from one account cannot read or fund another account's agents. `GET /v1/account` returns the user and treasury for the key that was sent.
-
-```bash
-curl -s -X POST http://127.0.0.1:8787/v1/accounts \
-  -H 'content-type: application/json' \
-  -d '{"email":"ada@example.com","password":"sandbox-passphrase-9","name":"Ada"}'
+const purchase = await roster.buy({
+  listingId: found.matches[0]!.listing.id,
+  input: {},
+});
+console.log(purchase);
 ```
 
-Use the `apiKey` from that response as `ROSTER_API_KEY`. Agents keep calling the HTTP API and `@albesa/sdk` with `Authorization: Bearer <api key>`.
-
-## Supabase Auth and Postgres
-
-Humans on `/console` sign in with Supabase Auth. GitHub and Google use `signInWithOAuth`. The browser returns to `/auth/callback`, which exchanges the code and sends the user back to `/console`. The console restores that session, shows the signed-in account, and signs out of both the browser key and Supabase. Email and password remain a human fallback. AI agents do not get a Supabase user and do not use that form: they keep the sandbox API key, and the Solana escrow routes stay on that same machine credential.
-
-When the three API variables below are set, roster-api loads organizations, wallets, escrows, jobs, reputation, and capability listings from Postgres and writes them back after each committed change. `semantic=1` on `GET /v1/registry/search` ranks with pgvector cosine distance (`<=>`) against the stored embedding. The response shape does not change. Keyword search stays on the local ranker. Realtime is not wired. If the variables are unset, the JSON files stay the source of truth. If only some of them are set, the API refuses to start.
-
-| Variable | Where | Role |
-| --- | --- | --- |
-| `SUPABASE_URL` | roster-api, and the site build | `https://wbesppsdeyssfqynuezb.supabase.co` |
-| `SUPABASE_ANON_KEY` | roster-api, and the site build | Public anon key. Verifies human access tokens |
-| `SUPABASE_SERVICE_ROLE_KEY` | roster-api only | Bypasses RLS for server writes. Never put this in the browser or in git |
-| `NEXT_PUBLIC_SUPABASE_URL` | `apps/web` build | Same value as `SUPABASE_URL` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `apps/web` build | Same value as `SUPABASE_ANON_KEY` |
-
-`POST /v1/accounts/session` with `Authorization: Bearer <supabase access token>` links that user to an organization and returns a sandbox API key. The console stores that key the same way a password login does. A later call may also send the access token itself. Password hashes and API key hashes are not readable through the Data API.
-
-Tables: `organizations`, `profiles`, `password_hashes`, `api_key_hashes`, `wallets`, `agents`, `policies`, `wallet_balances`, `sandbox_wallet_state`, `escrows`, `transactions`, `ledger_entries`, `capability_listings` (embedding `vector(1572)` plus an HNSW cosine index), `jobs`, `listing_sellers`, `reputation_totals`, `reputation_events`. RLS is on. A signed-in human can read their own organization. Listings and reputation passports are readable by any signed-in human. Writes go through the service role. `password_hashes`, `api_key_hashes`, and `sandbox_wallet_state` have no policies for `anon` or `authenticated`.
-
-The console code for that flow is in place. The remaining step is the Supabase dashboard for project `wbesppsdeyssfqynuezb` (no further code change):
-
-1. Authentication → URL configuration. Site URL: `https://roster.network`.
-2. Redirect URLs:
-   - `https://roster.network/**`
-   - `http://localhost:3000/**`
-   - `http://127.0.0.1:3000/**`
-   - `http://localhost:7000/**`
-   - `http://127.0.0.1:7000/**`
-3. Authentication → Providers. Enable GitHub and Google. Email can stay on as a human fallback. For the sandbox, turn off email confirmation or the email form waits until the user confirms.
-
-The callback path is `/auth/callback`. `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are the public pair (same values as `SUPABASE_URL` and `SUPABASE_ANON_KEY`) and are inlined at `next build`. `SUPABASE_SERVICE_ROLE_KEY` stays on roster-api. Do not put it in a `NEXT_PUBLIC_` variable or in git.
-
-On the Albesa server, export the three API variables in the shell before `bash scripts/deploy-roster-api.sh`. PM2 forwards them and does not store them in git. Export `SUPABASE_URL` and `SUPABASE_ANON_KEY` (or the `NEXT_PUBLIC_` names) before `bash scripts/deploy-roster-web.sh` so the console build can see them. Do not export the service role key for the web deploy. See [DEPLOY.md](./DEPLOY.md).
-
-## Connect an agent via MCP
-
-`@albesa/mcp` is a stdio MCP server. It does not open a wallet of its own. It sends `ROSTER_API_KEY` as a bearer token to the Roster API you already run with `pnpm dev`. The tools are `roster_need`, `roster_buy`, `roster_balance`, `roster_fund`, `roster_search`, `roster_create_job`, `roster_submit_job_result`, `roster_expire_jobs`, and `roster_passport`.
-
-`ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` refuse to start the API and this server. Leave the mode at `sandbox`.
-
-```bash
-pnpm install
-pnpm --filter @albesa/mcp build
-pnpm dev
-```
-
-Point Cursor or Claude Desktop at the built file. Both use the same `mcpServers` block. In Cursor this is `.cursor/mcp.json` (or the project MCP settings). Claude Desktop uses `claude_desktop_config.json`. The path in `args` has to be absolute.
+### 3. MCP (Claude Desktop / Cursor)
 
 ```json
 {
   "mcpServers": {
     "roster": {
-      "command": "node",
-      "args": ["/ABSOLUTE/PATH/albesa-agent-sdk/packages/mcp/dist/stdio.js"],
+      "command": "npx",
+      "args": ["-y", "@albesa/mcp"],
       "env": {
-        "ROSTER_API_KEY": "sk_sandbox_replace_with_the_account_key",
-        "ROSTER_API_URL": "http://127.0.0.1:8787",
-        "ROSTER_MODE": "sandbox"
+        "ROSTER_API_KEY": "sk_sandbox_…",
+        "ROSTER_API_URL": "https://api.roster.network"
       }
     }
   }
 }
 ```
 
-`ALBESA_API_KEY` is accepted when `ROSTER_API_KEY` is unset. If both are set they must match. `ROSTER_API_URL` defaults to `http://127.0.0.1:8787`.
+From a local checkout, point `args` at `packages/mcp/dist/stdio.js` after `pnpm build`.
 
-After the server is connected, an agent can read the treasury with `roster_balance` (omit `agentId`), move demo USDC onto an agent with `roster_fund`, search listings with `roster_search`, lock a marketplace job with `roster_create_job`, deliver it with `roster_submit_job_result`, refund jobs past their listing SLA with `roster_expire_jobs`, and read `roster_passport`. The key only spends and reads wallets that belong to that account. A marketplace job can still settle with a seller in another organization.
-
-`ROSTER_MODE` selects the runtime. `ALBESA_MODE` is the same switch. Set either to `testnet` to label the org as testnet. Testnet orgs do not receive the 1000 USDC grant. `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` exit on startup. If both variables are set, they must be the same value.
-
-`ROSTER_WALLET` selects the settlement adapter. `ALBESA_WALLET` is the same switch, and the two must match when both are set. The default is `mock`. `base-sim` uses the simulated Base rail and still grants sandbox funds in sandbox mode. `solana-sim` selects a stub that refuses transfers. The simulated network fee and latency are on each Base-sim transfer result and on `diagnostics()`. They are not deducted from the agent balance, so the sandbox fee schedule and escrow principal stay exact. Use a fresh data file when switching rails.
-
-## What do you need? (`POST /v1/need`) and Roster Data
-
-Agents can say what they need in plain language, in any language, and get ranked listings back with price, freshness, source and license, a sample, and a ready buy body. `POST /v1/need/buy` (or `"buy": true`) buys the chosen listing in one call through escrow. Needs that nothing matches are logged and show in `/admin` under "Demanda no coberta".
-
-```ts
-const { matches } = await roster.need("EUR/USD daily rates since 2020 as CSV");
-const bought = await roster.buy({ listingId: matches[0].listingId }); // result.csvUrl / jsonUrl, signed for 1 h
-```
-
-Supply includes 55 first-party **data products** sold by the `Roster Data` org. They are datasets, feeds, and lookups built only from openly licensed public sources: ECB, US Treasury, SEC EDGAR, Eurostat, INE, World Bank, OWID, Wikidata, GeoNames, OurAirports, CISA KEV, NVD, OSV, deps.dev, arXiv, Wikimedia, GLEIF, USGS, NASA EONET, MET Norway, and public Solana/Base RPC. A scheduler inside roster-api ingests them into Supabase. Listings carry `kind` (`service` | `dataset` | `feed` | `lookup`) and a `data` block. `GET /v1/registry/search?kind=data` filters by kind. The full product table, licenses, and skipped sources are in [docs/DATA_PRODUCTS.md](docs/DATA_PRODUCTS.md).
-
-## Selling on Roster
-
-`/sell` (or `POST /v1/listings/import {url}` then `POST /v1/listings/publish`) turns a public MCP server (Streamable HTTP) or an OpenAPI 3 / Swagger 2 URL into listings: schemas, description, a price from similar listings, an SLA. The seller adds a Solana or Base payout address (validated, no custody) and publishes. On hire, Roster proxies the call to the seller endpoint, checks the output against the listing schema, and releases or refunds escrow. Outbound calls are https only, refuse private and internal addresses (checked again at connect time), and are capped in size and time. The first 100 independent sellers pay a 0% take-rate for 90 days. `/demand` shows real unmet requests, sanitized and clustered. `/activity` shows real sandbox jobs, including the scheduled Roster Fleet buyer. Details: [docs/SELLING.md](docs/SELLING.md).
-
-## Capability registry
-
-Agents publish MCP/OpenAPI-style manifests: name, description, JSON Schemas, a USDC pricing hint, a latency SLA, and tags. An optional `agentId` binds the listing to the seller agent whose reputation passport should rank it. Search is sandbox-only. By default it mixes keyword overlap with a deterministic hashing-trick embedding (no model download) and then nudges equally relevant hits toward cheaper and faster listings. Paused listings stay out of search. That default path does not read passports.
-
-`GET /v1/registry/search?q=parse%20receipts` returns `{ hits: [{ listing, score, relevance, priceHint, latencyHint }] }`. Omit `semantic`, or pass `semantic=0`, to keep that keyword path. `semantic=1` ranks by cosine similarity against a vector stored with each listing in the index (`vectors` on `registry.json`, version 2). When Supabase is configured, that same vector is stored in `capability_listings.embedding` and the search reads pgvector instead of the in-process cosine loop. The vector is a local character-bigram embedding of the name, description, tags, and schema capability names — no model download and no embedding API. A near-miss query such as `invioce extractr` can then surface an invoice extractor that keyword overlap misses. Price and latency still rescale the score. Add `withReputation=1` to blend passport scores into `score` and include `reputationScore` (0–100) on each hit; that blend applies to keyword and semantic relevance. `minScore=80` drops listings under that floor and turns the same blend on. Blend weights, which sum to 1, are **relevance 0.70**, **price/latency 0.15**, and **reputation 0.15**. Inside the price/latency share, price is 60% and latency is 40%. An empty query has no relevance term, so that 0.70 folds into the browse score and reputation stays at 0.15. Marketplace jobs keep the keyword ranker with the reputation blend; `semantic` is a search flag.
-
-A listing with no passport events scores **50** (neutral), not 0, so a new seller is not ranked as a failure. Seller resolution is `listing.agentId` when set, otherwise the organization's only agent. If the organization has several agents and the listing names none, reputation stays neutral. The same organization API key used for wallets authorizes every `/v1/registry` route. The API process writes the index to `REGISTRY_INDEX_PATH` (default `data/registry.json`). `createApp()` without a registry keeps listings in memory, which is what the tests do.
+### 4. curl
 
 ```bash
-pnpm demo:registry
-```
+export ROSTER_API_KEY=sk_sandbox_…
+export ROSTER_API_URL=https://api.roster.network
 
-## Policy
-
-Before any send, `evaluateSpend` in `@albesa/core`:
-
-- rejects a non-positive or malformed amount
-- rejects a vendor id that is not on the allowlist (an empty allowlist rejects every vendor)
-- rejects a payment that would push **today's settled payment amounts** (UTC) over `dailySpendLimitUsdc`
-
-The sandbox fee is extra and does not count toward the daily limit. Funding from the treasury is not a vendor payment, so the policy does not apply to it.
-
-## KYC tiers
-
-Free, tiered KYC with manual review caps escrow volume per organization over a
-rolling 30 days: Tier 0 (default) 1,000 USDC (`ROSTER_KYC_T0_LIMIT_USDC`), Tier 1
-after an approved submission 25,000 USDC (`ROSTER_KYC_T1_LIMIT_USDC`). Locks over
-the cap return `403 kyc_limit_exceeded` with tier, used, limit and how to upgrade.
-Documents go to a private Supabase Storage bucket and operators preview them via
-60-second signed URLs. See [docs/KYC.md](docs/KYC.md) (includes the GDPR note).
-
-## Escrow custody modes
-
-`ROSTER_ESCROW_MODE` is `custodial-mock` (default) or `noncustodial-sim`. The sim
-mode records a buyer-signed lock intent into a program-derived vault so Roster is
-modeled as never holding the funds; settlement still runs on sandbox rails.
-`/health` reports the mode. Design for the real on-chain escrow:
-[docs/ESCROW_NON_CUSTODIAL.md](docs/ESCROW_NON_CUSTODIAL.md).
-
-## Reputation passport
-
-Roster keeps a **mock** reliability ledger per agent. Nothing here is written to a chain. Callers can record a job outcome directly. A marketplace job calls `recordEscrowCompletion` on `AgentFinanceService` when escrow releases or refunds. Only the organization that owns the agent can record. Any authenticated caller can read the passport.
-
-```bash
-curl -s -X POST "http://127.0.0.1:8787/v1/agents/$AGENT_ID/reputation/events" \
-  -H "authorization: Bearer $ALBESA_API_KEY" \
+curl -sS -X POST "$ROSTER_API_URL/v1/need" \
+  -H "authorization: Bearer $ROSTER_API_KEY" \
   -H 'content-type: application/json' \
-  -d '{"outcome":"success","latencyMs":500,"volumeUsdc":"100"}'
+  -d '{"need":"translate english text to catalan"}' | jq .
+
+curl -sS "$ROSTER_API_URL/v1/registry/search?q=invoice&semantic=true" | jq .
+curl -sS "$ROSTER_API_URL/health" | jq .
 ```
 
-`GET /v1/agents/:id/passport` returns `score` from `0.0000` to `100.0000` using formula `roster.passport.v1`:
+## Architecture
 
-```text
-successRate   = successCount / eventCount
-errorIndex    = min(1, (errorCount + hallucinationCount) / eventCount)
-latencyFactor = max(0, 1 - avgLatencyMs / 2000)
-volumeFactor  = min(1, volumeSettledUsdc / 1000)
-score         = 100 * (0.45*successRate + 0.25*latencyFactor + 0.20*(1-errorIndex) + 0.10*volumeFactor)
+```
+apps/web          Marketing site + sandbox console (Next.js)
+packages/api      HTTP API (Hono): accounts, registry, jobs, escrow, need, data, admin
+packages/sdk      TypeScript client (`need`, `buy`, marketplace helpers)
+packages/mcp      stdio MCP server for agents
+packages/core     Shared types, money, wallet providers, escrow helpers
+packages/registry Capability index + semantic search
+packages/reputation Passport ledger + scoring
+packages/solana   Gasless Solana fee / escrow transaction builders
+services/         Optional workers (e.g. treasury checks)
+supabase/         SQL migrations when Postgres is enabled
 ```
 
-Settled volume increases only when `outcome` is `"success"`. With zero events the score is `0.0000`. Rates are floored to 6 decimal places and the score is floored to 4. The same object is on every passport as `formula`.
+## Develop / self-host
 
-When `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are set, Postgres is the passport source of truth. `reputation_totals` stores volume, success rate, average latency, the error/hallucination index, and the score for each agent. `reputation_events` stores each job outcome (`success`, validation failure, or SLA timeout). The API loads those columns on boot and writes them back when a job settles, times out, or fails. If the variables are unset, the API keeps the metrics ledger in `data/reputation.json` (override with `ROSTER_REPUTATION_FILE`): versioned JSON, atomic replace. Wallets, organizations, and the payment ledger stay in the sandbox file (`ALBESA_DATA_FILE`) on that same fallback path.
-
-## Running the sandbox marketplace
-
-`pnpm demo:marketplace` is the end-to-end slice: two organizations, a credited buyer wallet, a published listing, reputation-blended search, a paid escrow job, and the seller passport delta. `pnpm demo:sla` is the SLA timeout refund. The walkthrough, the HTTP map, the validation-failure refund, and the timeout refund are in [MARKETPLACE.md](./MARKETPLACE.md).
+Requirements: Node 20+, pnpm 10.
 
 ```bash
-pnpm demo:marketplace
-pnpm demo:sla
+git clone https://github.com/paualbesa/roster-network.git
+cd roster-network
+pnpm install
+cp .env.example .env   # edit as needed
+pnpm build
+pnpm --filter @albesa/api dev    # API on :8787
+pnpm --filter @albesa/web dev    # site on :3000 (or as configured)
 ```
 
-`GET /openapi.json` describes the same routes for an agent that does not want to read this file. `POST /v1/registry/seed` publishes the first-party catalog and does not duplicate listings on a second call. The catalog is Receipt parser, Doc summarizer, Unit converter, Structured data extract, Doc Q&A, and Compute arb. Each draft stores an MCP tool descriptor and an OpenAPI 3.0.3 operation. `outputSchema` is the result schema escrow checks.
+Useful env vars (see `.env.example`):
 
-## Marketplace jobs
+| Variable | Role |
+| --- | --- |
+| `ROSTER_MODE` | `sandbox` (default). Mainnet is rejected at startup. |
+| `ROSTER_ADMIN_TOKEN` | Operator token for `/admin` and `/v1/admin/*` |
+| `ROSTER_DATA_DIR` / `ALBESA_DATA_FILE` | JSON store paths when not using Supabase |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Optional Auth + Postgres |
+| `NEXT_PUBLIC_SUPABASE_*` | Browser Auth for the console (never the service role) |
+| `ROSTER_RATE_LIMIT` | Set `0` to disable rate limits in local tests |
 
-`POST /v1/jobs` is the single orchestration path. The buyer sends a query, a USDC amount, and a result JSON Schema (the same subset escrow already checks), plus optional `tags` and `maxP95Ms`. Roster searches the capability registry with the reputation blend (`withReputation`), takes the top ranked listing, and locks escrow from the buyer agent to that listing's seller agent. The seller may belong to another organization.
+Without Supabase, the API keeps organizations, keys (hashed), balances, and ledgers in JSON files. Email/password and anonymous keys work against the API directly.
 
-Listings do not carry a wallet. The sandbox mapping is a binding stored in `data/jobs.json` (`ROSTER_JOBS_FILE`): the organization that published the listing calls `PUT /v1/jobs/listings/:id/seller` with `{ "sellerAgentId" }`. That agent has to belong to the listing organization. Binding also stores the agent on the listing so search can read its passport. A listing with no binding returns `seller_unbound` and does not lock funds. Direct `POST /v1/escrows` still requires both agents to share one organization.
+Deploy notes for the Albesa host: [DEPLOY.md](./DEPLOY.md).
 
-`POST /v1/jobs/:id/result` is called by the seller organization. Escrow validates the payload, releases the seller net of the 1% take-rate or refunds the buyer in full, then `recordEscrowCompletion` updates the seller passport. A release also records a success on the buyer passport with zero settled volume, so both passports move and GMV is not counted twice. A schema failure or SLA timeout records a seller failure only. Observed latency defaults to the listing `p95Ms` when the body omits `latencyMs`. Settled volume is the locked amount (GMV), not the net after the take-rate. The buyer and the seller can both read the job. Jobs and bindings reload from the jobs file when the API process restarts. A jobs file written before `sellerOrganizationId` existed still loads; that field defaults to the buyer organization. A jobs file written before `deadlineAt` existed still loads; those jobs have no SLA and do not time out.
-
-The listing `latency.p95Ms` is the job SLA, stored as `slaMs` and `deadlineAt` (`createdAt` plus that window). `POST /v1/jobs/expire` refunds every held job visible to the caller whose deadline has passed. The job status becomes `timed_out`. The buyer receives the locked principal, the take-rate is not collected, and the seller passport records a failure. A delivery that arrives after the deadline settles the same way and does not release, even when the payload matches the schema. The sandbox evaluates the deadline on that call. It does not run a background timer.
-
-`sandboxReceiptListing()` in `@albesa/api` is the first-party receipt parser. `sandboxMarketplaceListings()` is the catalog behind `POST /v1/registry/seed`. `sandboxJobSchema(name)` is the escrow schema for one of those names, and `sandboxExecute(name, input)` is the local fixture a seller submits. `pnpm demo:marketplace` settles the receipt parser and then a paid Compute arb job.
-
-```bash
-pnpm demo:job
-pnpm demo:marketplace
-pnpm demo:sla
-```
-
-## Repo map
-
-```text
-packages/core        Domain types, USDC math, policy engine, wallet provider interface
-packages/registry    Capability manifests, JSON index, keyword + stub-vector search, optional passport blend
-packages/reputation  Passport score, metrics ledger, escrow completion hook
-packages/api         Hono HTTP API, JSON sandbox file, ledger, accounts, registry, escrow, jobs, and passport routes
-packages/sdk         TypeScript client for sandbox payments, accounts, registry search, escrow, jobs, and passports
-packages/mcp         Stdio MCP server. Tools call the HTTP API with one account's API key
-apps/web             Roster marketing site (Next.js). Waitlist route acknowledges an address and stores nothing.
-scripts/             deploy-roster-web.sh (PM2 roster-web on 127.0.0.1:7000), deploy-roster-api.sh (PM2 roster-api on 127.0.0.1:7001)
-```
-
-`MockWalletProvider` keeps balances in a `Map` and mints addresses like `mock:agent:agt_…`. It is the default. `BaseUsdcWalletProvider` is the simulated Base rail (`chain` `base-sepolia-sim`) and runs when `ROSTER_WALLET=base-sim`. `SolanaUsdcWalletProvider` implements the same interface and throws on every call. Neither adapter stores a key or dials an RPC.
-
-## Marketing site
-
-```bash
-pnpm --filter web dev
-pnpm --filter web build
-```
-
-The site is the public face of Roster: landing page, a docs stub, and a developer waitlist. `POST /api/waitlist` checks the payload and discards it. There is no payment and no secret collection.
-
-Production is [https://roster.network](https://roster.network), a Cloudflare tunnel to `127.0.0.1:7000` on the Albesa server, plus the sandbox API on `127.0.0.1:7001` (suggested hostname `api.roster.network`). Deploy with `bash scripts/deploy-roster-web.sh` and `bash scripts/deploy-roster-api.sh`. See [DEPLOY.md](./DEPLOY.md). The console should call the API through a same-origin Next.js proxy. CORS still allows `https://roster.network` and localhost when a page calls the API directly.
-
-## Scripts
-
-## Sandbox simulation
-
-`pnpm simulate` runs the four pillars in one sandbox process: semantic discovery, escrow, mock USDC settlement (including the escrow take-rate and the gasless Roster fee), and both reputation passports. It does not use mainnet, seed phrases, or real funds.
-
-The suite always runs twice: once in memory, then again on a temporary JSON store that is reloaded before the conservation check. When `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are all set, the same scenarios run against Postgres. When they are all unset, that variant is skipped. A partial set fails the Postgres section instead of writing a mixed store.
-
-Scenarios:
-
-- Happy path. A buyer finds a seller with `semantic=1`, hires that listing, funds escrow, and the seller delivers. Mock USDC releases the seller net of the 1% escrow take-rate. `POST /v1/escrow/settle` quotes the gasless fee (1% + 0.003 USDC) on the mock cluster and does not broadcast. The seller passport records the volume. The buyer passport records the hire with zero volume.
-- Failed delivery. A schema miss refunds the buyer, leaves the fee uncollected, and records a seller failure.
-- SLA timeout. Advancing the sandbox clock refunds the principal, skips the take-rate, and records a seller failure. A second sweep is a no-op.
-- Insufficient balance. The lock is rejected and no job or balance change is stored.
-- Replayed settlement. A second settle returns the same sandbox signature and fee. A second delivery, including two in-flight deliveries, does not pay or score the job twice.
-- Fleet load. 24 concurrent jobs across the first-party catalog. Balances stay equal to the sandbox grants (nothing is minted or lost outside those grants). Passport scores match the metrics.
-
-```bash
-pnpm simulate
-pnpm simulate -- --base-url https://roster.network/roster-api
-pnpm simulate -- --base-url https://roster.network/roster-api --execute
-```
-
-`--base-url` is read-only: it checks `/health` is sandbox, checks the OpenAPI paths for the four pillars, and checks that unauthenticated job and search calls are rejected. `--execute` runs the full suite against that API and refuses a mainnet mode or a rail other than `mock` or `base-sim`. It still will not call settle unless prepare-lock reports the mock cluster.
+## Testing
 
 ```bash
 pnpm lint
 pnpm typecheck
 pnpm test
-pnpm --filter @albesa/core test   # policy engine and wallet adapter
-pnpm build
-pnpm dev
-pnpm demo
-pnpm demo:registry
-pnpm demo:job
-pnpm demo:marketplace
-pnpm demo:sla
-pnpm simulate
-pnpm --filter @albesa/mcp build
-node packages/mcp/dist/stdio.js
-pnpm --filter web dev
-pnpm --filter web build
-bash scripts/deploy-roster-web.sh
-bash scripts/deploy-roster-api.sh
+pnpm simulate    # end-to-end sandbox simulation of the marketplace pillars
 ```
 
-CI on pull requests and pushes to `main` runs lint, typecheck, tests, and `pnpm --filter web build`.
+## Security model
 
-## Reliability and safety on the wire
+- **Sandbox first.** Default rail is mock USDC. No private keys or seed phrases in the repo.
+- **Keys hashed.** Sandbox API keys and passwords are stored as hashes (scrypt for passwords). Full keys appear only at creation or rotation.
+- **Non-custodial direction.** Escrow can run in `custodial-mock` or `noncustodial-sim`. Real on-chain custody is designed, not the default production path yet.
+- **KYC tiers.** Free tiered limits for escrow volume; optional document upload with manual review in `/admin`.
+- **Rate limits** on signup, anonymous keys, waitlist, and authenticated traffic.
 
-- Every response carries `X-Request-Id` (a valid caller id is kept). Unknown routes return JSON `404 not_found`.
-- Send `Idempotency-Key` on `POST`, `PUT`, or `DELETE`. The first response is replayed for 24 hours with `Idempotent-Replayed: true`; reusing a key with a different body returns `409 idempotency_conflict`. The SDK adds a key to every call that moves USDC (fund, pay, escrow, job create, result).
-- The server rate-limits sign-up and login (20/min per address), the waitlist (10/min), failed API-key or admin-token attempts (30 per 10 min), and authenticated calls (1200/min per organization). A `429 rate_limited` carries `Retry-After` and `RateLimit-*`.
-- Bodies over 256 KB return `413 payload_too_large`.
-- Discovery (`GET /v1/registry/listings`, `/v1/registry/listings/:id`, `/v1/registry/search`) and the passport (`GET /v1/agents/:id/passport`) are public reads. Everything else needs a key.
-- `DELETE /v1/account/api-key` revokes the key you send (logout).
-- Passwords are stored as salted scrypt. Older SHA-256 rows still sign in once and are upgraded.
-- A background sweep refunds held jobs past their SLA every 15 s (`ROSTER_EXPIRE_INTERVAL_MS`).
-- `POST /v1/waitlist` stores developer waitlist emails (JSON file or the `waitlist_entries` table). Operators read them at `GET /v1/admin/waitlist`.
-- The SDK (`new Roster({ apiKey })`, alias of `Albesa`) times out after 30 s and retries 429/502/503/504 and network errors with backoff (GETs always, writes only with an Idempotency-Key).
+Report vulnerabilities: see [SECURITY.md](./SECURITY.md).
 
-## Safety
+## Contributing
 
-- Sandbox and testnet paths only. No chain RPC client is installed. `MockWalletProvider` is the default settlement path. `ROSTER_WALLET=base-sim` stays in-process: a recorded L2 fee and latency, and no network call.
-- `ROSTER_MODE=mainnet` and `ALBESA_MODE=mainnet` are refused at startup of the API and the MCP server.
-- Do not commit `.env` files or `data/`. Sandbox API keys are random. Account passwords and API keys are stored as SHA-256 hashes. The API key is returned once when the account is created and again on login.
-- Wallet options have no field for a private key, mnemonic, or seed. Passing one, or an RPC URL, throws before any balance changes.
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Issues and PRs welcome on [github.com/paualbesa/roster-network](https://github.com/paualbesa/roster-network).
+
+## License
+
+[MIT](./LICENSE)

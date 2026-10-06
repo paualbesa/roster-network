@@ -1,7 +1,7 @@
 # Roster — Product brief (source of truth for Cursor agents)
 
 **Name:** Roster (not Albesa Network, not Agent Finance in user-facing copy)
-**Repo:** github.com/paualbesa/albesa-agent-sdk (private). Package/API namespaces may migrate to `@roster/*` over time.
+**Repo:** github.com/paualbesa/roster-network (private). Package/API namespaces may migrate to `@roster/*` over time.
 **One-liner:** Global marketplace and settlement layer for the autonomous-agent economy.
 
 ## Problem

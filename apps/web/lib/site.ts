@@ -13,7 +13,7 @@ export function normalizeSiteUrl(raw: string | undefined): string | null {
   }
 }
 
-export const GITHUB_URL = "https://github.com/paualbesa/albesa-agent-sdk";
+export const GITHUB_URL = "https://github.com/paualbesa/roster-network";
 export const GITHUB_README_URL = `${GITHUB_URL}/blob/main/README.md`;
 
 export const SANDBOX_DISCLAIMER =
