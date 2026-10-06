@@ -390,7 +390,7 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
     const seller = this.resolveOwner(input.sellerAddress);
     const buyerKp = this.keypairForAddress(buyer.toBase58(), input.buyerAddress);
     // Program create_account pays rent from the buyer; fee payer sponsors SOL.
-    await this.ensureSponsoredSol(buyer, 3_500_000n);
+    await this.ensureSponsoredSol(buyer, 10_000_000n);
     const buyerAta = await this.ensureAta(buyer);
     // Flush soft credits so the ATA can fund the vault.
     const pending = this.pendingCredits.get(buyer.toBase58()) ?? 0n;
