@@ -389,6 +389,8 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
     const buyer = this.resolveOwner(input.buyerAddress);
     const seller = this.resolveOwner(input.sellerAddress);
     const buyerKp = this.keypairForAddress(buyer.toBase58(), input.buyerAddress);
+    // Program create_account pays rent from the buyer; fee payer sponsors SOL.
+    await this.ensureSponsoredSol(buyer, 3_500_000n);
     const buyerAta = await this.ensureAta(buyer);
     // Flush soft credits so the ATA can fund the vault.
     const pending = this.pendingCredits.get(buyer.toBase58()) ?? 0n;
@@ -533,6 +535,21 @@ export class SolanaDevnetWalletProvider implements WalletProvider, PersistentSan
       writeFileSync(this.mintStatePath, JSON.stringify({ mint: this.mint.toBase58(), decimals: TOKEN_DECIMALS }, null, 2));
     }
     return this.mint;
+  }
+
+  /** Top up an owner with SOL from the fee payer so PDA rent can be paid. */
+  private async ensureSponsoredSol(owner: PublicKey, minLamports: bigint): Promise<void> {
+    const balance = BigInt(await withRpcRetry(() => this.connection.getBalance(owner, "confirmed"), "getBalance"));
+    if (balance >= minLamports) return;
+    const need = minLamports - balance;
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: this.feePayer.publicKey,
+        toPubkey: owner,
+        lamports: Number(need),
+      }),
+    );
+    await this.send(tx, [this.feePayer]);
   }
 
   private async ensureAta(owner: PublicKey): Promise<PublicKey> {
