@@ -157,7 +157,6 @@ export function parseNeedBody(body: unknown): NeedRequest {
   return { need, budgetUsdc, kinds: [...new Set(kinds)], limit, buy: record.buy === true, input };
 }
 
-/** Rank data products and services for one natural-language need. */
 export async function matchNeed(deps: NeedDeps, request: NeedRequest): Promise<{ matches: NeedMatch[]; best: CapabilitySearchHit | null; bestRelevance: number }> {
   const expanded = expandNeed(request.need);
   const base = {

@@ -182,7 +182,6 @@ export class SellApiError extends Error {
   }
 }
 
-/** Browser calls through the same-origin /roster-api proxy. */
 export async function sellRequest<T>(method: string, path: string, apiKey: string | null, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { accept: "application/json" };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;

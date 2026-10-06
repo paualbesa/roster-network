@@ -6,7 +6,6 @@ import { formatUsdc } from "@/lib/need";
 import { readBrowserSession } from "@/lib/session";
 import { BuyReceipt, useBuy } from "./buy-receipt";
 
-/** Buy box on a public listing page. Edits the example input as JSON before buying. */
 export function ListingBuy({ listingId, priceUsdc, example }: { listingId: string; priceUsdc: string; example: unknown }) {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [input, setInput] = useState(() => (example && typeof example === "object" ? JSON.stringify(example, null, 2) : "{}"));

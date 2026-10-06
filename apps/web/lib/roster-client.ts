@@ -265,7 +265,6 @@ export function createRosterClient(options: RosterClientOptions = {}) {
       const apiKey = options.apiKey?.trim();
       return request<unknown>("POST", "/v1/need", input, false, apiKey || undefined).then(readNeedResponse);
     },
-    /** Buy one listing through escrow from the account's "Roster buyer" agent. */
     buy(input: { listingId: string; input?: Record<string, unknown> }): Promise<BuyResponseView> {
       return request<unknown>("POST", "/v1/need/buy", input).then(readBuyResponse);
     },
@@ -287,7 +286,6 @@ export function createRosterClient(options: RosterClientOptions = {}) {
     listJobs(): Promise<ConsoleJob[]> {
       return request<unknown>("GET", "/v1/jobs").then(readJobList);
     },
-    /** Revoke the API key this client holds (logout). */
     revokeKey(): Promise<void> {
       return request<unknown>("DELETE", "/v1/account/api-key").then(() => undefined);
     },

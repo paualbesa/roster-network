@@ -11,7 +11,6 @@ export interface BuyState {
   run: (listingId: string, input?: Record<string, unknown>) => Promise<void>;
 }
 
-/** One-call buy through `POST /v1/need/buy` with the browser's sandbox key. */
 export function useBuy(apiKey: string | null): BuyState {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");

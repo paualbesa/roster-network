@@ -37,7 +37,6 @@ export interface DataProductSpec {
   description: string;
   tags: string[];
   sources: DataSourceAttribution[];
-  /** Human cadence, e.g. "daily". */
   cadence: string;
   /** Seconds between refreshes. Live lookups use the cache TTL here. */
   intervalS: number;

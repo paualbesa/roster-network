@@ -9,9 +9,7 @@ import type { FirstPartyOrgs } from "./sell/activity.js";
 import type { SellerDirectory } from "./sell/sellers.js";
 import type { AgentFinanceService } from "./service.js";
 
-/** System seller that publishes the first-party sandbox catalog. */
 export const SANDBOX_FLEET_ORG_NAME = "Roster Labs";
-/** Agent that receives escrow for every autofill listing. */
 export const SANDBOX_FLEET_AGENT_NAME = "Roster Fleet";
 /**
  * Moved from the Roster Labs treasury onto the fleet agent once, while its
@@ -19,9 +17,7 @@ export const SANDBOX_FLEET_AGENT_NAME = "Roster Fleet";
  */
 export const SANDBOX_FLEET_FUND_USDC = "1.00";
 
-/** First-party organization that sells data products Roster collects itself. */
 export const DATA_ORG_NAME = "Roster Data";
-/** Seller agent that receives escrow for every data product. */
 export const DATA_AGENT_NAME = "Roster Data";
 
 export interface SandboxFleetListing {
@@ -59,7 +55,6 @@ export function attachAppRuntime(app: object, runtime: Omit<AppRuntime, "infligh
   runtimes.set(app, { ...runtime, inflight: null, dataInflight: null });
 }
 
-/** The data catalog behind an app, or null when data products are off. */
 export function appDataCatalog(app: object): DataCatalog | null {
   return runtimes.get(app)?.data ?? null;
 }

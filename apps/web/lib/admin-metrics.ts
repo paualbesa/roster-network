@@ -19,7 +19,6 @@ export interface ReputationSummary {
 const USDC_RE = /^-?\d+(\.\d+)?$/;
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-/** Compact USDC for metric cards. Keeps extra fractional digits when they are not zero. */
 export function formatUsdcDisplay(value: string): string {
   const trimmed = value.trim();
   if (!USDC_RE.test(trimmed)) return value;

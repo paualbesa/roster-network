@@ -1,5 +1,3 @@
-/** Small offline NLP helpers shared by the fleet tools. */
-
 export const STOPWORDS = new Set(
   (
     "a about above after again against all am an and any are as at be because been before being below between both but by " +

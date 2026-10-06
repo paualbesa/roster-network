@@ -7,7 +7,6 @@ import { referenceProducts } from "./reference.js";
 import { researchProducts } from "./research.js";
 import { securityProducts } from "./security.js";
 
-/** Every first-party Roster Data product, in catalog order. */
 export const DATA_PRODUCTS: readonly DataProductSpec[] = [
   ...financeProducts,
   ...macroProducts,

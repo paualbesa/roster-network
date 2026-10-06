@@ -1,5 +1,3 @@
-/** JSON Schema helpers for imported tools and operations. */
-
 type Json = Record<string, unknown>;
 
 const FIELD_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;

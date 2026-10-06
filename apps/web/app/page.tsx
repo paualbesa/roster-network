@@ -77,7 +77,6 @@ export const metadata: Metadata = {
   openGraph: { url: "/" },
 };
 
-/** Revalidate the live marketplace strip every minute. */
 export const revalidate = 60;
 
 const STRUCTURED_DATA = {

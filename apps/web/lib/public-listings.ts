@@ -1,6 +1,5 @@
 import { resolveRosterApiOrigin } from "./api-base";
 
-/** What the landing page shows for one public listing. */
 export interface PublicListing {
   id: string;
   name: string;

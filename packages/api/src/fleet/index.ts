@@ -31,7 +31,6 @@ const TOOLS: readonly FleetTool[] = [
 
 const BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
-/** Every Roster Fleet tool beyond the six classic demo listings. */
 export function fleetTools(): readonly FleetTool[] {
   return TOOLS;
 }

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-/** One unmet need, aggregated by normalized text. */
 export interface UnmetNeed {
   id: string;
   need: string;
@@ -39,7 +38,6 @@ export interface DemandPersistence {
   remove(ids: string[]): Promise<void>;
 }
 
-/** Unmet-demand log: what agents asked for that Roster could not sell yet. */
 export class DemandLog {
   private readonly entries = new Map<string, UnmetNeed>();
   private loaded: Promise<void> | null = null;
@@ -149,7 +147,6 @@ function round(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
-/** JSON file next to the sandbox data (json storage mode). */
 export class FileDemandPersistence implements DemandPersistence {
   private cache = new Map<string, UnmetNeed>();
 

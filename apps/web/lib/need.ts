@@ -1,5 +1,3 @@
-/** Client-side shapes and helpers for `POST /v1/need`, `/v1/need/buy`, and data products. */
-
 export type ListingKind = "service" | "dataset" | "feed" | "lookup";
 
 export interface NeedFreshness {
@@ -231,7 +229,6 @@ export function sampleCell(value: unknown): string {
   return json.length > 48 ? `${json.slice(0, 47)}…` : json;
 }
 
-/** Up to `max` column names that appear in the sample rows, in first-seen order. */
 export function sampleColumns(rows: readonly Record<string, unknown>[], max = 6): string[] {
   const seen: string[] = [];
   for (const row of rows) {

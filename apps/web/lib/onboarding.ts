@@ -8,7 +8,6 @@ export interface OnboardingStep {
   href: string | null;
 }
 
-/** First-run checklist for the console dashboard. */
 export function onboardingSteps(agents: readonly ConsoleAgent[], jobs: readonly ConsoleJob[]): OnboardingStep[] {
   const hasAgent = agents.length > 0;
   const funded = agents.some((agent) => isPositiveUsdc(agent.balanceUsdc));

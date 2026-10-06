@@ -325,7 +325,6 @@ export class AgentFinanceService implements ReputationHook {
     this.kycLimitsValue = options.kycLimits ?? resolveKycLimits();
   }
 
-  /** Escrow custody model reported by /health. */
   get escrowMode(): EscrowMode {
     return this.escrowModeValue;
   }
@@ -503,7 +502,6 @@ export class AgentFinanceService implements ReputationHook {
     });
   }
 
-  /** Operator view of the waitlist, newest first. */
   listWaitlist(): Promise<WaitlistEntry[]> {
     return this.enqueue(async () =>
       [...this.store.waitlist.values()]

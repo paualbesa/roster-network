@@ -39,8 +39,8 @@ export interface ListingSellerBinding {
   sellerAgentId: string;
   createdAt: string;
   /**
-   * When true, Roster delivers `sandboxExecute` for this listing.
-   * Only the sandbox fleet bootstrap sets it. A normal bind stays false.
+   * Roster delivers for the seller: fleet fixture, data catalog, or seller proxy.
+   * Set only by first-party bootstraps and by publishing an imported listing.
    */
   autofill: boolean;
 }
@@ -123,7 +123,6 @@ export interface CreateJobInput {
   tags: string[];
   maxP95Ms: number | null;
   memo: string | null;
-  /** Buyer payload for a first-party fixture. Null when omitted. */
   input: unknown;
   /** When set, lock this listing instead of the top search hit. */
   listingId: string | null;
@@ -295,7 +294,6 @@ export class JsonJobStore extends MemoryJobStore {
   }
 }
 
-/** How the sandbox fleet delivers a locked job. */
 export interface AutofillConfig {
   /** `sync` settles inside the lock. `async` waits `delayMs` and still honors the SLA. */
   mode: "sync" | "async";
@@ -328,16 +326,13 @@ function readAutofillDelay(raw: string | undefined): number {
   return parsed;
 }
 
-/**
- * First-party seller that delivers by name with async work (network, storage).
- * Roster Data uses it: buy → fetch or sign the data → submit through escrow.
- */
 export interface ExternalListingRef {
   id: string;
   name: string;
   organizationId: string;
 }
 
+/** Async delivery (Roster Data, seller proxy). A throw refunds the buyer through escrow. */
 export interface ExternalFulfiller {
   handles(listing: ExternalListingRef): boolean;
   /** Resolve the result. A throw submits `{ error }`, which fails the schema and refunds the buyer. */
@@ -350,7 +345,7 @@ export interface JobOrchestratorOptions {
   jobs: JobStore;
   now?: () => Date;
   autofill?: AutofillConfig;
-  /** Async first-party delivery (Roster Data). Bindings made with `autofill: true` use it. */
+  /** Used by bindings made with `autofill: true` that are not fleet fixtures. */
   externalFulfiller?: ExternalFulfiller;
 }
 
@@ -418,7 +413,6 @@ export class JobOrchestrator {
     });
   }
 
-  /** Every marketplace job, newest first. No organization filter. */
   listAllJobs(): Promise<{ jobs: JobView[] }> {
     return this.enqueue(async () => {
       const jobs = this.jobs

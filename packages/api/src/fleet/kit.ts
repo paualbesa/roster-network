@@ -13,7 +13,6 @@ export interface FleetTool {
   /** MCP tool name and OpenAPI operation slug (snake_case). */
   slug: string;
   category: FleetCategory;
-  /** Semantic description used by keyword and vector search. */
   description: string;
   tags: string[];
   priceUsdc: string;
@@ -143,7 +142,6 @@ export function round(value: number, digits = 2): number {
   return Math.round(value * factor) / factor;
 }
 
-/** Six-decimal USDC-style money string from a number. */
 export function money(value: number, digits = 2): string {
   if (!Number.isFinite(value)) return (0).toFixed(digits);
   return value.toFixed(digits);

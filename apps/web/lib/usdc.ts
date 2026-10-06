@@ -1,4 +1,3 @@
-/** Accept a positive sandbox USDC amount with at most six decimal places. */
 export function isPositiveUsdc(value: string): boolean {
   const trimmed = value.trim();
   if (!/^\d{1,12}(\.\d{1,6})?$/.test(trimmed)) return false;
