@@ -28,7 +28,8 @@
     "@supabase/supabase-js": "^2.117.2",
     "hono": "^4.9.8",
     "js-yaml": "4.3.2",
-    "ws": "^8.22.0"
+    "ws": "^8.22.0",
+    "@solana/web3.js": "^1.98.4"
   },
   "devDependencies": {
     "@types/node": "^22.18.6",

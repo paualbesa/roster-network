@@ -22,3 +22,16 @@ solana-devnet-fee-payer.json
 solana-devnet-mint.json
 **/solana-devnet*.json
 **/solana-devnet.env
+
+# Solana program build / deploy keys (never commit)
+programs/**/target/
+**/roster_escrow-keypair.json
+**/*-keypair.json
+!packages/**/fixtures/**/*.json
+
+# Escrow program: commit .so for server deploy; never commit keypairs
+!programs/roster-escrow/deploy/
+programs/roster-escrow/deploy/*
+!programs/roster-escrow/deploy/*.so
+!programs/roster-escrow/deploy/README.md
+target/

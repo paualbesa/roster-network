@@ -50,3 +50,22 @@ export {
 } from "./devnet-wallet.js";
 export type { SolanaDevnetWalletOptions, SolanaDevnetStatus } from "./devnet-wallet.js";
 export { looksLikeSolanaSignature, solanaExplorerAddressUrl, solanaExplorerTxUrl } from "./explorer.js";
+
+export {
+  ROSTER_ESCROW_PROGRAM_ID_DEVNET,
+  ROSTER_ESCROW_MAINNET_USDC_MINT,
+  ROSTER_ESCROW_MAINNET_PER_JOB_CAP_USDC,
+  computeOnChainFeeMicros,
+  configPda,
+  createAndFundIx,
+  disputeIx,
+  escrowIdBytes,
+  escrowPda as noncustodialEscrowPda,
+  initializeConfigIx,
+  refundIx,
+  releaseIx,
+  arbiterResolveIx,
+  rosterEscrowProgramId,
+  vaultPda,
+  noncustodialVaultAddress,
+} from "./noncustodial-escrow.js";
