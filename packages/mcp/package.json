@@ -1,6 +1,6 @@
 {
   "name": "@albesa/mcp",
-  "description": "Roster MCP server. Agents act on one sandbox user account and its USDC wallet.",
+  "description": "Roster MCP server (stdio + helpers). Connect agents to https://roster.network/mcp or run locally against the API.",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -31,5 +31,29 @@
     "@types/node": "^22.18.6",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
-  }
+  },
+  "license": "MIT",
+  "homepage": "https://roster.network",
+  "bugs": {
+    "url": "https://github.com/paualbesa/roster-network/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paualbesa/roster-network.git",
+    "directory": "packages/mcp"
+  },
+  "keywords": [
+    "roster",
+    "mcp",
+    "model-context-protocol",
+    "agents",
+    "stdio"
+  ],
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "mcpName": "io.github.paualbesa/roster-network"
 }

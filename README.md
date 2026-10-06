@@ -81,6 +81,16 @@ curl -sS -X POST https://roster.network/roster-api/v1/need \
 ```
 
 
+
+## Agent discovery
+
+- Remote MCP: `https://roster.network/mcp` (Bearer key)
+- `llms.txt`: https://roster.network/llms.txt
+- Well-known: https://roster.network/.well-known/mcp
+- Official registry metadata: [`server.json`](./server.json) (`io.github.paualbesa/roster-network`)
+- Smithery: [`smithery.yaml`](./smithery.yaml)
+- Publish / directory notes: [`docs/discovery/`](./docs/discovery/)
+
 ## Architecture
 
 ```

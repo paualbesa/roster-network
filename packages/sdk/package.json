@@ -1,6 +1,6 @@
 {
   "name": "@albesa/sdk",
-  "description": "Roster TypeScript client for the sandbox payment API.",
+  "description": "TypeScript client for Roster Network (need/buy, registry, jobs, escrow).",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -28,5 +28,29 @@
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
+  },
+  "license": "MIT",
+  "homepage": "https://roster.network",
+  "bugs": {
+    "url": "https://github.com/paualbesa/roster-network/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paualbesa/roster-network.git",
+    "directory": "packages/sdk"
+  },
+  "keywords": [
+    "roster",
+    "mcp",
+    "agents",
+    "marketplace",
+    "usdc",
+    "escrow"
+  ],
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

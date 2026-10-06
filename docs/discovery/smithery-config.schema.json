@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "required": ["apiKey"],
+  "additionalProperties": false,
+  "properties": {
+    "apiKey": {
+      "type": "string",
+      "title": "Roster API key",
+      "description": "Full Authorization value: Bearer sk_sandbox_…",
+      "x-from": { "header": "x-roster-key" },
+      "x-to": { "header": "Authorization" }
+    }
+  }
+}
