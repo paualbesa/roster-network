@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { MIN_PAID_LISTING_USDC } from "@albesa/core";
 import { ROSTER_BASE_FEE_USDC, ROSTER_PERCENT_FEE } from "./constants.js";
-import { quoteRosterNetworkFee } from "./fees.js";
+import { assertPaidListingPrice, quoteRosterNetworkFee } from "./fees.js";
 
 describe("Roster network fee", () => {
   it("exports the gasless schedule", () => {
@@ -38,5 +39,11 @@ describe("Roster network fee", () => {
     expect(() => quoteRosterNetworkFee("0")).toThrow(/greater than zero/);
     expect(() => quoteRosterNetworkFee("0.003")).toThrow(/greater than the Roster fee/);
     expect(() => quoteRosterNetworkFee("nope")).toThrow(/Invalid USDC amount/);
+  });
+
+  it("rejects paid prices below the 0.01 USDC listing floor", () => {
+    expect(MIN_PAID_LISTING_USDC).toBe("0.010000");
+    expect(() => assertPaidListingPrice("0.009")).toThrow(/at least 0.010000/);
+    expect(assertPaidListingPrice("0.01").providerPayoutUsdc).toBe("0.006900");
   });
 });

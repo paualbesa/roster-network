@@ -330,7 +330,7 @@ describe("Roster Fleet buyer", () => {
           sources: [SOURCES.ecbFrankfurter],
           cadence: "daily",
           intervalS: 86_400,
-          priceUsdc: "0.002",
+          priceUsdc: "0.01",
           p95Ms: 5000,
           columns: [{ name: "k", type: "string", description: "Key" }],
           ingest: async () => [{ k: "v" }],

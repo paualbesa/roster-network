@@ -6,6 +6,9 @@
 export const ROSTER_PERCENT_FEE = 0.01;
 export const ROSTER_BASE_FEE_USDC = 0.003;
 
+/** @deprecated Prefer MIN_PAID_LISTING_USDC from @albesa/core (string micros). Numeric mirror for fee schedule docs. */
+export const MIN_PAID_LISTING_USDC_NUMBER = 0.01;
+
 /** 0.02 SOL. The treasury worker tops up the fee payer when balance is under this. */
 export const FEE_PAYER_MIN_SOL = 0.02;
 export const FEE_PAYER_MIN_LAMPORTS = 20_000_000n;
@@ -37,4 +40,8 @@ if (FEE_PAYER_MIN_SOL !== 0.02 || FEE_PAYER_MIN_LAMPORTS !== 20_000_000n) {
 }
 if (FEE_PAYER_TOP_UP_USDC !== 10 || FEE_PAYER_TOP_UP_USDC_MICROS !== 10_000_000n) {
   throw new Error("Fee payer top-up must stay 10 USDC.");
+}
+
+if (MIN_PAID_LISTING_USDC_NUMBER.toFixed(6) !== "0.010000") {
+  throw new Error("MIN_PAID_LISTING_USDC_NUMBER must stay 0.01.");
 }

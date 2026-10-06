@@ -135,7 +135,7 @@ export const textTools: FleetTool[] = [
       "Score how easy English text is to read: Flesch reading ease, Flesch-Kincaid grade level, average sentence length and " +
       "long-word ratio. Helps editors simplify docs, onboarding copy, legal text and support articles.",
     tags: ["readability", "writing", "editing", "text"],
-    priceUsdc: "0.008",
+    priceUsdc: "0.01",
     p95Ms: 250,
     p50Ms: 60,
     input: textInput,
@@ -177,7 +177,7 @@ export const textTools: FleetTool[] = [
       "Count words, characters, sentences and paragraphs, and estimate reading and speaking time. A quick text statistics " +
       "tool for writers, CMS pipelines, content limits and essay checks.",
     tags: ["word-count", "statistics", "reading-time", "text"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: textInput,
@@ -214,7 +214,7 @@ export const textTools: FleetTool[] = [
       "Classify the sentiment of a review, tweet, support ticket or survey answer as positive, negative or neutral with a " +
       "score from -1 to 1. Lexicon-based opinion mining with negation handling; runs offline.",
     tags: ["sentiment", "opinion", "reviews", "classification", "text"],
-    priceUsdc: "0.008",
+    priceUsdc: "0.01",
     p95Ms: 250,
     p50Ms: 60,
     input: textInput,
@@ -315,7 +315,7 @@ export const textTools: FleetTool[] = [
       "Identify the language of a text snippet: English, Spanish, Catalan, French, German, Italian or Portuguese, with a " +
       "confidence score. Route multilingual support tickets, pick translation pipelines, tag content by locale.",
     tags: ["language", "detection", "multilingual", "i18n", "text"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: textInput,
@@ -359,7 +359,7 @@ export const textTools: FleetTool[] = [
       "Convert titles and product names into clean, URL-safe slugs: lowercase, ASCII, hyphen separated, accents removed. " +
       "For CMS permalinks, SEO-friendly URLs, file names and identifiers.",
     tags: ["slug", "url", "seo", "text", "permalink"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { text: s.str(500, 1), maxLength: s.int(8, 120) },
@@ -528,7 +528,7 @@ export const textTools: FleetTool[] = [
       "Pull every question out of an email, interview transcript, chat log or forum thread so none goes unanswered. Flags " +
       "the ones addressed to a named person.",
     tags: ["questions", "extract", "support", "text"],
-    priceUsdc: "0.008",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 50,
     input: textInput,
@@ -588,7 +588,7 @@ export const textTools: FleetTool[] = [
       "Convert text or identifiers between camelCase, PascalCase, snake_case, kebab-case, CONSTANT_CASE, Title Case, " +
       "UPPER and lower case. Handy for code generation, column renaming and API field mapping.",
     tags: ["case", "naming", "code", "text", "utility"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { text: s.str(5000, 1), to: s.enm(["camel", "pascal", "snake", "kebab", "constant", "title", "upper", "lower"]) },

@@ -1,5 +1,5 @@
 import type { Context, Env, Hono } from "hono";
-import { compareUsdc, EscrowSchemaError, parseResultSchema } from "@albesa/core";
+import { compareUsdc, EscrowSchemaError, MIN_PAID_LISTING_USDC, parseResultSchema } from "@albesa/core";
 import type { CapabilityListing, CapabilityRegistry } from "@albesa/registry";
 import type { DemandLog } from "../demand.js";
 import type { JobOrchestrator, JobStore } from "../jobs.js";
@@ -264,8 +264,8 @@ function parsePublishItem(raw: unknown, index: number, allowHttp: boolean): Publ
   if (!name || name.length > 80) throw new ServiceError(400, "invalid_request", `${at}.name must be 1-80 characters.`);
   if (!description || description.length > 4000) throw new ServiceError(400, "invalid_request", `${at}.description must be 1-4000 characters.`);
   const priceUsdc = typeof item.priceUsdc === "string" ? item.priceUsdc.trim() : typeof item.priceUsdc === "number" ? item.priceUsdc.toString() : "";
-  if (!/^\d+(\.\d{1,6})?$/.test(priceUsdc) || compareUsdc(priceUsdc, "0.001") < 0 || compareUsdc(priceUsdc, "100") > 0) {
-    throw new ServiceError(400, "invalid_request", `${at}.priceUsdc must be between 0.001 and 100 USDC.`);
+  if (!/^\d+(\.\d{1,6})?$/.test(priceUsdc) || compareUsdc(priceUsdc, MIN_PAID_LISTING_USDC) < 0 || compareUsdc(priceUsdc, "100") > 0) {
+    throw new ServiceError(400, "invalid_request", `${at}.priceUsdc must be between ${MIN_PAID_LISTING_USDC} and 100 USDC.`);
   }
   const p95Ms = Number(item.p95Ms);
   if (!Number.isInteger(p95Ms) || p95Ms < 1000 || p95Ms > 60_000) throw new ServiceError(400, "invalid_request", `${at}.p95Ms must be an integer from 1000 to 60000.`);

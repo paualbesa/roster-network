@@ -47,7 +47,7 @@ const neighborListing = {
   name: "Inventory notifier",
   description: "Notifies the team when inventory falls below a threshold.",
   tags: ["inventory", "notify"],
-  pricing: { model: "per_call", amountUsdc: "0.001" },
+  pricing: { model: "per_call", amountUsdc: "0.01" },
   latency: { p95Ms: 40 },
 };
 

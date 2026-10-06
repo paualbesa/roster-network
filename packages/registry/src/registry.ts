@@ -1,4 +1,4 @@
-import { createId, formatUsdc, MoneyError, parseUsdc } from "@albesa/core";
+import { compareUsdc, createId, formatUsdc, MIN_PAID_LISTING_USDC, MoneyError, parseUsdc } from "@albesa/core";
 import { RegistryError } from "./errors.js";
 import { writeIndex, readIndex } from "./persist.js";
 import { rankListings } from "./rank.js";
@@ -603,6 +603,13 @@ function readPricing(value: unknown): PricingHint {
   }
   if (model !== "free" && amount === "0.000000") {
     throw new RegistryError(400, "invalid_request", "pricing.amountUsdc must be greater than 0 for paid models.");
+  }
+  if (model !== "free" && compareUsdc(amount, MIN_PAID_LISTING_USDC) < 0) {
+    throw new RegistryError(
+      400,
+      "invalid_request",
+      `pricing.amountUsdc must be at least ${MIN_PAID_LISTING_USDC} USDC (Roster fee is 1% + 0.003 USDC).`,
+    );
   }
   return { model: model satisfies PricingModel, amountUsdc: amount };
 }

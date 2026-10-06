@@ -311,7 +311,7 @@ export const macroProducts: DataProductSpec[] = [
     sources: [SOURCES.worldBank],
     cadence: "weekly",
     intervalS: 7 * DAY,
-    priceUsdc: "0.002",
+    priceUsdc: "0.01",
     p95Ms: 6000,
     columns: [
       { name: "iso3", type: "string", description: "ISO 3166 alpha-3." },

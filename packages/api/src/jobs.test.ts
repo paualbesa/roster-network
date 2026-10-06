@@ -156,6 +156,38 @@ async function bind(
 }
 
 describe("marketplace jobs", () => {
+  it("rejects job amounts and paid listings below the 0.01 USDC floor", async () => {
+    const app = createApp({ mode: "sandbox" });
+    const { auth } = await organization(app, "Floor");
+    const buyerId = await createAgent(app, auth, "buyer");
+    const sellerId = await createAgent(app, auth, "seller");
+    await fund(app, auth, buyerId, "1.00");
+
+    const tooCheap = await app.request("/v1/registry/listings", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ ...invoice, pricing: { model: "per_call", amountUsdc: "0.009" } }),
+    });
+    expect(tooCheap.status).toBe(400);
+    expect(((await tooCheap.json()) as ErrorBody).error.message).toMatch(/at least 0\.010000/);
+
+    const listingId = await register(app, auth, invoice);
+    await bind(app, auth, listingId, sellerId);
+    const cheapJob = await app.request("/v1/jobs", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        buyerAgentId: buyerId,
+        query: "parse receipts",
+        amountUsdc: "0.009",
+        schema: totalSchema,
+        listingId,
+      }),
+    });
+    expect(cheapJob.status).toBe(400);
+    expect(((await cheapJob.json()) as ErrorBody).error.code).toBe("price_too_low");
+  });
+
   it("discovers a listing, releases net of the take-rate, and raises the seller passport", async () => {
     const app = createApp({ mode: "sandbox" });
     const { auth } = await organization(app);

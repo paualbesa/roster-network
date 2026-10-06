@@ -93,7 +93,7 @@ export const financeTools: FleetTool[] = [
       "Calculate VAT for any EU country: net to gross or gross to net, standard or reduced rate, with the tax amount " +
       "broken out. Pricing pages, invoicing, e-commerce checkout and cross-border sales (rates table built in).",
     tags: ["vat", "tax", "eu", "invoicing", "pricing", "finance"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { amount: s.num(0), country: s.str(2, 2), rate: s.enm(["standard", "reduced"]), mode: s.enm(["net_to_gross", "gross_to_net"]) },
@@ -120,7 +120,7 @@ export const financeTools: FleetTool[] = [
       "Validate an IBAN bank account number: country length, format and the ISO 13616 mod-97 checksum, and return the " +
       "formatted IBAN and bank code. Prevents failed SEPA transfers and payout errors during supplier onboarding.",
     tags: ["iban", "banking", "validation", "sepa", "payments"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { iban: s.str(64, 1) },
@@ -150,7 +150,7 @@ export const financeTools: FleetTool[] = [
       "Check a payment card number with the Luhn checksum and detect the brand (Visa, Mastercard, Amex, Discover, JCB, " +
       "Diners). Form validation and test-data checks only: numbers are not stored and the result is masked.",
     tags: ["cards", "luhn", "validation", "payments", "checkout"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { number: s.str(32, 1) },
@@ -193,7 +193,7 @@ export const financeTools: FleetTool[] = [
       "Compute the monthly payment, total interest and an amortization schedule for a fixed-rate loan or mortgage. " +
       "Financial planning, lending calculators, equipment financing and runway models.",
     tags: ["loan", "mortgage", "amortization", "interest", "finance"],
-    priceUsdc: "0.008",
+    priceUsdc: "0.01",
     p95Ms: 200,
     p50Ms: 40,
     input: { principal: s.num(0), annualRatePercent: s.num(0, 100), months: s.int(1, 600), scheduleRows: s.int(0, 24) },
@@ -291,7 +291,7 @@ export const financeTools: FleetTool[] = [
       "Normalize messy money strings (\"1.234,56 €\", \"$1,234.56\", \"USD 12\", \"12,5 EUR\") into a decimal amount and ISO " +
       "currency code. Cleans scraped prices, OCR output, spreadsheets and multi-locale order data.",
     tags: ["currency", "money", "normalize", "parse", "finance"],
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 150,
     p50Ms: 30,
     input: { amounts: s.arr(s.str(64), 1000, 1) },

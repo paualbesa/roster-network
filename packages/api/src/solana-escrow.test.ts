@@ -130,6 +130,6 @@ describe("gasless USDC escrow", () => {
       body: JSON.stringify({ buyerPubkey: BUYER, amountUsdc: "0.001" }),
     });
     expect(tiny.status).toBe(400);
-    expect(((await tiny.json()) as ErrorBody).error.code).toBe("fee_exceeds_price");
+    expect(((await tiny.json()) as ErrorBody).error.code).toBe("price_too_low");
   });
 });

@@ -1,4 +1,4 @@
-import { compareUsdc, parseUsdc, formatUsdc } from "@albesa/core";
+import { compareUsdc, formatUsdc, MIN_PAID_LISTING_USDC, parseUsdc } from "@albesa/core";
 import {
   embedSemantic,
   parseSearchQuery,
@@ -261,6 +261,13 @@ export async function buyListing(
   const listing = deps.registry.get(input.listingId);
   if (!listing || listing.status !== "active") throw new ServiceError(404, "not_found", "Listing not found or paused.");
   const price = listing.pricing.amountUsdc;
+  if (listing.pricing.model !== "free" && compareUsdc(price, MIN_PAID_LISTING_USDC) < 0) {
+    throw new ServiceError(
+      400,
+      "price_too_low",
+      `Listing price must be at least ${MIN_PAID_LISTING_USDC} USDC (Roster fee is 1% + 0.003 USDC).`,
+    );
+  }
   const examples = (listing.inputSchema as { examples?: unknown[] }).examples;
   const example = Array.isArray(examples) && typeof examples[0] === "object" && examples[0] !== null ? examples[0] : {};
   if (input.input && (listing.kind ?? "service") !== "service") {

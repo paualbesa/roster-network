@@ -1,4 +1,4 @@
-export { createRosterMcpServer, readRosterClientOptions } from "./server.js";
+export { createRosterMcpServer, readRosterClientOptions, summarizeBuyResult, summarizeJobResult } from "./server.js";
 export type { RosterClientOptions, RosterMcpOptions } from "./server.js";
 export {
   attachRosterMcp,

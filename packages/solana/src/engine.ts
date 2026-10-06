@@ -10,7 +10,7 @@ import {
 import type { SolanaClusterMode, SolanaEngineConfig } from "./config.js";
 import { resolveSolanaEngineConfig } from "./config.js";
 import { SolanaFeeError } from "./errors.js";
-import { jobPriceMicros, quoteRosterNetworkFee, type RosterNetworkFeeQuote } from "./fees.js";
+import { assertPaidListingPrice, jobPriceMicros, type RosterNetworkFeeQuote } from "./fees.js";
 import {
   feePayerSigner,
   keypairFromSecret,
@@ -140,7 +140,7 @@ export async function prepareLock(
   config: SolanaEngineConfig = resolveSolanaEngineConfig(),
   options: SolanaCallOptions = {},
 ): Promise<PrepareLockResult> {
-  const quote = quoteRosterNetworkFee(input.amountUsdc);
+  const quote = assertPaidListingPrice(input.amountUsdc);
   const feePayer = feePayerSigner(config);
   const buyer = requirePublicKey(input.buyerPubkey, "buyerPubkey");
   const escrowId = resolveEscrowId(input.escrowId);
@@ -194,7 +194,7 @@ export async function settleEscrow(
   if (input.verified !== true) {
     throw new SolanaFeeError(409, "invalid_state", "Settle runs only after work is verified.");
   }
-  const quote = quoteRosterNetworkFee(input.amountUsdc);
+  const quote = assertPaidListingPrice(input.amountUsdc);
   const feePayer = feePayerSigner(config);
   const authority = programAuthoritySigner(config);
   const buyer = requirePublicKey(input.buyerPubkey, "buyerPubkey");

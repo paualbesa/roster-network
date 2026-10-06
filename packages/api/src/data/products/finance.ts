@@ -53,7 +53,7 @@ export const financeProducts: DataProductSpec[] = [
     sources: [SOURCES.ecbFrankfurter],
     cadence: "every 4 hours",
     intervalS: 4 * 3600,
-    priceUsdc: "0.002",
+    priceUsdc: "0.01",
     p95Ms: 4000,
     columns: [
       { name: "base", type: "string", description: "ISO 4217 base currency." },
@@ -136,7 +136,7 @@ export const financeProducts: DataProductSpec[] = [
     sources: [SOURCES.ecbFrankfurter],
     cadence: "daily",
     intervalS: DAY,
-    priceUsdc: "0.001",
+    priceUsdc: "0.01",
     p95Ms: 6000,
     columns: [
       { name: "amount", type: "number", description: "Input amount." },
@@ -326,7 +326,7 @@ export const financeProducts: DataProductSpec[] = [
     sources: [SOURCES.secEdgar],
     cadence: "daily",
     intervalS: DAY,
-    priceUsdc: "0.001",
+    priceUsdc: "0.01",
     p95Ms: 4000,
     columns: [
       { name: "ticker", type: "string", description: "Exchange ticker." },
@@ -373,7 +373,7 @@ export const financeProducts: DataProductSpec[] = [
     sources: [SOURCES.secEdgar],
     cadence: "hourly",
     intervalS: 3600,
-    priceUsdc: "0.005",
+    priceUsdc: "0.01",
     p95Ms: 4000,
     timeField: "updated_at",
     idField: "id",

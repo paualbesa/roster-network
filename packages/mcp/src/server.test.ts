@@ -4,7 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { bootstrapSandboxFleet, createApp, sandboxReceiptListing } from "@albesa/api";
 import { createSandboxAccount } from "@albesa/sdk";
 import { describe, expect, it } from "vitest";
-import { createRosterMcpServer, readRosterClientOptions } from "./index.js";
+import { createRosterMcpServer, readRosterClientOptions, summarizeBuyResult } from "./index.js";
 
 const PASSWORD = "sandbox-passphrase-9";
 
@@ -274,7 +274,42 @@ describe("Roster MCP server", () => {
       expect(parsed.matched).toBe(true);
       const bought = await mcp.callTool({ name: "roster_buy", arguments: { listingId: parsed.matches[0]!.listingId } });
       expect(bought.isError).toBeUndefined();
-      expect(JSON.parse(toolText(bought))).toMatchObject({ status: "released", delivered: true });
+      const buyPayload = JSON.parse(toolText(bought)) as Record<string, unknown>;
+      expect(buyPayload).toMatchObject({ status: "released", delivered: true });
+      expect(typeof buyPayload.jobId).toBe("string");
+      expect(buyPayload).not.toEqual(null);
+      expect(toolText(bought)).not.toBe("null");
     });
+  });
+});
+
+describe("summarizeBuyResult", () => {
+  it("returns a settlement summary and rejects null", () => {
+    expect(() => summarizeBuyResult(null)).toThrow(/empty response/);
+    const summary = summarizeBuyResult({
+      status: "released",
+      delivered: true,
+      result: { hello: "world" },
+      job: {
+        id: "job_1",
+        status: "released",
+        escrowId: "esc_1",
+        amountUsdc: "0.010000",
+        escrowMode: "noncustodial-devnet",
+        vaultAddress: "Vault111",
+        lockProviderRef: "LockSig111",
+        settlementProviderRef: "SettleSig111",
+      },
+      receipt: { escrowId: "esc_1", amountUsdc: "0.010000", listingId: "cap_1", listingName: "Demo", takeRateUsdc: "0.003100", sellerNetUsdc: "0.006900", buyerAgentId: "agt_1", buyerBalanceUsdc: "1.000000", settledAt: "2026-10-06T00:00:00.000Z" },
+    });
+    expect(summary).toMatchObject({
+      status: "released",
+      delivered: true,
+      jobId: "job_1",
+      vaultAddress: "Vault111",
+      lockProviderRef: "LockSig111",
+      settlementProviderRef: "SettleSig111",
+    });
+    expect(JSON.stringify(summary)).not.toBe("null");
   });
 });
