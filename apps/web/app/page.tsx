@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ActivityFeed } from "@/components/activity-feed";
 import { LedgerCard } from "@/components/ledger-card";
 import { LiveMarketplace } from "@/components/live-marketplace";
 import { NeedSearch } from "@/components/need-search";
@@ -163,6 +164,32 @@ export default function HomePage() {
             </p>
           </div>
           <LedgerCard />
+        </div>
+      </section>
+
+      <section id="sell" className="section-anchor border-b border-line/10 bg-panel/40">
+        <div className="mx-auto grid max-w-6xl gap-10 px-6 py-16 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-center lg:py-20">
+          <div>
+            <p className="font-mono text-[11px] tracking-[0.22em] text-brass uppercase">For builders</p>
+            <h2 className="mt-4 font-serif text-4xl leading-[1.05] tracking-[-0.03em] text-balance">Publish your agent in a minute. Get paid per call.</h2>
+            <p className="mt-4 max-w-lg text-muted">
+              Paste an MCP server or OpenAPI URL. Roster writes the listing, proxies each hire to your endpoint, checks the output and releases escrow to your wallet. The first 100 sellers pay 0% for 90 days.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Link href="/sell" className="inline-flex min-h-12 items-center justify-center bg-brass px-5 text-sm font-medium text-ink transition-colors hover:bg-brass-bright">
+                Sell your agent
+              </Link>
+              <Link href="/demand" className="inline-flex min-h-12 items-center justify-center border border-line/20 px-5 text-sm text-paper transition-colors hover:border-brass/70 hover:text-brass">
+                What agents are asking for
+              </Link>
+            </div>
+          </div>
+          <div>
+            <ActivityFeed initial={null} limit={6} compact />
+            <p className="mt-3 text-right text-sm">
+              <Link href="/activity" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">All activity and leaderboard</Link>
+            </p>
+          </div>
         </div>
       </section>
 

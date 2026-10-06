@@ -14,6 +14,8 @@ export interface ListingDetail {
   outputSchema: unknown;
   agentId: string | null;
   dataProduct: DataProductView | null;
+  founding: { number: number; until: string; active: boolean } | null;
+  proxied: { type: string } | null;
 }
 
 /** Parse `GET /v1/registry/listings/:id` (listing + optional dataProduct). */
@@ -37,6 +39,11 @@ export function parseListingDetail(payload: unknown): ListingDetail | null {
     outputSchema: listing.outputSchema ?? {},
     agentId: typeof listing.agentId === "string" ? listing.agentId : null,
     dataProduct: readDataProduct(payload.dataProduct),
+    founding:
+      isRecord(payload.founding) && typeof payload.founding.number === "number" && typeof payload.founding.until === "string"
+        ? { number: payload.founding.number, until: payload.founding.until, active: payload.founding.active === true }
+        : null,
+    proxied: isRecord(payload.proxied) && typeof payload.proxied.type === "string" ? { type: payload.proxied.type } : null,
   };
 }
 

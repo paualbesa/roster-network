@@ -3,6 +3,10 @@ import type { CapabilityRegistry } from "@albesa/registry";
 import type { SandboxCapabilityDraft } from "./catalog.js";
 import type { DataCatalog } from "./data/catalog.js";
 import { rosterFleetListings, type JobOrchestrator, type JobStore } from "./jobs.js";
+import { DemandLog } from "./demand.js";
+import { buyListing } from "./need.js";
+import type { FirstPartyOrgs } from "./sell/activity.js";
+import type { SellerDirectory } from "./sell/sellers.js";
 import type { AgentFinanceService } from "./service.js";
 
 /** System seller that publishes the first-party sandbox catalog. */
@@ -42,6 +46,9 @@ interface AppRuntime {
   jobs: JobStore;
   orchestrator: JobOrchestrator;
   data: DataCatalog | null;
+  /** Mutable: filled in here so fulfilment and the activity feed can recognise first-party orgs. */
+  firstParty: FirstPartyOrgs;
+  sellers: SellerDirectory;
   inflight: Promise<SandboxFleetSnapshot> | null;
   dataInflight: Promise<SandboxFleetSnapshot> | null;
 }
@@ -74,6 +81,72 @@ export function bootstrapDataProducts(app: object): Promise<SandboxFleetSnapshot
   });
   runtime.dataInflight = run;
   return run;
+}
+
+/** Load seller profiles and private endpoints before serving: the job path reads them synchronously. */
+export async function initSellers(app: object): Promise<void> {
+  await runtimes.get(app)?.sellers.init();
+}
+
+export function resolveFleetBuyerIntervalMin(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.ROSTER_FLEET_BUYER_INTERVAL_MIN?.trim();
+  if (raw === undefined || raw === "") return 20;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? Math.min(value, 24 * 60) : 20;
+}
+
+/**
+ * One genuine first-party purchase: Roster Labs (shown as "Roster Fleet")
+ * buys a real Roster Data product through escrow and the product is actually
+ * delivered. Sandbox USDC. Only products that need no buyer input are picked.
+ */
+export async function fleetBuyOnce(app: object, pick: (count: number) => number = (count) => Math.floor(Math.random() * count)): Promise<{ listingName: string; status: string } | null> {
+  const runtime = runtimes.get(app);
+  if (!runtime || runtime.mode !== "sandbox") return null;
+  const { labs, data } = runtime.firstParty;
+  if (!labs || !data) return null;
+  const candidates = runtime.registry.list().filter((listing) => {
+    if (listing.organizationId !== data || listing.status !== "active" || (listing.kind ?? "service") === "service") return false;
+    const schema = listing.inputSchema as { required?: unknown; examples?: unknown };
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    return required.length === 0 || (Array.isArray(schema.examples) && schema.examples.length > 0);
+  });
+  if (candidates.length === 0) return null;
+  const listing = candidates[pick(candidates.length) % candidates.length]!;
+  const result = await buyListing(
+    { registry: runtime.registry, service: runtime.service, orchestrator: runtime.orchestrator, data: runtime.data, demand: new DemandLog() },
+    labs,
+    { listingId: listing.id, input: null, buyerAgentId: null, waitMs: 20_000 },
+  );
+  return { listingName: listing.name, status: result.status };
+}
+
+/** Scheduled Roster Fleet buyer. Interval 0 disables it. */
+export function startFleetBuyer(app: object, options: { intervalMin: number; afterBuy?: () => Promise<void> }): (() => void) | null {
+  if (options.intervalMin <= 0) return null;
+  const intervalMs = Math.max(60_000, options.intervalMin * 60_000);
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const bought = await fleetBuyOnce(app);
+      if (bought) console.log(JSON.stringify({ t: new Date().toISOString(), msg: "fleet_buy", listing: bought.listingName, status: bought.status }));
+      await options.afterBuy?.();
+    } catch (error) {
+      console.error("Roster Fleet buy failed", error);
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => void tick(), intervalMs);
+  timer.unref();
+  const first = setTimeout(() => void tick(), Math.min(intervalMs, 120_000));
+  first.unref();
+  return () => {
+    clearInterval(timer);
+    clearTimeout(first);
+  };
 }
 
 /**
@@ -125,6 +198,8 @@ async function ensureFirstPartySeller(
     createdOrganization = true;
   }
   const organizationId = organization.id;
+  if (orgName === DATA_ORG_NAME) runtime.firstParty.data = organizationId;
+  if (orgName === SANDBOX_FLEET_ORG_NAME) runtime.firstParty.labs = organizationId;
 
   const agents = await runtime.service.listAgents(organizationId);
   let seller = oldest(

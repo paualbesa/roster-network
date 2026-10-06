@@ -4,7 +4,15 @@ import { resolveRuntimeMode, resolveWalletRail } from "@albesa/core";
 import { CapabilityRegistry } from "@albesa/registry";
 import { createApp, type AppHttpOptions } from "./app.js";
 import { LocalKycDocumentStore } from "./kyc.js";
-import { appDataCatalog, bootstrapDataProducts, bootstrapSandboxFleet } from "./fleet.js";
+import {
+  appDataCatalog,
+  bootstrapDataProducts,
+  bootstrapSandboxFleet,
+  initSellers,
+  resolveFleetBuyerIntervalMin,
+  startFleetBuyer,
+} from "./fleet.js";
+import { FileSellerPersistence, foundingConfigFromEnv, SellerDirectory } from "./sell/sellers.js";
 import { LocalDataStore } from "./data/store.js";
 import { DemandLog, FileDemandPersistence } from "./demand.js";
 import { resolveRateLimitConfig } from "./http.js";
@@ -39,7 +47,9 @@ async function main(): Promise<void> {
       );
       await startDataProducts(opened.app);
     }
+    await initSellers(opened.app);
     await opened.mirror.flush();
+    if (mode === "sandbox") startFleetBuyer(opened.app, { intervalMin: resolveFleetBuyerIntervalMin(), afterBuy: () => opened.mirror.flush() });
     startExpirySweeper({ app: opened.app, intervalMs: expireIntervalMs, afterSweep: () => opened.mirror.flush() });
   } else {
     const reputationFile = process.env.ROSTER_REPUTATION_FILE?.trim() || join(process.cwd(), "data", "reputation.json");
@@ -62,6 +72,7 @@ async function main(): Promise<void> {
           ? null
           : new LocalDataStore({ directory: process.env.ROSTER_DATA_DIR?.trim() || join(process.cwd(), "data", "data-products") }),
       demandLog: new DemandLog(new FileDemandPersistence(join(process.cwd(), "data", "unmet-needs.json"))),
+      sellers: new SellerDirectory(new FileSellerPersistence(join(process.cwd(), "data", "sellers.json")), foundingConfigFromEnv()),
     });
     app = jsonApp;
     if (mode === "sandbox") {
@@ -71,6 +82,8 @@ async function main(): Promise<void> {
       );
       await startDataProducts(jsonApp);
     }
+    await initSellers(jsonApp);
+    if (mode === "sandbox") startFleetBuyer(jsonApp, { intervalMin: resolveFleetBuyerIntervalMin() });
     startExpirySweeper({ app: jsonApp, intervalMs: expireIntervalMs });
   }
   serve({ fetch: app.fetch, hostname, port }, (info) => {

@@ -189,6 +189,68 @@ export const openApiDocument = {
         responses: { "201": { description: "{ job, status, delivered, result, receipt }" }, "409": { description: "insufficient_funds" } },
       },
     },
+    "/v1/listings/import": {
+      post: {
+        summary:
+          "Read a public MCP server (Streamable HTTP, tools/list) or OpenAPI 3/Swagger 2 document and return draft listings: name, description, input/output schemas, suggested USDC price from similar listings, SLA, and the private seller endpoint. https only; private and internal addresses are refused.",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { type: "object", required: ["url"], properties: { url: { type: "string" }, kind: { type: "string", enum: ["auto", "mcp", "openapi"] } } } } },
+        },
+        responses: { "200": { description: "{ source, drafts[], skipped[], founding }" }, "400": { description: "invalid_url | blocked_destination" }, "422": { description: "import_failed" } },
+      },
+    },
+    "/v1/listings/publish": {
+      post: {
+        summary:
+          "Publish imported drafts. Requires a payout wallet (Solana or Base address; no custody). Roster proxies each hire to the seller endpoint, validates the output against the listing schema, and releases or refunds escrow. The first founding sellers pay a 0% take-rate.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["listings"],
+                properties: {
+                  listings: { type: "array", items: { type: "object" } },
+                  payout: { type: "object", properties: { chain: { type: "string", enum: ["solana", "base"] }, address: { type: "string" } } },
+                },
+              },
+            },
+          },
+        },
+        responses: { "201": { description: "{ listings[], sellerAgentId, payout, founding, takeRateBps }" }, "400": { description: "invalid_payout | invalid_schema | blocked_destination" } },
+      },
+    },
+    "/v1/sellers/me": {
+      get: { summary: "Seller dashboard: listings, calls, sandbox earnings, pending payouts, founding status.", responses: { "200": { description: "{ profile, founding, takeRateBps, totals, listings[], recent[] }" } } },
+    },
+    "/v1/sellers/me/payout": {
+      put: {
+        summary: "Set the payout wallet address (Solana or Base).",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { chain: { type: "string" }, address: { type: "string" } } } } } },
+        responses: { "200": { description: "{ payout }" }, "400": { description: "invalid_payout" } },
+      },
+    },
+    "/v1/founding": {
+      get: { security: [], summary: "Founding seller program: seats, taken, remaining, days at 0% take-rate.", responses: { "200": { description: "{ limit, taken, remaining, days, takeRateBps }" } } },
+    },
+    "/v1/demand": {
+      get: {
+        security: [],
+        summary: "Public demand board: unmet agent requests, sanitized and clustered, with request counts and an estimated earnings figure (requests × suggested price).",
+        parameters: [{ name: "limit", in: "query", schema: { type: "integer" } }],
+        responses: { "200": { description: "{ sandbox, clusters[], totals }" } },
+      },
+    },
+    "/v1/activity": {
+      get: {
+        security: [],
+        summary: "Live sandbox activity: real jobs (mock USDC) with seller, product, amount, latency and buyer label, plus a seller leaderboard. Roster Fleet is Roster's own buyer.",
+        parameters: [{ name: "limit", in: "query", schema: { type: "integer" } }],
+        responses: { "200": { description: "{ sandbox, items[], totals, leaderboard[] }" } },
+      },
+    },
     "/v1/data/products": {
       get: {
         security: [],

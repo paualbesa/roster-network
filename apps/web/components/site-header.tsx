@@ -5,8 +5,9 @@ import { useEffect, useState } from "react";
 
 const NAV = [
   { href: "/data", label: "Data" },
-  { href: "/#problem", label: "Problem" },
-  { href: "/#pillars", label: "Pillars" },
+  { href: "/sell", label: "Sell" },
+  { href: "/demand", label: "Demand" },
+  { href: "/activity", label: "Activity" },
   { href: "/#flow", label: "How it works" },
   { href: "/console", label: "Console" },
   { href: "/docs", label: "Docs" },
@@ -32,7 +33,7 @@ export function SiteHeader() {
           <Mark />
           <span className="font-serif text-2xl tracking-[-0.03em] text-paper">Roster</span>
         </Link>
-        <nav aria-label="Primary" className="hidden items-center gap-8 md:flex">
+        <nav aria-label="Primary" className="hidden items-center gap-6 lg:gap-7 md:flex">
           {NAV.map((item) => (
             <Link key={item.href} href={item.href} className="text-sm text-muted transition-colors hover:text-paper">
               {item.label}
