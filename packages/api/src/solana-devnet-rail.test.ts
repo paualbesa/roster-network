@@ -83,11 +83,22 @@ describe("solana-devnet rail (offline ledger)", () => {
     });
     expect(created.status).toBe(201);
     const locked = (await created.json()) as {
-      job: { id: string; status: string; chain: string; lockProviderRef: string };
+      job: {
+        id: string;
+        status: string;
+        chain: string;
+        lockProviderRef: string;
+        slaMs: number;
+        createdAt: string;
+        deadlineAt: string;
+      };
     };
     expect(locked.job.chain).toBe("solana-devnet");
     expect(locked.job.lockProviderRef.length).toBeGreaterThan(60);
     expect(locked.job.status).toBe("held");
+    // Listing p95 stays 400; deadline adds Devnet settlement buffer.
+    expect(locked.job.slaMs).toBe(400);
+    expect(Date.parse(locked.job.deadlineAt!) - Date.parse(locked.job.createdAt)).toBe(400 + 60_000);
 
     const delivered = await app.request(`/v1/jobs/${locked.job.id}/result`, {
       method: "POST",

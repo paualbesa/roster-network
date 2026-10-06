@@ -140,7 +140,9 @@ export function createPollers(client: Client, channels: RostyChannels, stateFile
   async function handleTxItem(ch: TextChannel, item: ActivityItem, now: Date): Promise<void> {
     if (item.status && item.status !== "released") return;
     const fleet = isFleetBuyer(item.buyer, item.buyerKind);
-    if (fleet) {
+    // Devnet (and any job with an explorer link) posts individually so TX has real sigs.
+    // Mock fleet buys stay aggregated to avoid spam.
+    if (fleet && !item.explorerUrl) {
       if (!state.fleetBucket) {
         state.fleetBucket = { windowStartedAt: now.toISOString(), count: 0, amountUsdc: "0.000000" };
       }
@@ -158,6 +160,9 @@ export function createPollers(client: Client, channels: RostyChannels, stateFile
           seller: item.seller ?? "—",
           latencyMs: item.latencyMs ?? null,
           sandbox: item.sandbox !== false,
+          explorerUrl: item.explorerUrl,
+          railLabel: item.railLabel,
+          chain: item.chain,
         }),
       ],
     });

@@ -778,6 +778,15 @@ export class AgentFinanceService implements ReputationHook {
     return this.enqueue(() => this.fundAgentUnlocked(organizationId, agentId, amountUsdc));
   }
 
+  /**
+   * Top up a sandbox org treasury (mint test USDC on solana-devnet / mock credit)
+   * when the balance is below `minUsdc`. Idempotent for already-funded treasuries.
+   * No-op outside sandbox or when the rail cannot credit.
+   */
+  ensureSandboxTreasury(organizationId: string, minUsdc: string = "1.00"): Promise<{ balanceUsdc: string; credited: boolean }> {
+    return this.enqueue(() => this.ensureSandboxTreasuryUnlocked(organizationId, minUsdc));
+  }
+
   payAgent(organizationId: string, agentId: string, input: PaymentInput): Promise<PaymentResult> {
     return this.enqueue(() => this.payAgentUnlocked(organizationId, agentId, input));
   }
@@ -1398,6 +1407,32 @@ export class AgentFinanceService implements ReputationHook {
     this.store.transactions.push(transaction);
     this.commit();
     return { transaction, balanceUsdc: await this.wallets.getBalance(wallet.address) };
+  }
+
+  private async ensureSandboxTreasuryUnlocked(
+    organizationId: string,
+    minUsdc: string,
+  ): Promise<{ balanceUsdc: string; credited: boolean }> {
+    const organization = this.requireOrganization(organizationId);
+    if (this.mode !== "sandbox") {
+      const treasury = await this.readTreasury(organizationId);
+      return { balanceUsdc: treasury.balanceUsdc, credited: false };
+    }
+    if (!isPersistentSandboxWallet(this.wallets)) {
+      const treasury = await this.readTreasury(organizationId);
+      return { balanceUsdc: treasury.balanceUsdc, credited: false };
+    }
+    const wallet = this.requireWallet(organization.treasuryWalletId);
+    const min = this.parsePositiveAmount(minUsdc);
+    let balanceUsdc = await this.wallets.getBalance(wallet.address);
+    if (compareUsdc(balanceUsdc, min) >= 0) {
+      return { balanceUsdc, credited: false };
+    }
+    const createdAt = this.now().toISOString();
+    await this.mintSandboxGrant(organization, wallet, createdAt);
+    this.commit();
+    balanceUsdc = await this.wallets.getBalance(wallet.address);
+    return { balanceUsdc, credited: true };
   }
 
   private async mintSandboxGrant(organization: Organization, wallet: Wallet, createdAt: string): Promise<void> {
