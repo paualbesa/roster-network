@@ -96,8 +96,12 @@ async function main(): Promise<void> {
     if (mode === "sandbox") startFleetBuyer(jsonApp, { intervalMin: resolveFleetBuyerIntervalMin() });
     startExpirySweeper({ app: jsonApp, intervalMs: expireIntervalMs });
   }
-  const { attachRosterMcp } = await import("../../mcp/dist/index.js");
-  attachRosterMcp(app as unknown as Parameters<typeof attachRosterMcp>[0], { mode });
+  // Dynamic path avoids a workspace edge (mcp lists api as a dep) while still
+  // loading the built remote MCP attach helper after packages/mcp is built.
+  const mcpModule = (await import(new URL("../../mcp/dist/index.js", import.meta.url).href)) as {
+    attachRosterMcp: (app: { fetch: typeof import("hono").Hono.prototype.fetch }, options: { mode: typeof mode }) => void;
+  };
+  mcpModule.attachRosterMcp(app, { mode });
 
   serve({ fetch: app.fetch, hostname, port }, (info) => {
     console.log(

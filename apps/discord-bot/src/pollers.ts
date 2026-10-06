@@ -33,7 +33,7 @@ function demandRows(body: Awaited<ReturnType<typeof fetchDemand>>): { need: stri
 }
 
 export function createPollers(client: Client, channels: RostyChannels, stateFile: string) {
-  let state: RostyState = loadState(stateFile);
+  const state: RostyState = loadState(stateFile);
   let listingSeeded = state.seenListingIds.length > 0;
 
   const persist = () => saveState(stateFile, state);
