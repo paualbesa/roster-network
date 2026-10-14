@@ -189,13 +189,29 @@ export const openApiDocument = {
         responses: { "201": { description: "{ job, status, delivered, result, receipt }" }, "409": { description: "insufficient_funds" } },
       },
     },
+    "/x402/listings/{listingId}": {
+      get: {
+        summary:
+          "x402 (coinbase/x402) purchase of a listing. Without X-PAYMENT/PAYMENT-SIGNATURE: 402 with requirements (exact, solana-devnet USDC, payTo, amount = listing price incl. Roster fee, extra.feePayer). With a valid payment: settles on devnet, records a Roster job, returns the result with X-PAYMENT-RESPONSE. GET query params or POST JSON body are the listing input.",
+        security: [],
+        parameters: [{ name: "listingId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "{ delivered, result, job, receipt, x402 }" }, "202": { description: "Paid; delivery pending (poll /x402/jobs/{jobId})" }, "402": { description: "x402 PaymentRequired" }, "404": { description: "not_found" } },
+      },
+      post: { summary: "Same as GET with a JSON body as input.", security: [], responses: { "200": { description: "Paid result" }, "402": { description: "x402 PaymentRequired" } } },
+    },
+    "/x402/resources": {
+      get: { summary: "x402 discovery list of every payable listing with its payment requirements.", security: [], responses: { "200": { description: "{ x402Version, items[] }" } } },
+    },
+    "/x402/jobs/{jobId}": {
+      get: { summary: "Poll an x402 purchase that returned 202.", security: [], parameters: [{ name: "jobId", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "{ job, delivered, result }" } } },
+    },
     "/v1/listings/import": {
       post: {
         summary:
-          "Read a public MCP server (Streamable HTTP, tools/list) or OpenAPI 3/Swagger 2 document and return draft listings: name, description, input/output schemas, suggested USDC price from similar listings, SLA, and the private seller endpoint. https only; private and internal addresses are refused.",
+          "Read a public MCP server (Streamable HTTP, tools/list), OpenAPI 3/Swagger 2 document, or x402 resource (HTTP 402 with payment requirements; exact/solana-devnet is payable by roster_buy, other networks are marked x402 external, unsupported network) and return draft listings: name, description, input/output schemas, suggested USDC price from similar listings, SLA, and the private seller endpoint. https only; private and internal addresses are refused.",
         requestBody: {
           required: true,
-          content: { "application/json": { schema: { type: "object", required: ["url"], properties: { url: { type: "string" }, kind: { type: "string", enum: ["auto", "mcp", "openapi"] } } } } },
+          content: { "application/json": { schema: { type: "object", required: ["url"], properties: { url: { type: "string" }, kind: { type: "string", enum: ["auto", "mcp", "openapi", "x402"] } } } } },
         },
         responses: { "200": { description: "{ source, drafts[], skipped[], founding }" }, "400": { description: "invalid_url | blocked_destination" }, "422": { description: "import_failed" } },
       },

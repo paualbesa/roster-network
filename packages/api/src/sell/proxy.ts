@@ -3,6 +3,7 @@ import { openMcpSession } from "./mcp-client.js";
 import type { SafeFetcher } from "./net.js";
 import type { SellerEndpoint } from "./import.js";
 import type { SellerDirectory } from "./sellers.js";
+import { callX402Resource, isX402Endpoint, type X402Payer } from "../x402/outbound.js";
 
 const MAX_REQUEST_BYTES = 256 * 1024;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -18,6 +19,7 @@ export class SellerProxy implements ExternalFulfiller {
     private readonly sellers: SellerDirectory,
     private readonly fetcher: SafeFetcher,
     private readonly timeoutFor: (listingId: string) => number = () => MAX_TIMEOUT_MS,
+    private readonly x402Payer: X402Payer | null = null,
   ) {}
 
   handles(listing: ExternalListingRef): boolean {
@@ -29,13 +31,18 @@ export class SellerProxy implements ExternalFulfiller {
     const record = this.sellers.endpointFor(listing.id);
     if (!record || record.organizationId !== listing.organizationId) throw new Error("Seller endpoint not found.");
     const timeoutMs = Math.min(MAX_TIMEOUT_MS, Math.max(1000, this.timeoutFor(listing.id)));
+    if (isX402Endpoint(record.endpoint)) {
+      if (!record.endpoint.supported) throw new Error(`x402 external, unsupported network (${record.endpoint.network}).`);
+      if (!this.x402Payer) throw new Error("x402 external payment is not configured on this API (needs a solana-devnet payer).");
+      return callX402Resource(this.fetcher, record.endpoint, input, this.x402Payer);
+    }
     return callSellerEndpoint(this.fetcher, record.endpoint, input, timeoutMs);
   }
 }
 
 export async function callSellerEndpoint(
   fetcher: SafeFetcher,
-  endpoint: SellerEndpoint,
+  endpoint: Exclude<SellerEndpoint, { type: "x402" }>,
   input: Record<string, unknown>,
   timeoutMs: number,
 ): Promise<Record<string, unknown>> {

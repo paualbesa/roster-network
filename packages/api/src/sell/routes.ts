@@ -10,6 +10,7 @@ import { ImportError, importSource, sanitizeTags, type SellerEndpoint } from "./
 import { assertSafeUrl, EgressError, type SafeFetcher } from "./net.js";
 import type { SellerDirectory } from "./sellers.js";
 import { maskAddress, validatePayoutWallet } from "./wallets.js";
+import { isSolanaDevnet } from "../x402/protocol.js";
 
 export const SELLER_AGENT_NAME = "Roster seller";
 const MAX_PUBLISH = 25;
@@ -53,7 +54,7 @@ export function registerSellRoutes<E extends Env>(app: Hono<E>, deps: SellRouteD
     const body = await readBody(c);
     const url = typeof body.url === "string" ? body.url.trim() : "";
     if (!url) throw new ServiceError(400, "invalid_request", "url is required.");
-    const kind = body.kind === "mcp" || body.kind === "openapi" ? body.kind : "auto";
+    const kind = body.kind === "mcp" || body.kind === "openapi" || body.kind === "x402" ? body.kind : "auto";
     try {
       const result = await importSource(url, { fetcher: deps.fetcher, registry: deps.registry, allowHttp: deps.allowHttp === true }, kind);
       return c.json({ ...result, founding: foundingFor(deps, org) });
@@ -279,6 +280,9 @@ function parsePublishItem(raw: unknown, index: number, allowHttp: boolean): Publ
     throw error;
   }
   const endpoint = parseEndpoint(item.endpoint, at, allowHttp);
+  if (endpoint.type === "x402" && endpoint.requirement && BigInt(usdcMicros(priceUsdc)) < BigInt(endpoint.requirement.amount)) {
+    throw new ServiceError(400, "price_too_low", `${at}.priceUsdc must cover the upstream x402 price (${endpoint.requirement.amount} micros).`);
+  }
   const tags = sanitizeTags(Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === "string") : []);
   const sourceUrl = typeof item.sourceUrl === "string" && item.sourceUrl.length <= 2048 ? item.sourceUrl : null;
   return { name, description, inputSchema: item.inputSchema as Record<string, unknown>, outputSchema: item.outputSchema as Record<string, unknown>, priceUsdc, p95Ms, tags, endpoint, sourceUrl };
@@ -301,6 +305,32 @@ function parseEndpoint(raw: unknown, at: string, allowHttp: boolean): SellerEndp
     }
     return { type: "mcp", url, toolName: value.toolName, structured: value.structured === true };
   }
+  if (value.type === "x402") {
+    const method = typeof value.method === "string" ? value.method.toUpperCase() : "GET";
+    if (method !== "GET" && method !== "POST") throw new ServiceError(400, "invalid_request", `${at}.endpoint.method must be GET or POST.`);
+    const network = typeof value.network === "string" ? value.network.slice(0, 80) : "unknown";
+    const raw = typeof value.requirement === "object" && value.requirement !== null && !Array.isArray(value.requirement) ? (value.requirement as Record<string, unknown>) : null;
+    const requirement =
+      raw &&
+      raw.scheme === "exact" &&
+      typeof raw.network === "string" &&
+      typeof raw.amount === "string" &&
+      /^\d{1,20}$/.test(raw.amount) &&
+      typeof raw.asset === "string" &&
+      typeof raw.payTo === "string"
+        ? {
+            scheme: "exact",
+            network: raw.network,
+            amount: raw.amount,
+            asset: raw.asset,
+            payTo: raw.payTo,
+            maxTimeoutSeconds: typeof raw.maxTimeoutSeconds === "number" ? Math.min(300, Math.max(5, raw.maxTimeoutSeconds)) : 60,
+            ...(typeof raw.extra === "object" && raw.extra !== null && !Array.isArray(raw.extra) ? { extra: raw.extra as Record<string, unknown> } : {}),
+          }
+        : null;
+    const supported = value.supported === true && requirement !== null && isSolanaDevnet(requirement.network);
+    return { type: "x402", url, method, requirement: supported ? requirement : null, network, supported };
+  }
   if (value.type === "openapi") {
     const method = typeof value.method === "string" ? value.method.toUpperCase() : "";
     if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) throw new ServiceError(400, "invalid_request", `${at}.endpoint.method is invalid.`);
@@ -313,7 +343,7 @@ function parseEndpoint(raw: unknown, at: string, allowHttp: boolean): SellerEndp
       : [];
     return { type: "openapi", url, method: method as "GET", params, hasBody: value.hasBody === true };
   }
-  throw new ServiceError(400, "invalid_request", `${at}.endpoint.type must be "mcp" or "openapi".`);
+  throw new ServiceError(400, "invalid_request", `${at}.endpoint.type must be "mcp", "openapi", or "x402".`);
 }
 
 async function ensureSellerAgent(service: AgentFinanceService, org: string): Promise<string> {
@@ -346,4 +376,9 @@ function micros(amount: string): bigint {
 
 function usdc(value: bigint): string {
   return `${(value / 1_000_000n).toString()}.${(value % 1_000_000n).toString().padStart(6, "0")}`;
+}
+
+function usdcMicros(usdc: string): string {
+  const [whole = "0", frac = ""] = usdc.split(".");
+  return (BigInt(whole) * 1_000_000n + BigInt(frac.padEnd(6, "0").slice(0, 6) || "0")).toString();
 }

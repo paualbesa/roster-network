@@ -1,6 +1,8 @@
 import {
   SolanaFeeError,
   createSolanaDevnetWallet,
+  keypairFromSecret,
+  loadFeePayerSecret,
   resolveSolanaEngineConfig,
   type SolanaDevnetWalletProvider,
   type SolanaEngineConfig,
@@ -75,6 +77,9 @@ import type { FirstPartyOrgs } from "./sell/activity.js";
 import { createSafeFetcher, type SafeFetcher } from "./sell/net.js";
 import { SellerProxy } from "./sell/proxy.js";
 import { registerSellRoutes } from "./sell/routes.js";
+import { registerX402Routes, x402ConfigFromEnv, type X402Config } from "./x402/routes.js";
+import { DevnetSvmChain, type SvmSettlementChain } from "./x402/svm.js";
+import { DevnetX402Payer, type X402Payer } from "./x402/outbound.js";
 
 import { foundingConfigFromEnv, SellerDirectory } from "./sell/sellers.js";
 
@@ -137,6 +142,13 @@ export interface AppOptions extends AppHttpOptions {
   sellers?: SellerDirectory;
   /** Outbound HTTP for imports and the seller proxy. Omit it for the SSRF-guarded default. */
   egressFetcher?: SafeFetcher;
+  /**
+   * x402 gateway (`/x402/*`). Omit it to read ROSTER_X402_* and use the solana-devnet fee payer as facilitator
+   * when the solana-devnet rail is selected. `null` turns the gateway off.
+   */
+  x402?: X402Config | null;
+  /** Outbound x402 payer for imported x402 listings. Omit it for the env default (devnet only); `null` disables. */
+  x402Payer?: X402Payer | null;
   /** Tests only: accept http:// seller URLs. */
   allowHttpEgress?: boolean;
   /**
@@ -213,7 +225,8 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
   const sellers = options.sellers ?? new SellerDirectory(null, foundingConfigFromEnv(), undefined, options.now ?? (() => new Date()));
   sellers.setFirstPartyCheck((org) => org === firstParty.labs || org === firstParty.data);
   const egress = options.egressFetcher ?? createSafeFetcher({ allowHttp: options.allowHttpEgress === true });
-  const proxy = new SellerProxy(sellers, egress, (listingId) => registry.get(listingId)?.latency.p95Ms ?? 30_000);
+  const x402Payer = options.x402Payer === undefined ? defaultX402Payer(walletRail) : options.x402Payer;
+  const proxy = new SellerProxy(sellers, egress, (listingId) => registry.get(listingId)?.latency.p95Ms ?? 30_000, x402Payer);
   // The data catalog matches by name, so it only serves listings of the real Roster Data org.
   const ownsData = (listing: { name: string; organizationId: string }) =>
     data !== null && firstParty.data !== null && listing.organizationId === firstParty.data && data.handles(listing.name);
@@ -756,7 +769,19 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
       listing,
       ...(dataProduct ? { dataProduct } : {}),
       ...(founding ? { founding } : {}),
-      ...(imported ? { proxied: { type: imported.endpoint.type } } : {}),
+      ...(imported
+        ? {
+            proxied:
+              imported.endpoint.type === "x402"
+                ? {
+                    type: "x402",
+                    network: imported.endpoint.network,
+                    supported: imported.endpoint.supported,
+                    status: imported.endpoint.supported ? "x402 external, payable on solana-devnet" : "x402 external, unsupported network",
+                  }
+                : { type: imported.endpoint.type },
+          }
+        : {}),
     });
   });
 
@@ -849,6 +874,25 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
     allowHttp: options.allowHttpEgress === true,
     ...(options.now ? { now: options.now } : {}),
   });
+
+  const x402 = options.x402 === undefined ? defaultX402Config(walletRail) : options.x402;
+  if (x402) {
+    app.use("/x402/*", async (c, next) => {
+      if (limits) {
+        const blocked = limit(c, `x402:${clientAddress(c.req.raw.headers)}`, limits.publicRead);
+        if (blocked) return blocked;
+      }
+      await next();
+    });
+    registerX402Routes(app, {
+      registry,
+      service,
+      orchestrator,
+      needDeps: { registry, service, orchestrator, data, demand },
+      config: x402,
+      ...(options.now ? { now: options.now } : {}),
+    });
+  }
 
   registerAdminRoutes(app, adminDeps);
   registerDataAdminRoutes(app, { data, demand });
@@ -1149,6 +1193,35 @@ function parseLogin(body: unknown): { email: string; password: string } {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function defaultX402Payer(walletRail: WalletRail): X402Payer | null {
+  if (walletRail !== "solana-devnet" || process.env.ROSTER_X402?.trim().toLowerCase() === "off") return null;
+  const secret = process.env.ROSTER_X402_PAYER_SECRET?.trim() || loadFeePayerSecret(process.env);
+  if (!secret) return null;
+  try {
+    const rpc = process.env.SOLANA_RPC_URL?.trim() || process.env.ROSTER_SOLANA_RPC?.trim() || "https://api.devnet.solana.com";
+    return new DevnetX402Payer(keypairFromSecret(secret, "ROSTER_X402_PAYER_SECRET"), rpc);
+  } catch {
+    return null;
+  }
+}
+
+function defaultX402Config(walletRail: WalletRail): X402Config | null {
+  if (process.env.ROSTER_X402?.trim().toLowerCase() === "off") return null;
+  let chain: SvmSettlementChain | null = null;
+  if (walletRail === "solana-devnet") {
+    const secret = loadFeePayerSecret(process.env);
+    const rpc = process.env.SOLANA_RPC_URL?.trim() || process.env.ROSTER_SOLANA_RPC?.trim() || undefined;
+    if (secret) {
+      try {
+        chain = new DevnetSvmChain(keypairFromSecret(secret, "ROSTER_FEE_PAYER_SECRET"), rpc);
+      } catch {
+        chain = null;
+      }
+    }
+  }
+  return x402ConfigFromEnv(process.env, chain);
 }
 
 function openJobStore(options: AppOptions): JobStore {

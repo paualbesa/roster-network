@@ -19,7 +19,7 @@ export interface SellerEndpointRecord {
   listingId: string;
   organizationId: string;
   endpoint: SellerEndpoint;
-  source: { type: "openapi" | "mcp"; url: string };
+  source: { type: "openapi" | "mcp" | "x402"; url: string };
   createdAt: string;
 }
 
