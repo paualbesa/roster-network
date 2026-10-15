@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { Readable } from "node:stream";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createRosterMcpServer, type RosterMcpOptions } from "./server.js";
 
 export interface RemoteMcpHandlerOptions {
@@ -73,24 +71,19 @@ export function createRemoteMcpFetchHandler(options: RemoteMcpHandlerOptions): (
       ...(options.env ? { env: options.env } : {}),
     } satisfies RosterMcpOptions);
 
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
+    // Stateless (no session id): a fresh server + transport per request.
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
     await server.connect(transport);
 
     try {
       let parsedBody: unknown;
-      let bodyBuf = Buffer.alloc(0);
       if (request.method !== "GET" && request.method !== "HEAD") {
-        bodyBuf = Buffer.from(await request.arrayBuffer());
+        const bodyBuf = Buffer.from(await request.arrayBuffer());
         if (bodyBuf.length > MCP_MAX_BODY_BYTES) return payloadTooLarge(request);
         const text = bodyBuf.toString("utf8").trim();
         parsedBody = text ? JSON.parse(text) : undefined;
       }
-      const { req, res, done } = bridgeBuffersToNode(request, bodyBuf);
-      await transport.handleRequest(req, res, parsedBody);
-      const response = await done;
+      const response = await transport.handleRequest(request, { parsedBody });
       const headers = new Headers(response.headers);
       for (const [key, value] of Object.entries(corsHeaders(request))) {
         headers.set(key, value);
@@ -145,124 +138,6 @@ function jsonResponse(status: number, body: unknown, request: Request): Response
   });
 }
 
-/**
- * Minimal IncomingMessage / ServerResponse bridge so StreamableHTTPServerTransport
- * can run inside Hono / Next fetch handlers.
- */
-function bridgeBuffersToNode(request: Request, bodyBuf: Buffer): {
-  req: IncomingMessage;
-  res: ServerResponse;
-  done: Promise<Response>;
-} {
-  const url = new URL(request.url);
-  const req = Readable.from(bodyBuf) as IncomingMessage;
-  req.method = request.method;
-  req.url = `${url.pathname}${url.search}`;
-  req.headers = {};
-  request.headers.forEach((value, key) => {
-    req.headers[key.toLowerCase()] = value;
-  });
-  if (!req.headers["content-length"]) {
-    req.headers["content-length"] = String(bodyBuf.length);
-  }
-
-  let statusCode = 200;
-  const responseHeaders = new Headers();
-  const chunks: Buffer[] = [];
-  let resolveDone!: (response: Response) => void;
-  const done = new Promise<Response>((resolve) => {
-    resolveDone = resolve;
-  });
-
-  const resState = {
-    statusCode,
-    headersSent: false,
-    writableEnded: false,
-  };
-  const res = {
-    get statusCode() {
-      return resState.statusCode;
-    },
-    set statusCode(code: number) {
-      resState.statusCode = code;
-      statusCode = code;
-    },
-    get headersSent() {
-      return resState.headersSent;
-    },
-    get writableEnded() {
-      return resState.writableEnded;
-    },
-    setHeader(name: string, value: string | number | readonly string[]) {
-      responseHeaders.set(name, Array.isArray(value) ? value.join(", ") : String(value));
-    },
-    getHeader(name: string) {
-      return responseHeaders.get(name) ?? undefined;
-    },
-    getHeaders() {
-      const out: Record<string, string> = {};
-      responseHeaders.forEach((value, key) => {
-        out[key] = value;
-      });
-      return out;
-    },
-    writeHead(code: number, headers?: Record<string, string | string[]>) {
-      statusCode = code;
-      resState.statusCode = code;
-      if (headers) {
-        for (const [key, value] of Object.entries(headers)) {
-          responseHeaders.set(key, Array.isArray(value) ? value.join(", ") : String(value));
-        }
-      }
-      resState.headersSent = true;
-      return this;
-    },
-    write(chunk: unknown) {
-      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-      chunks.push(buf);
-      return true;
-    },
-    end(chunk?: unknown) {
-      if (chunk !== undefined && chunk !== null) { const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)); chunks.push(buf); }
-      resState.writableEnded = true;
-      resState.headersSent = true;
-      resolveDone(
-        new Response(Buffer.concat(chunks), {
-          status: statusCode,
-          headers: responseHeaders,
-        }),
-      );
-      return this;
-    },
-    on() {
-      return this;
-    },
-    once() {
-      return this;
-    },
-    emit() {
-      return false;
-    },
-    removeListener() {
-      return this;
-    },
-    flushHeaders() {
-      resState.headersSent = true;
-    },
-  } as unknown as ServerResponse;
-
-
-  // Ensure a response even if transport never calls end (e.g. early return writing directly).
-  queueMicrotask(() => {
-    if (!resState.writableEnded && resState.headersSent && chunks.length > 0) {
-      (res as unknown as { end: (chunk?: unknown) => unknown }).end();
-    }
-  });
-
-  return { req, res, done };
-}
-
-/** Stable public MCP URL for docs and the console. */
 export const ROSTER_REMOTE_MCP_URL = "https://roster.network/mcp";
 
 export function remoteMcpConfigCard(apiKey: string): { url: string; header: string; value: string } {

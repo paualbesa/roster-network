@@ -23,7 +23,7 @@
   "dependencies": {
     "@albesa/core": "workspace:*",
     "@albesa/sdk": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.18.2",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
