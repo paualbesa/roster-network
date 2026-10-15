@@ -165,7 +165,9 @@ module.exports = {
         "next",
       ),
       args: "start --hostname 127.0.0.1 --port 7000",
-      interpreter: "node",
+      // Next 16 needs Node >= 20.9. "node" would resolve to the PM2 daemon's Node (18 on the server),
+      // so pin the Node that evaluates this file (the deploy script selects Node 20 via nvm first).
+      interpreter: process.execPath,
       instances: 1,
       exec_mode: "fork",
       autorestart: true,

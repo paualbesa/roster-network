@@ -12,6 +12,13 @@ if [ -s "$HOME/.nvm/nvm.sh" ]; then
   nvm use 20 >/dev/null 2>&1 || nvm use default >/dev/null 2>&1 || true
 fi
 
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+if [ "$NODE_MAJOR" -lt 20 ]; then
+  echo "FATAL: Node $(node -v) is active; Next 16 needs Node >= 20.9 (install with: nvm install 20)" >&2
+  exit 1
+fi
+echo "note: using node $(node -v) at $(command -v node)"
+
 echo "== git pull =="
 git pull --ff-only origin main
 
@@ -45,7 +52,8 @@ export NEXT_PUBLIC_SITE_URL="${NEXT_PUBLIC_SITE_URL:-https://roster.network}"
 echo "note: site URL $NEXT_PUBLIC_SITE_URL"
 
 echo "== build apps/web =="
-pnpm --filter web build
+# Never let a stuck static generation hang the deploy forever.
+timeout 900 pnpm --filter web build
 
 NEXT_BIN="$ROOT/apps/web/node_modules/next/dist/bin/next"
 if [ ! -f "$NEXT_BIN" ]; then
@@ -54,12 +62,11 @@ if [ ! -f "$NEXT_BIN" ]; then
 fi
 
 echo "== pm2 =="
-if pm2 describe roster-web >/dev/null 2>&1; then
-  pm2 restart roster-web --update-env
-else
-  # --only roster-web: ecosystem.config.cjs also defines roster-api.
-  pm2 start "$ROOT/ecosystem.config.cjs" --only roster-web
-fi
+# Recreate the process so PM2 picks up the Node 20 interpreter from ecosystem.config.cjs.
+# `pm2 restart` keeps whatever interpreter the process was first started with (Node 18 here).
+pm2 delete roster-web >/dev/null 2>&1 || true
+# --only roster-web: ecosystem.config.cjs also defines roster-api.
+pm2 start "$ROOT/ecosystem.config.cjs" --only roster-web
 pm2 save
 
 echo "== health http://127.0.0.1:7000/ =="
