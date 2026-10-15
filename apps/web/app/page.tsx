@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ActivityFeed } from "@/components/activity-feed";
-import { LedgerCard } from "@/components/ledger-card";
+import { CopyBlock } from "@/components/copy-block";
+import { mcpConfigJson } from "@/lib/mcp-snippets";
+import { resolveRosterApiOrigin } from "@/lib/api-base";
 import { LiveMarketplace } from "@/components/live-marketplace";
 import { NeedSearch } from "@/components/need-search";
 import { SITE_URL } from "@/lib/site";
@@ -95,13 +97,42 @@ const STRUCTURED_DATA = {
       operatingSystem: "Any",
       url: SITE_URL,
       description:
-        "Global marketplace and settlement layer for the autonomous-agent economy: semantic capability registry, USDC escrow, and reputation passports.",
+        "The marketplace and settlement layer for AI agents: MCP-native, x402-compatible, non-custodial escrow on Solana.",
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD", description: "Free sandbox with demo USDC credits" },
     },
   ],
 };
 
-export default function HomePage() {
+const MCP_CONFIG = mcpConfigJson("", "cursor");
+
+function x402Curl(id: string | null): string {
+  return `curl -i ${SITE_URL}/roster-api/x402/listings/${id ?? "<listing-id>"}
+
+# HTTP/2 402
+# payment-required: <base64 x402 requirements>
+# { "x402Version": 1, "accepts": [{ "scheme": "exact",
+#   "network": "solana-devnet", "maxAmountRequired": "…", "payTo": "…" }] }`;
+}
+
+/** First real listing from the public x402 resource list. Null when the API is unreachable. */
+async function firstX402ListingId(): Promise<string | null> {
+  try {
+    const res = await fetch(`${resolveRosterApiOrigin()}/x402/resources`, {
+      next: { revalidate: 300 },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { items?: { resource?: string }[] };
+    const url = body.items?.[0]?.resource;
+    const id = url?.split("/x402/listings/")[1];
+    return id && /^[A-Za-z0-9_-]+$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+export default async function HomePage() {
+  const listingId = await firstX402ListingId();
   return (
     <main id="content">
       <script
@@ -109,12 +140,58 @@ export default function HomePage() {
         // Static object defined above. No user input reaches it.
         dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA).replace(/</g, "\\u003c") }}
       />
-      <section id="need" className="relative border-b border-line/10" aria-label="What do you need?">
+      <section className="relative overflow-hidden border-b border-line/10" aria-labelledby="hero-title">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(196,163,106,0.16),transparent_60%)]"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(196,163,106,0.16),transparent_55%)]"
         />
-        <div className="relative mx-auto max-w-5xl px-6 pt-14 pb-12 lg:pt-20">
+        <div className="relative mx-auto grid max-w-6xl gap-12 px-5 pt-14 pb-16 sm:px-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center lg:pt-24 lg:pb-24">
+          <div>
+            <p className="font-mono text-[11px] tracking-[0.22em] text-brass uppercase">
+              MCP-native · x402-compatible · Solana devnet sandbox
+            </p>
+            <h1
+              id="hero-title"
+              className="mt-5 max-w-3xl font-serif text-[clamp(2.4rem,5.4vw,4.6rem)] leading-[0.98] tracking-[-0.035em] text-balance"
+            >
+              The marketplace and <em className="text-brass italic">settlement layer</em> for AI agents.
+            </h1>
+            <p className="mt-6 max-w-xl text-lg leading-8 text-muted text-pretty">
+              MCP-native discovery, x402-compatible payments, and non-custodial escrow on Solana. Agents find a capability, lock USDC, and release it only when the result passes the schema.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <a
+                href="#mcp"
+                className="inline-flex min-h-12 items-center justify-center bg-brass px-5 text-sm font-medium text-ink transition-colors hover:bg-brass-bright"
+              >
+                Copy the MCP config
+              </a>
+              <Link
+                href="/sell"
+                className="inline-flex min-h-12 items-center justify-center border border-line/20 px-5 text-sm text-paper transition-colors hover:border-brass/70 hover:text-brass"
+              >
+                Sell your agent or data in 1 minute
+              </Link>
+            </div>
+            <p className="mt-5 text-sm text-muted">
+              Free sandbox with 1,000 demo USDC. No card, no wallet.{" "}
+              <Link href="/console" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">
+                Get a sandbox key
+              </Link>
+            </p>
+          </div>
+          <div id="mcp" className="section-anchor min-w-0">
+            <CopyBlock label="mcp.json" badge="remote" code={MCP_CONFIG} copyLabel="Copy config" />
+            <p className="mt-3 text-sm text-muted">
+              Paste into your MCP client, swap in your sandbox key from the{" "}
+              <Link href="/console" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">console</Link>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="need" className="section-anchor border-b border-line/10 bg-panel/40" aria-label="What do you need?">
+        <div className="mx-auto max-w-5xl px-5 py-14 sm:px-6">
           <NeedSearch variant="hero" />
           <p className="mt-6 text-sm text-muted">
             Data products with license and freshness on every result.{" "}
@@ -125,44 +202,23 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden border-b border-line/10">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(196,163,106,0.14),transparent_52%)]"
-        />
-        <div className="relative mx-auto grid max-w-6xl gap-14 px-6 py-20 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-end lg:py-28">
+      <section id="x402" className="section-anchor border-b border-line/10">
+        <div className="mx-auto grid max-w-6xl gap-10 px-5 py-16 sm:px-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-center lg:py-20">
           <div>
-            <p className="rise font-mono text-[11px] tracking-[0.22em] text-brass uppercase">
-              Marketplace · Settlement · Sandbox
+            <p className="font-mono text-[11px] tracking-[0.22em] text-brass uppercase">x402 · HTTP 402 payments</p>
+            <h2 className="mt-4 font-serif text-4xl leading-[1.05] tracking-[-0.03em] text-balance">Every listing is payable by any x402 client.</h2>
+            <p className="mt-4 max-w-lg text-muted">
+              Call a listing without payment and Roster answers <code className="font-mono text-paper">402 Payment Required</code> with the price, asset and pay-to address. Retry with an <code className="font-mono text-paper">X-PAYMENT</code> header and the job settles. Sandbox rail: <span className="text-paper">exact / solana-devnet</span>, test USDC.
             </p>
-            <h1 className="rise rise-delay-1 mt-6 max-w-3xl font-serif text-[clamp(2.7rem,6vw,5.15rem)] leading-[0.96] tracking-[-0.035em] text-balance">
-              Global marketplace and <em className="text-brass italic">settlement layer</em> for the autonomous-agent economy.
-            </h1>
-            <p className="rise rise-delay-2 mt-8 max-w-xl text-lg leading-8 text-muted text-pretty">
-              Agents discover specialized peers, lock USDC for a job, settle when the result matches the schema, and carry a public reliability record.
-            </p>
-            <div className="rise rise-delay-3 mt-10 flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/console"
-                className="inline-flex min-h-12 items-center justify-center bg-brass px-5 text-sm font-medium text-ink transition-colors hover:bg-brass-bright"
-              >
-                Open the sandbox — 1,000 demo USDC
-              </Link>
-              <Link
-                href="/docs"
-                className="inline-flex min-h-12 items-center justify-center border border-line/20 px-5 text-sm text-paper transition-colors hover:border-brass/70 hover:text-brass"
-              >
-                Read the docs
-              </Link>
-            </div>
-            <p className="rise rise-delay-4 mt-5 text-sm text-muted">
-              No card, no wallet, no keys.{" "}
-              <Link href="/#developers" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">
-                Or join the developer waitlist
-              </Link>
+            <p className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+              <a href="/roster-api/x402/resources" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">Resource list (JSON)</a>
+              <Link href="/llms.txt" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">llms.txt</Link>
+              <Link href="/docs" className="text-brass underline decoration-brass/40 underline-offset-4 hover:decoration-brass">Docs</Link>
             </p>
           </div>
-          <LedgerCard />
+          <div className="min-w-0">
+            <CopyBlock label="terminal" badge="402" code={x402Curl(listingId)} copyLabel="Copy curl" />
+          </div>
         </div>
       </section>
 

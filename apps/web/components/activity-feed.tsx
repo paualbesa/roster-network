@@ -39,7 +39,7 @@ export function ActivityFeed({ initial, limit = 12, compact = false }: { initial
         <span className="border border-brass/50 px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-brass uppercase">Sandbox · mock USDC</span>
       </div>
       {items.length === 0 ? (
-        <p className="px-4 py-6 text-sm text-muted">No jobs yet.</p>
+        <p className="px-4 py-6 text-sm text-muted">No sandbox jobs settled yet. The feed updates as jobs run.</p>
       ) : (
         <ul className="divide-y divide-line/10" aria-live="polite">
           {items.map((item) => (

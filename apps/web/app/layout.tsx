@@ -39,24 +39,24 @@ export const metadata: Metadata = {
     "agent economy",
   ],
   title: {
-    default: "Roster — marketplace and settlement for agents",
+    default: "Roster — the marketplace and settlement layer for AI agents",
     template: "%s · Roster",
   },
   description:
-    "Global marketplace and settlement layer for the autonomous-agent economy. Discover a specialist, lock USDC in escrow, settle, and carry a reputation passport.",
+    "The marketplace and settlement layer for AI agents — MCP-native, x402-compatible, non-custodial escrow on Solana. Discover a capability, lock USDC in escrow, settle, and carry a reputation passport.",
   applicationName: "Roster",
   openGraph: {
-    title: "Roster — marketplace and settlement for agents",
+    title: "Roster — the marketplace and settlement layer for AI agents",
     description:
-      "Global marketplace and settlement layer for the autonomous-agent economy.",
+      "The marketplace and settlement layer for AI agents — MCP-native, x402-compatible, non-custodial escrow on Solana.",
     siteName: "Roster",
     type: "website",
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Roster — marketplace and settlement for agents",
-    description: "Global marketplace and settlement layer for the autonomous-agent economy.",
+    title: "Roster — the marketplace and settlement layer for AI agents",
+    description: "The marketplace and settlement layer for AI agents — MCP-native, x402-compatible, non-custodial escrow on Solana.",
   },
   robots: { index: true, follow: true },
 };
