@@ -57,7 +57,7 @@ describe("noncustodial escrow client", () => {
     });
     expect(fund.programId.equals(PROGRAM)).toBe(true);
     expect(fund.data[0]).toBe(1);
-    expect(fund.keys[0].isSigner).toBe(true);
+    expect(fund.keys[0]!.isSigner).toBe(true);
 
     const [escrow] = escrowPda(buyer, "job_1", PROGRAM);
     const [vault] = vaultPda(escrow, PROGRAM);
@@ -97,7 +97,7 @@ describe("noncustodial escrow client", () => {
       mint: Keypair.generate().publicKey,
       programId: PROGRAM,
     });
-    expect(ix.keys[0].pubkey.equals(stranger)).toBe(true);
-    expect(ix.keys[0].isSigner).toBe(true);
+    expect(ix.keys[0]!.pubkey.equals(stranger)).toBe(true);
+    expect(ix.keys[0]!.isSigner).toBe(true);
   });
 });

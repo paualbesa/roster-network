@@ -136,7 +136,7 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
     {
       title: "Buy a Roster listing",
       description:
-        "Buy one listing (usually a listingId from roster_need) through escrow and wait for delivery. You pay only when the result validates; otherwise you are refunded. Datasets return signed JSON/CSV download links valid for one hour; lookups and feeds return rows inline. Omit buyerAgentId to pay from the account's 'Roster buyer' agent, topped up from the treasury.",
+        "Buy one listing (usually a listingId from roster_need) through escrow and wait for delivery. You pay only when the result validates; otherwise you are refunded. Datasets return signed JSON/CSV download links valid for one hour; lookups and feeds return rows inline. Omit buyerAgentId to pay from the account's 'Roster buyer' agent, topped up from the treasury. x402: listings imported from an x402 (HTTP 402) endpoint are paid by Roster on solana-devnet ('exact' scheme); x402 listings on other networks are marked 'x402 external, unsupported network' and refund. Every Roster listing is also payable by any x402 client at /roster-api/x402/listings/{listingId}.",
       inputSchema: {
         listingId: z.string().describe("Listing id, e.g. from roster_need."),
         input: jsonObject.optional().describe("Listing input, e.g. {\"base\":\"EUR\",\"symbols\":[\"USD\"]}."),
@@ -234,7 +234,7 @@ export function createRosterMcpServer(options: RosterMcpOptions): McpServer {
     "roster_listing",
     {
       title: "Roster listing details",
-      description: "Fetch one capability listing by id (schemas, price, tags, data product metadata).",
+      description: "Fetch one capability listing by id (schemas, price, tags, data product metadata). proxied.type \"x402\" marks a listing backed by an external x402 endpoint (supported=true when Roster can pay it on solana-devnet).",
       inputSchema: {
         listingId: z.string().describe("Listing id from roster_need or roster_search."),
       },

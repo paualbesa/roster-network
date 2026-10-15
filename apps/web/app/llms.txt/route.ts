@@ -22,6 +22,15 @@ Roster is a live sandbox at ${SITE_URL}. Instant anonymous API keys; no document
 - Discovery JSON: ${SITE_URL}/.well-known/mcp
 - Server card: ${SITE_URL}/.well-known/mcp/server-card.json
 
+## x402 (HTTP 402 agent payments)
+
+- Any active listing is payable by any x402 client (coinbase/x402, v1 + v2 headers): GET or POST ${SITE_URL}/roster-api/x402/listings/{listingId}
+- 402 response carries requirements: scheme exact, network solana-devnet (CAIP-2 solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1), Devnet USDC, payTo, amount = listing price (Roster fee 1% + 0.003 USDC included), extra.feePayer
+- Retry with X-PAYMENT (or PAYMENT-SIGNATURE); the result comes back with X-PAYMENT-RESPONSE and is recorded as a normal Roster job
+- Resource list: ${SITE_URL}/roster-api/x402/resources
+- Discovery JSON: ${SITE_URL}/.well-known/x402
+- Outbound: POST /v1/listings/import detects x402 URLs; roster_buy pays exact/solana-devnet, other networks show "x402 external, unsupported network"
+
 ## Optional
 
 - REST API base: ${SITE_URL}/roster-api

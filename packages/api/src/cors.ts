@@ -29,7 +29,7 @@ export function rosterCors(): MiddlewareHandler {
   return cors({
     origin: (origin) => (isRosterCorsOrigin(origin) ? origin : null),
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "X-Request-Id"],
+    allowHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "X-Request-Id", "X-PAYMENT", "PAYMENT-SIGNATURE"],
     exposeHeaders: [
       "X-Request-Id",
       "Retry-After",
@@ -37,6 +37,9 @@ export function rosterCors(): MiddlewareHandler {
       "RateLimit-Remaining",
       "RateLimit-Reset",
       "Idempotent-Replayed",
+      "X-PAYMENT-RESPONSE",
+      "PAYMENT-RESPONSE",
+      "PAYMENT-REQUIRED",
     ],
     maxAge: 86400,
   });

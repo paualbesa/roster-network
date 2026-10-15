@@ -48,6 +48,17 @@ export function GET(): Response {
       },
       domainNamespace: "network.roster/mcp",
     },
+    x402: {
+      supported: true,
+      versions: [1, 2],
+      schemes: ["exact"],
+      networks: ["solana-devnet", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"],
+      asset: "USDC (Solana Devnet, 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU)",
+      discovery: `${SITE_URL}/.well-known/x402`,
+      resources: `${SITE_URL}/roster-api/x402/resources`,
+      pay: `${SITE_URL}/roster-api/x402/listings/{listingId}`,
+      outbound: "POST /v1/listings/import detects x402 endpoints; roster_buy pays exact/solana-devnet requirements",
+    },
     llmsTxt: `${SITE_URL}/llms.txt`,
     serverCard: `${SITE_URL}/.well-known/mcp/server-card.json`,
   };

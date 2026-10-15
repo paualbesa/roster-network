@@ -87,9 +87,37 @@ curl -sS -X POST https://roster.network/roster-api/v1/need \
 - Remote MCP: `https://roster.network/mcp` (Bearer key)
 - `llms.txt`: https://roster.network/llms.txt
 - Well-known: https://roster.network/.well-known/mcp
+- x402: https://roster.network/.well-known/x402 (pay any listing over HTTP 402)
 - Official registry metadata: [`server.json`](./server.json) (`io.github.paualbesa/roster-network`)
 - Smithery: [`smithery.yaml`](./smithery.yaml)
 - Publish / directory notes: [`docs/discovery/`](./docs/discovery/)
+
+## x402 interoperability
+
+Roster speaks [x402](https://github.com/coinbase/x402), the HTTP 402 payment standard for agents (v1 `X-PAYMENT` and v2 `PAYMENT-SIGNATURE` headers).
+
+**Inbound: any x402 agent can buy a Roster listing.**
+
+```bash
+curl -i https://roster.network/roster-api/x402/listings/<listingId>
+# HTTP/1.1 402 Payment Required
+# {"x402Version":1,"accepts":[{"scheme":"exact","network":"solana-devnet","amount":"20000",
+#   "asset":"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU","payTo":"…","extra":{"feePayer":"…"}}]}
+```
+
+The client signs an `exact` SPL `TransferChecked` (Solana Devnet USDC) and retries with `X-PAYMENT`. Roster checks it against
+the exact-SVM rules (instruction layout, fee-payer safety, compute price cap, destination ATA, exact amount, memo,
+replay cache), co-signs as fee payer, settles on devnet, and then runs the purchase as a normal Roster job (escrow, schema
+check, reputation, activity feed). The amount is the listing price; the Roster fee (1% + 0.003 USDC) is taken from it in escrow.
+The response carries `X-PAYMENT-RESPONSE`. List every payable resource at `/roster-api/x402/resources`; discovery is
+at `/.well-known/x402`.
+
+**Outbound: Roster can resell an x402 endpoint.** `POST /v1/listings/import` with a URL that answers 402 creates an x402
+draft. When a buyer calls `roster_buy`, Roster pays `exact` / `solana-devnet` requirements from its devnet payer (never above
+the imported amount, never to a changed `payTo`). Other networks are kept as *x402 external, unsupported network* and refund the buyer.
+
+Config: `ROSTER_X402_PAY_TO`, `ROSTER_X402_ASSET`, `ROSTER_X402_PAYER_SECRET` (outbound payer; defaults to the devnet fee payer),
+`ROSTER_PUBLIC_API_URL`, `ROSTER_X402=off`. Settlement is devnet-only; mainnet RPC URLs are refused.
 
 ## Architecture
 

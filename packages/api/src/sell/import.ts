@@ -3,6 +3,7 @@ import { load as loadYaml } from "js-yaml";
 import { listMcpTools, McpError, openMcpSession } from "./mcp-client.js";
 import { assertSafeUrl, EgressError, type SafeFetcher } from "./net.js";
 import { isRecord, mcpOutputSchema, openApiOutputSchema, resolveLocalRefs, toInputSchema } from "./schema.js";
+import { detectX402, draftFromX402 } from "../x402/outbound.js";
 
 type Json = Record<string, unknown>;
 
@@ -15,7 +16,23 @@ export type SellerEndpoint =
       params: { name: string; in: "path" | "query" }[];
       hasBody: boolean;
     }
-  | { type: "mcp"; url: string; toolName: string; structured: boolean };
+  | { type: "mcp"; url: string; toolName: string; structured: boolean }
+  | {
+      type: "x402";
+      url: string;
+      method: "GET" | "POST";
+      requirement: {
+        scheme: string;
+        network: string;
+        amount: string;
+        asset: string;
+        payTo: string;
+        maxTimeoutSeconds: number;
+        extra?: Record<string, unknown>;
+      } | null;
+      network: string;
+      supported: boolean;
+    };
 
 export interface ImportedDraft {
   name: string;
@@ -56,7 +73,7 @@ const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 export async function importSource(
   url: string,
   deps: { fetcher: SafeFetcher; registry: CapabilityRegistry; allowHttp?: boolean },
-  kind: "auto" | "mcp" | "openapi" = "auto",
+  kind: "auto" | "mcp" | "openapi" | "x402" = "auto",
 ): Promise<ImportResult> {
   try {
     assertSafeUrl(url, { allowHttp: deps.allowHttp === true });
@@ -64,8 +81,30 @@ export async function importSource(
     if (error instanceof EgressError) throw new ImportError(400, error.code, error.message);
     throw error;
   }
+  if (kind === "x402" || kind === "auto") {
+    try {
+      const detected = await detectX402(url, deps.fetcher);
+      if (detected) {
+        // The upstream x402 price is the floor; Roster does not re-price it from similar listings.
+        const draft = draftFromX402(url, detected.method, detected.required);
+        return {
+          source: { type: "openapi", url, title: `x402 ${new URL(url).hostname}`, version: `x402-v${detected.required.x402Version}` },
+          drafts: [draft],
+          skipped: [],
+        };
+      }
+      if (kind === "x402") throw new ImportError(422, "not_x402", "URL did not answer HTTP 402 with x402 payment requirements.");
+    } catch (error) {
+      if (error instanceof ImportError) throw error;
+      if (error instanceof EgressError && (error.code === "invalid_url" || error.code === "blocked_destination")) {
+        throw new ImportError(400, error.code, error.message);
+      }
+      if (kind === "x402") throw new ImportError(422, "import_failed", error instanceof Error ? error.message : "x402 import failed");
+      // auto: fall through to openapi/mcp
+    }
+  }
   const looksMcp = /\/(mcp|sse)\/?(\?.*)?$/i.test(url);
-  const order: ("mcp" | "openapi")[] = kind !== "auto" ? [kind] : looksMcp ? ["mcp", "openapi"] : ["openapi", "mcp"];
+  const order: ("mcp" | "openapi")[] = kind === "mcp" || kind === "openapi" ? [kind] : looksMcp ? ["mcp", "openapi"] : ["openapi", "mcp"];
   const errors: string[] = [];
   for (const attempt of order) {
     try {
@@ -79,7 +118,7 @@ export async function importSource(
       errors.push(`${attempt}: ${error instanceof Error ? error.message : "failed"}`);
     }
   }
-  throw new ImportError(422, "import_failed", `Could not read an MCP server or an OpenAPI document at that URL. ${errors.join(" · ")}`.slice(0, 600));
+  throw new ImportError(422, "import_failed", `Could not read an MCP server, an OpenAPI document, or an x402 resource at that URL. ${errors.join(" · ")}`.slice(0, 600));
 }
 
 async function importOpenApi(url: string, fetcher: SafeFetcher): Promise<ImportResult> {

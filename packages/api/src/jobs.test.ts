@@ -169,7 +169,7 @@ describe("marketplace jobs", () => {
       body: JSON.stringify({ ...invoice, pricing: { model: "per_call", amountUsdc: "0.009" } }),
     });
     expect(tooCheap.status).toBe(400);
-    expect(((await tooCheap.json()) as ErrorBody).error.message).toMatch(/at least 0\.010000/);
+    expect(((await tooCheap.json()) as { error: { message: string } }).error.message).toMatch(/at least 0\.010000/);
 
     const listingId = await register(app, auth, invoice);
     await bind(app, auth, listingId, sellerId);
