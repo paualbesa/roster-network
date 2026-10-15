@@ -36,7 +36,7 @@ Value: ${card.value}
 `;
 }
 
-export function sdkSnippetTs(apiKey: string, apiUrl = "https://api.roster.network"): string {
+export function sdkSnippetTs(apiKey: string, apiUrl = "https://roster.network/roster-api"): string {
   const key = apiKey.trim() || "sk_sandbox_YOUR_KEY";
   return `import { RosterClient } from "@albesa/sdk";
 
@@ -50,7 +50,7 @@ console.log(found.matches[0]?.listing.name);
 `;
 }
 
-export function sdkSnippetCurl(apiKey: string, apiUrl = "https://api.roster.network"): string {
+export function sdkSnippetCurl(apiKey: string, apiUrl = "https://roster.network/roster-api"): string {
   const key = apiKey.trim() || "sk_sandbox_YOUR_KEY";
   return `curl -sS -X POST ${apiUrl}/v1/need \\
   -H "authorization: Bearer ${key}" \\
@@ -59,7 +59,7 @@ export function sdkSnippetCurl(apiKey: string, apiUrl = "https://api.roster.netw
 `;
 }
 
-export function sdkSnippetPython(apiKey: string, apiUrl = "https://api.roster.network"): string {
+export function sdkSnippetPython(apiKey: string, apiUrl = "https://roster.network/roster-api"): string {
   const key = apiKey.trim() || "sk_sandbox_YOUR_KEY";
   return `import json, urllib.request
 

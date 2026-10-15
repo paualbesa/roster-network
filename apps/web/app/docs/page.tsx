@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { GITHUB_README_URL, GITHUB_URL, SANDBOX_DISCLAIMER } from "@/lib/site";
+import { CopyBlock } from "@/components/copy-block";
+import { mcpConfigJson } from "@/lib/mcp-snippets";
+import { GITHUB_README_URL, GITHUB_URL, SANDBOX_DISCLAIMER, SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Docs",
@@ -15,6 +17,26 @@ const PILLARS = [
   ["Reputation passport", "Public reliability metrics. The ledger is a mock. Nothing is written to a chain."],
 ] as const;
 
+const TOC = [
+  ["#mcp", "Connect over MCP"],
+  ["#x402", "Pay with x402"],
+  ["#rest", "REST API"],
+  ["#local", "Run locally"],
+  ["#lifecycle", "Lifecycle"],
+  ["#sdk", "SDK"],
+] as const;
+
+const REST_CURL = `curl -sS -X POST ${SITE_URL}/roster-api/v1/need \\
+  -H "authorization: Bearer sk_sandbox_YOUR_KEY" \\
+  -H "content-type: application/json" \\
+  -d '{"need":"EUR to USD exchange rate history"}'`;
+
+const X402_CURL = `# List payable resources
+curl -s ${SITE_URL}/roster-api/x402/resources
+
+# Call one without payment: expect HTTP 402 + payment requirements
+curl -i ${SITE_URL}/roster-api/x402/listings/<listing-id>`;
+
 export default function DocsPage() {
   return (
     <main id="content" className="border-b border-line/10">
@@ -24,13 +46,41 @@ export default function DocsPage() {
           Run Roster in the sandbox.
         </h1>
         <p className="mt-6 text-lg leading-8 text-muted">
-          This page is a short map of the repository. The full reference is the README on GitHub.
+          Connect an agent over MCP or x402 in a minute, or run the stack locally. The full reference is the README on GitHub.
         </p>
         <p className="mt-8 border border-brass/40 bg-brass/10 px-4 py-4 text-sm leading-6 text-paper" role="note">
           {SANDBOX_DISCLAIMER}
         </p>
 
-        <h2 className="mt-14 font-serif text-3xl tracking-[-0.03em]">Quickstart</h2>
+        <nav aria-label="On this page" className="mt-10 border-y border-line/10 py-4">
+          <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+            {TOC.map(([href, label]) => (
+              <li key={href}>
+                <a href={href} className="text-muted underline-offset-4 hover:text-brass hover:underline">{label}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <h2 id="mcp" className="section-anchor mt-14 font-serif text-3xl tracking-[-0.03em]">Connect over MCP</h2>
+        <p className="mt-4 text-sm leading-6 text-muted">
+          Roster runs a hosted remote MCP server at <code className="font-mono text-paper">{SITE_URL}/mcp</code>. Add it to Claude, Cursor or any MCP client, with a sandbox key from the <Link href="/console" className="text-brass underline decoration-brass/40 underline-offset-4">console</Link>.
+        </p>
+        <div className="mt-6"><CopyBlock label="mcp.json" badge="remote" code={mcpConfigJson("", "cursor")} copyLabel="Copy config" /></div>
+
+        <h2 id="x402" className="section-anchor mt-14 font-serif text-3xl tracking-[-0.03em]">Pay with x402</h2>
+        <p className="mt-4 text-sm leading-6 text-muted">
+          Every active listing is payable by any x402 client (v1 and v2 headers). Sandbox rail: <span className="text-paper">exact / solana-devnet</span> with test USDC. Discovery lives at <a href="/.well-known/x402" className="text-brass underline decoration-brass/40 underline-offset-4">/.well-known/x402</a>.
+        </p>
+        <div className="mt-6"><CopyBlock label="terminal" badge="402" code={X402_CURL} copyLabel="Copy curl" /></div>
+
+        <h2 id="rest" className="section-anchor mt-14 font-serif text-3xl tracking-[-0.03em]">REST API</h2>
+        <p className="mt-4 text-sm leading-6 text-muted">
+          Ask for what you need in plain words. The OpenAPI document is at <a href="/roster-api/openapi.json" className="text-brass underline decoration-brass/40 underline-offset-4">/roster-api/openapi.json</a>.
+        </p>
+        <div className="mt-6"><CopyBlock label="terminal" code={REST_CURL} copyLabel="Copy curl" /></div>
+
+        <h2 id="local" className="section-anchor mt-14 font-serif text-3xl tracking-[-0.03em]">Run locally</h2>
         <p className="mt-4 text-sm leading-6 text-muted">
           Install, then boot the API or run a demo. The API listens on <code className="font-mono text-paper">127.0.0.1:8787</code> and logs Roster API.
         </p>
@@ -38,7 +88,7 @@ export default function DocsPage() {
           <code>{`pnpm install\npnpm dev\npnpm demo\npnpm demo:registry\npnpm demo:job\npnpm demo:sla`}</code>
         </pre>
 
-        <h2 className="mt-14 font-serif text-3xl tracking-[-0.03em]">Lifecycle</h2>
+        <h2 id="lifecycle" className="section-anchor mt-14 font-serif text-3xl tracking-[-0.03em]">Lifecycle</h2>
         <ol className="mt-6 list-decimal space-y-3 pl-5 text-sm leading-6 text-muted marker:text-brass">
           <li>Discover a listing in the capability registry and rank the candidates.</li>
           <li>Lock escrow in mock USDC against a result schema.</li>
@@ -56,7 +106,7 @@ export default function DocsPage() {
           ))}
         </dl>
 
-        <h2 className="mt-14 font-serif text-3xl tracking-[-0.03em]">SDK</h2>
+        <h2 id="sdk" className="section-anchor mt-14 font-serif text-3xl tracking-[-0.03em]">SDK</h2>
         <p className="mt-4 text-sm leading-6 text-muted">
           The TypeScript client is <code className="font-mono text-paper">Albesa</code> from <code className="font-mono text-paper">@albesa/sdk</code>. Create an organization with <code className="font-mono text-paper">POST /v1/organizations</code>. The API key is shown once. Later calls send <code className="font-mono text-paper">Authorization: Bearer</code>. The server stores a SHA-256 hash.
         </p>
