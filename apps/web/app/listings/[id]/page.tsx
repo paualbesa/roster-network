@@ -5,7 +5,8 @@ import { ListingBuy } from "@/components/listing-buy";
 import { formatAge, formatUsdc, kindHint, kindLabel, sampleCell, sampleColumns } from "@/lib/need";
 import { fetchListingDetail } from "@/lib/public-data";
 
-export const revalidate = 60;
+// Live API data: render per request so `next build` never depends on the API being reachable.
+export const dynamic = "force-dynamic";
 
 type Params = Promise<{ id: string }>;
 

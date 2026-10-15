@@ -54,7 +54,8 @@ export const metadata: Metadata = {
   openGraph: { url: "/" },
 };
 
-export const revalidate = 60;
+// Live API data: render per request so `next build` never depends on the API being reachable.
+export const dynamic = "force-dynamic";
 
 const STRUCTURED_DATA = {
   "@context": "https://schema.org",
