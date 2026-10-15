@@ -10,7 +10,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/data" },
 };
 
-export const revalidate = 120;
+// Live API data: render per request so `next build` never depends on the API being reachable.
+export const dynamic = "force-dynamic";
 
 const ORDER: ListingKind[] = ["dataset", "feed", "lookup"];
 

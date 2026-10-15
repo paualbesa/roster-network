@@ -9,7 +9,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/activity" },
 };
 
-export const revalidate = 10;
+// Live API data: render per request so `next build` never depends on the API being reachable.
+export const dynamic = "force-dynamic";
 
 export default async function ActivityPage() {
   const feed = await fetchActivity();
