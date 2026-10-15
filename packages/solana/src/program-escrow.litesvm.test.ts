@@ -33,7 +33,8 @@ import {
 } from "./noncustodial-escrow.js";
 
 const PROGRAM_ID = new PublicKey(ROSTER_ESCROW_PROGRAM_ID_DEVNET);
-const SO_PATH = resolve(
+// ROSTER_ESCROW_SO points at a freshly built .so (cargo-build-sbf) to test unreleased program changes.
+const SO_PATH = process.env.ROSTER_ESCROW_SO ?? resolve(
   process.cwd(),
   // vitest cwd is packages/solana
   "../../programs/roster-escrow/deploy/roster_escrow.so",
@@ -334,5 +335,76 @@ describe("roster-escrow LiteSVM", () => {
     });
     const relRes = send(svm, new Transaction().add(release), [authority, buyer]);
     expect(failed(relRes)).toBe(true);
+  });
+
+  // Needs the program build with assert_token_program (not yet on devnet / committed .so).
+  it.skipIf(!process.env.ROSTER_ESCROW_SO)("rejects a substituted token program on fund (IncorrectProgramId)", () => {
+    const svm = loadSvm();
+    const authority = Keypair.generate();
+    const buyer = Keypair.generate();
+    const seller = Keypair.generate();
+    svm.airdrop(authority.publicKey, BigInt(3 * LAMPORTS_PER_SOL));
+    svm.airdrop(buyer.publicKey, BigInt(2 * LAMPORTS_PER_SOL));
+    const mintKp = Keypair.generate();
+    send(
+      svm,
+      new Transaction().add(
+        SystemProgram.createAccount({
+          fromPubkey: authority.publicKey,
+          newAccountPubkey: mintKp.publicKey,
+          space: MINT_SIZE,
+          lamports: Number(svm.minimumBalanceForRentExemption(BigInt(MINT_SIZE))),
+          programId: TOKEN_PROGRAM_ID,
+        }),
+        createInitializeMint2Instruction(mintKp.publicKey, 6, authority.publicKey, null),
+      ),
+      [authority, mintKp],
+    );
+    const buyerAta = getAssociatedTokenAddressSync(mintKp.publicKey, buyer.publicKey);
+    const feeAta = getAssociatedTokenAddressSync(mintKp.publicKey, authority.publicKey);
+    send(
+      svm,
+      new Transaction().add(
+        createAssociatedTokenAccountIdempotentInstruction(authority.publicKey, buyerAta, buyer.publicKey, mintKp.publicKey),
+        createAssociatedTokenAccountIdempotentInstruction(authority.publicKey, feeAta, authority.publicKey, mintKp.publicKey),
+        createMintToInstruction(mintKp.publicKey, buyerAta, authority.publicKey, 2_000_000n),
+      ),
+      [authority],
+    );
+    const initRes = send(
+      svm,
+      new Transaction().add(
+        initializeConfigIx({
+          authority: authority.publicKey,
+          feeRecipientToken: feeAta,
+          mint: mintKp.publicKey,
+          arbiter: authority.publicKey,
+          feeBps: 100,
+          flatFee: 3000n,
+          disputeWindowSecs: 3600n,
+          programId: PROGRAM_ID,
+        }),
+      ),
+      [authority],
+    );
+    expect(failed(initRes)).toBe(false);
+    const now = Number(svm.getClock().unixTimestamp);
+    const fund = createAndFundIx({
+      buyer: buyer.publicKey,
+      buyerAta,
+      seller: seller.publicKey,
+      mint: mintKp.publicKey,
+      escrowId: "fake-token-program",
+      amount: 1_000_000n,
+      schemaHash: sha256("sha256").update("x").digest(),
+      deadlineTs: BigInt(now + 100),
+      programId: PROGRAM_ID,
+    });
+    const swapped = fund.keys.findIndex((k) => k.pubkey.equals(TOKEN_PROGRAM_ID));
+    expect(swapped).toBeGreaterThanOrEqual(0);
+    fund.keys[swapped] = { pubkey: PROGRAM_ID, isSigner: false, isWritable: false };
+    const res = send(svm, new Transaction().add(fund), [authority, buyer]);
+    expect(failed(res)).toBe(true);
+    expect(String((res as FailedTransactionMetadata).err())).toMatch(/IncorrectProgramId/);
   });
 });

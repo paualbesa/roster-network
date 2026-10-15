@@ -8,7 +8,7 @@ use solana_program::{
     program_pack::Pack,
     pubkey::Pubkey,
     rent::Rent,
-    system_instruction,
+    system_instruction, system_program,
     sysvar::Sysvar,
 };
 use spl_token::{
@@ -63,8 +63,21 @@ fn process_initialize_config(
     if !authority.is_signer {
         return Err(EscrowError::MissingSignature.into());
     }
-    if fee_bps > 1_000 {
+    if fee_bps > 1_000 || dispute_window_secs < 0 {
         return Err(EscrowError::InvalidInstruction.into());
+    }
+    assert_system_program(system_program)?;
+    // The mint must be a real SPL mint and the fee recipient a token account for it.
+    if mint_info.owner != &spl_token::id() {
+        return Err(EscrowError::WrongMint.into());
+    }
+    Mint::unpack(&mint_info.data.borrow()).map_err(|_| EscrowError::WrongMint)?;
+    if fee_recipient.owner != &spl_token::id() {
+        return Err(EscrowError::InvalidAccount.into());
+    }
+    let fee_ta = TokenAccount::unpack(&fee_recipient.data.borrow()).map_err(|_| EscrowError::InvalidAccount)?;
+    if fee_ta.mint != *mint_info.key {
+        return Err(EscrowError::WrongMint.into());
     }
 
     let (config_pda, bump) = Pubkey::find_program_address(&[CONFIG_SEED], program_id);
@@ -105,6 +118,23 @@ fn process_initialize_config(
     Ok(())
 }
 
+/// Only the legacy SPL Token program may be invoked or trusted as an account owner.
+/// Without this, a caller could pass a fake "token program" whose transfer is a no-op,
+/// leaving an escrow marked Held with an empty vault (fake funding).
+fn assert_token_program(info: &AccountInfo) -> ProgramResult {
+    if info.key != &spl_token::id() {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    Ok(())
+}
+
+fn assert_system_program(info: &AccountInfo) -> ProgramResult {
+    if info.key != &system_program::id() {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    Ok(())
+}
+
 fn load_config(program_id: &Pubkey, info: &AccountInfo) -> Result<Config, ProgramError> {
     if info.owner != program_id {
         return Err(ProgramError::IncorrectProgramId);
@@ -126,6 +156,12 @@ fn load_escrow(program_id: &Pubkey, info: &AccountInfo) -> Result<Escrow, Progra
     }
     let escrow = Escrow::try_from_slice(&info.data.borrow()).map_err(|_| EscrowError::InvalidAccount)?;
     if escrow.discriminator != ESCROW_DISCRIMINATOR {
+        return Err(EscrowError::InvalidAccount.into());
+    }
+    // Account address must be the PDA for (buyer, escrow_id); bump in data must match.
+    let (expected, bump) =
+        Pubkey::find_program_address(&[ESCROW_SEED, escrow.buyer.as_ref(), &escrow.escrow_id], program_id);
+    if info.key != &expected || bump != escrow.bump {
         return Err(EscrowError::InvalidAccount.into());
     }
     Ok(escrow)
@@ -154,6 +190,11 @@ fn process_create_and_fund(
     if !buyer.is_signer {
         return Err(EscrowError::MissingSignature.into());
     }
+    assert_token_program(token_program)?;
+    assert_system_program(system_program)?;
+    if mint_info.owner != &spl_token::id() {
+        return Err(EscrowError::WrongMint.into());
+    }
     let config = load_config(program_id, config_info)?;
     if mint_info.key != &config.mint {
         return Err(EscrowError::WrongMint.into());
@@ -178,6 +219,14 @@ fn process_create_and_fund(
         Pubkey::find_program_address(&[VAULT_SEED, escrow_pda.as_ref()], program_id);
     if vault_info.key != &vault_pda {
         return Err(EscrowError::WrongVault.into());
+    }
+    // Source must be a real token account for this mint, owned by the buyer.
+    if buyer_ata.owner != token_program.key {
+        return Err(EscrowError::InvalidAccount.into());
+    }
+    let buyer_ta = TokenAccount::unpack(&buyer_ata.data.borrow()).map_err(|_| EscrowError::InvalidAccount)?;
+    if buyer_ta.owner != *buyer.key || buyer_ta.mint != *mint_info.key {
+        return Err(EscrowError::InvalidAccount.into());
     }
 
     let rent = Rent::get()?;
@@ -266,7 +315,13 @@ fn assert_vault(program_id: &Pubkey, escrow: &Escrow, escrow_key: &Pubkey, vault
     if vault.key != &expected {
         return Err(EscrowError::WrongVault.into());
     }
-    let _ = escrow;
+    if vault.owner != &spl_token::id() {
+        return Err(EscrowError::WrongVault.into());
+    }
+    let vault_ta = TokenAccount::unpack(&vault.data.borrow()).map_err(|_| EscrowError::WrongVault)?;
+    if vault_ta.owner != *escrow_key || vault_ta.mint != escrow.mint {
+        return Err(EscrowError::WrongVault.into());
+    }
     Ok(())
 }
 
@@ -285,6 +340,7 @@ fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
     if !authority.is_signer {
         return Err(EscrowError::MissingSignature.into());
     }
+    assert_token_program(token_program)?;
     let config = load_config(program_id, config_info)?;
     let mut escrow = load_escrow(program_id, escrow_info)?;
     assert_vault(program_id, &escrow, escrow_info.key, vault_info)?;
@@ -403,6 +459,7 @@ fn process_refund(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResul
     let mint_info = next_account_info(acc)?;
     let token_program = next_account_info(acc)?;
 
+    assert_token_program(token_program)?;
     let config = load_config(program_id, config_info)?;
     let mut escrow = load_escrow(program_id, escrow_info)?;
     assert_vault(program_id, &escrow, escrow_info.key, vault_info)?;
