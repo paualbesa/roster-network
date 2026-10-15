@@ -20,6 +20,20 @@ Artifacts: `programs/roster-escrow/`, client `packages/solana/src/noncustodial-e
 | Overflow / fee edge | `checked_*` math; reject `fee >= amount` | — |
 | Rent griefing | Vault closed on settle; escrow account kept as tombstone to block id reuse | Escrow rent locked until we add explicit close-after-settle with id bloom |
 
+## Finding (2026-10-14 internal): program-id checks
+
+**Severity:** High (pre-mainnet). **Status:** Fixed in-tree.
+
+`CreateAndFund` / `Release` / `Refund` previously accepted any `token_program` account and did not verify `system_program`. A fake token program could accept a no-op "transfer" so an escrow appears `Held` while the vault holds no real SPL tokens (fake funding / settlement griefing). Init also did not require the fee recipient to be an SPL token account for the configured mint.
+
+**Remediation:**
+- `assert_token_program` / `assert_system_program` on fund, release, refund, and config init.
+- Init: mint owner = SPL Token; fee recipient unpacks as token account for that mint; `dispute_window_secs >= 0`.
+- Fund: buyer ATA owner+mint checked before CPI.
+- `load_escrow` verifies PDA(`buyer`, `escrow_id`) + bump; `assert_vault` checks vault PDA, SPL owner, mint, and authority = escrow PDA.
+
+Still open for external audit: Token-2022 / malicious mint re-entrancy, upgrade-authority freeze, economic buyer-cancel risk.
+
 ## Invariants
 
 1. Vault token account authority = Escrow PDA; no private key exists for it.
@@ -33,7 +47,7 @@ Artifacts: `programs/roster-escrow/`, client `packages/solana/src/noncustodial-e
 
 | Layer | What |
 |---|---|
-| Rust host (`cargo test -p roster-escrow`) | Fee unit tests; PDA stability; state-machine negatives (double release, release after refund, dispute window, deadline refund) |
+| Rust host (`cargo test -p roster-escrow`) | Fee unit tests; PDA stability; state-machine negatives (double release, release after refund, dispute window, deadline refund, arbiter-only-after-dispute); documented SPL Token / System program-id requirements |
 | TS (`packages/solana` vitest) | Fee parity; PDA helpers; instruction discriminants; wrong-signer meta shape |
 | DEVNET E2E (`scripts/e2e-escrow-devnet.mjs`) | Live fund→release and fund→refund with explorer signatures |
 

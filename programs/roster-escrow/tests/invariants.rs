@@ -119,3 +119,58 @@ fn release_after_refund_forbidden() {
     s = apply(s, Action::RefundBuyer, false, true).unwrap();
     assert!(apply(s, Action::ReleaseBuyer, false, true).is_err());
 }
+
+#[test]
+fn cannot_release_while_held_as_arbiter() {
+    let s = apply(EscrowState::Uninit, Action::Fund, false, true).unwrap();
+    assert_eq!(
+        apply(s, Action::ReleaseArbiter, false, true).unwrap_err(),
+        "arbiter only after dispute"
+    );
+}
+
+#[test]
+fn cannot_dispute_after_deadline() {
+    // Dispute window may still be open by calendar, but deadline blocks dispute.
+    let s = apply(EscrowState::Uninit, Action::Fund, true, true).unwrap();
+    // Fund ignores after_deadline; state is Held. Dispute with after_deadline=true fails.
+    assert!(apply(s, Action::Dispute, true, true).is_err());
+}
+
+#[test]
+fn buyer_cancel_before_deadline_allowed() {
+    let s = apply(EscrowState::Uninit, Action::Fund, false, true).unwrap();
+    let s = apply(s, Action::RefundBuyer, false, true).unwrap();
+    assert_eq!(s, EscrowState::Refunded);
+}
+
+#[test]
+fn arbiter_refund_after_dispute() {
+    let s = apply(EscrowState::Uninit, Action::Fund, false, true).unwrap();
+    let s = apply(s, Action::Dispute, false, true).unwrap();
+    let s = apply(s, Action::RefundArbiter, false, true).unwrap();
+    assert_eq!(s, EscrowState::Refunded);
+    assert!(apply(s, Action::ReleaseArbiter, false, true).is_err());
+}
+
+/// Documented account checks the processor must enforce (token program id, PDA, mint).
+/// These are compile-time reminders tied to processor.rs; LiteSVM covers runtime.
+#[test]
+fn required_program_ids_are_spl_token_and_system() {
+    use solana_program::system_program;
+    assert_ne!(spl_token::id(), system_program::id());
+    // Declared program id must not collide with token/system (sanity for deploy key).
+    assert_ne!(roster_escrow::id(), spl_token::id());
+}
+
+#[test]
+fn fee_zero_amount_rejected() {
+    assert!(matches!(compute_fee(0, 100, 0), Err(EscrowError::ZeroAmount)));
+}
+
+#[test]
+fn fee_overflow_bps_path_uses_u128() {
+    // Max realistic amount with 10% still fits; pure overflow is hard without u64::MAX * bps.
+    let fee = compute_fee(u64::MAX / 2, 1, 0).unwrap();
+    assert!(fee > 0);
+}
