@@ -55,7 +55,7 @@ export function adminUpstreamToken(headers: Headers): string | null {
   return readAdminCookie(headers.get("cookie"));
 }
 
-const FORWARD_REQUEST = ["authorization", "content-type", "accept", "idempotency-key", "x-request-id"] as const;
+const FORWARD_REQUEST = ["authorization", "content-type", "accept", "idempotency-key", "x-request-id", "x-payment", "payment-signature"] as const;
 
 /**
  * Client address headers for the API rate limiter. roster-api only listens on
