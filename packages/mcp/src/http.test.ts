@@ -1,6 +1,6 @@
 import { createApp } from "@albesa/api";
 import { describe, expect, it } from "vitest";
-import { attachRosterMcp, createRemoteMcpFetchHandler, readBearer, remoteMcpClientJson, remoteMcpConfigCard } from "./http.js";
+import { attachRosterMcp, createRemoteMcpFetchHandler, MCP_MAX_BODY_BYTES, readBearer, remoteMcpClientJson, remoteMcpConfigCard } from "./http.js";
 
 function fetchFor(app: ReturnType<typeof createApp>): typeof fetch {
   return (input, init) => Promise.resolve(app.request(input, init));
@@ -109,5 +109,50 @@ describe("remote MCP HTTP", () => {
     expect(card.url).toBe("https://roster.network/mcp");
     expect(card.value).toBe(`Bearer ${apiKey}`);
     expect(remoteMcpClientJson(apiKey, "cursor")).toContain(apiKey);
+  });
+});
+
+describe("remote MCP hardening", () => {
+  const initBody = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } },
+  });
+
+  it("rejects oversized bodies with 413 before parsing", async () => {
+    const handler = createRemoteMcpFetchHandler({
+      apiBaseUrl: "http://roster.internal",
+      fetch: () => Promise.reject(new Error("must not be called")),
+    });
+    const big = "x".repeat(MCP_MAX_BODY_BYTES + 1);
+    const res = await handler(
+      new Request("http://roster.network/mcp", {
+        method: "POST",
+        headers: { authorization: "Bearer sk_sandbox_x", "content-type": "application/json" },
+        body: big,
+      }),
+    );
+    expect(res.status).toBe(413);
+  });
+
+  it("forwards the caller address to the API so limits are per caller", async () => {
+    const seen: (string | null)[] = [];
+    const recording: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      seen.push(headers.get("cf-connecting-ip"));
+      return Promise.resolve(new Response(JSON.stringify({ agents: [] }), { headers: { "content-type": "application/json" } }));
+    };
+    const handler = createRemoteMcpFetchHandler({ apiBaseUrl: "http://roster.internal", fetch: recording });
+    const headers = {
+      authorization: "Bearer sk_sandbox_x",
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      "cf-connecting-ip": "203.0.113.9",
+    };
+    await handler(new Request("http://roster.network/mcp", { method: "POST", headers, body: initBody }));
+    const call = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "roster_list_agents", arguments: {} } });
+    await handler(new Request("http://roster.network/mcp", { method: "POST", headers, body: call }));
+    for (const value of seen) expect(value).toBe("203.0.113.9");
   });
 });
