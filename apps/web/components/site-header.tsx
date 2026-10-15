@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const NAV = [
@@ -15,6 +16,8 @@ const NAV = [
 
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const isCurrent = (href: string) => !href.includes("#") && (pathname === href || pathname.startsWith(`${href}/`));
 
   useEffect(() => {
     if (!open) return;
@@ -35,7 +38,13 @@ export function SiteHeader() {
         </Link>
         <nav aria-label="Primary" className="hidden items-center gap-6 lg:gap-7 md:flex">
           {NAV.map((item) => (
-            <Link key={item.href} href={item.href} className="text-sm text-muted transition-colors hover:text-paper">
+            <Link
+              key={item.href}
+              href={item.href}
+              prefetch={false}
+              aria-current={isCurrent(item.href) ? "page" : undefined}
+              className="text-sm text-muted transition-colors hover:text-paper aria-[current=page]:text-paper"
+            >
               {item.label}
             </Link>
           ))}
