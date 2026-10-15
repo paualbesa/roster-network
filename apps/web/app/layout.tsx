@@ -1,28 +1,19 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, Instrument_Sans, Instrument_Serif } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { SiteChrome } from "@/components/site-chrome";
 import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
-const sans = Instrument_Sans({
+const sans = Geist({
   subsets: ["latin"],
-  variable: "--font-instrument-sans",
+  variable: "--font-geist-sans",
   display: "swap",
 });
 
-const serif = Instrument_Serif({
+const mono = Geist_Mono({
   subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
-  variable: "--font-instrument-serif",
-  display: "swap",
-});
-
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-ibm-plex-mono",
+  variable: "--font-geist-mono",
   display: "swap",
 });
 
@@ -62,13 +53,13 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0e1110",
+  themeColor: "#07080c",
   colorScheme: "dark",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${serif.variable} ${mono.variable}`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body className="min-h-screen bg-ink font-sans text-paper antialiased">
         <a
           href="#content"

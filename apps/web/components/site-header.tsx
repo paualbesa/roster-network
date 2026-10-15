@@ -12,6 +12,7 @@ const NAV = [
   { href: "/#flow", label: "How it works" },
   { href: "/console", label: "Console" },
   { href: "/docs", label: "Docs" },
+  { href: "/donate", label: "Donate" },
 ] as const;
 
 export function SiteHeader() {
@@ -29,8 +30,8 @@ export function SiteHeader() {
   }, [open]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line/10 bg-ink/80 backdrop-blur-md">
-      <div className="h-[3px] bg-brass" />
+    <header className="sticky top-0 z-40 border-b border-line/10 bg-ink/70 backdrop-blur-xl">
+      <div className="h-px bg-gradient-to-r from-transparent via-violet to-transparent" />
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
         <Link href="/" className="group flex items-center gap-3 rounded-sm" onClick={() => setOpen(false)}>
           <Mark />
@@ -49,10 +50,10 @@ export function SiteHeader() {
             </Link>
           ))}
           <Link
-            href="/#developers"
-            className="inline-flex min-h-11 items-center bg-brass px-4 text-sm font-medium text-ink transition-colors hover:bg-brass-bright"
+            href="/console"
+            className="inline-flex min-h-10 items-center rounded-full bg-brass px-4 text-sm font-semibold text-ink transition-colors hover:bg-brass-bright"
           >
-            Waitlist
+            Get started
           </Link>
         </nav>
         <button
@@ -81,11 +82,11 @@ export function SiteHeader() {
             ))}
             <li>
               <Link
-                href="/#developers"
-                className="mt-2 inline-flex min-h-11 items-center bg-brass px-4 text-sm font-medium text-ink"
+                href="/console"
+                className="mt-2 inline-flex min-h-10 items-center rounded-full bg-brass px-4 text-sm font-semibold text-ink"
                 onClick={() => setOpen(false)}
               >
-                Waitlist
+                Get started
               </Link>
             </li>
           </ul>
