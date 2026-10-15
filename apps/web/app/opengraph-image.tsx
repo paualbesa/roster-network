@@ -4,7 +4,7 @@ export const alt = "Roster — the marketplace and settlement layer for AI agent
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-const BRASS = "#c4a36a";
+const BRASS = "#14f195";
 const MUTED = "#a39e93";
 const PAPER = "#ece6da";
 
@@ -17,7 +17,7 @@ export default function OpenGraphImage() {
           height: "100%",
           display: "flex",
           flexDirection: "column",
-          backgroundColor: "#0e1110",
+          backgroundColor: "#07080c",
           backgroundImage: "radial-gradient(ellipse at top left, rgba(153,69,255,0.28), rgba(14,17,16,0) 60%)",
           color: PAPER,
           borderTop: `8px solid ${BRASS}`,
