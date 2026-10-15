@@ -217,8 +217,8 @@ export function SellFlow({ need }: { need: string | null }) {
         </p>
         {ready && !apiKey ? (
           <p className="mt-3 text-sm text-paper">
-            <Link href="/console/login" className="text-brass underline underline-offset-4">Sign in</Link> or{" "}
-            <Link href="/console" className="text-brass underline underline-offset-4">create a sandbox account</Link> to import and publish.
+            <Link href="/console/login" className="text-paper underline decoration-brass underline-offset-4">Sign in</Link> or{" "}
+            <Link href="/console" className="text-paper underline decoration-brass underline-offset-4">create a sandbox account</Link> to import and publish.
           </p>
         ) : null}
       </form>

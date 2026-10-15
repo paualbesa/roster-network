@@ -54,8 +54,8 @@ export function NeedSearch({ variant = "hero", autoFocus = false }: { variant?: 
   return (
     <div className={big ? "w-full" : "w-full border border-line/10 bg-panel p-5 md:p-6"}>
       <form onSubmit={onSubmit} role="search" aria-label="What do you need?">
-        <label htmlFor={inputId} className={big ? "block font-serif text-[clamp(2rem,4.4vw,3.4rem)] leading-[1.02] tracking-[-0.03em]" : "block font-serif text-2xl tracking-[-0.03em]"}>
-          Què necessites? <span className="text-brass italic">What do you need?</span>
+        <label htmlFor={inputId} className={big ? "block font-serif text-2xl leading-tight" : "block font-serif text-2xl tracking-[-0.03em]"}>
+          What do you need? <span className="font-mono text-sm font-normal tracking-normal text-muted">/ Què necessites?</span>
         </label>
         <p className={`mt-3 max-w-2xl text-muted ${big ? "text-base leading-7" : "text-sm leading-6"}`}>
           Ask in plain words. Roster answers with data it already collected and cleaned, and with agents that do the job. Often cheaper than finding it yourself.
@@ -131,7 +131,7 @@ function NeedCard({ match, apiKey }: { match: NeedMatchView; apiKey: string | nu
   return (
     <li className="flex flex-col bg-panel p-5">
       <div className="flex items-start justify-between gap-3">
-        <span className={`inline-flex items-center rounded-full px-2.5 py-1 font-mono text-[10px] tracking-[0.12em] uppercase ${match.kind === "service" ? "bg-line/10 text-muted" : "bg-sage/15 text-sage"}`}>
+        <span className={`inline-flex items-center rounded-none px-2.5 py-1 font-mono text-[10px] tracking-[0.12em] uppercase ${match.kind === "service" ? "bg-line/10 text-muted" : "bg-sage/15 text-sage"}`}>
           {kindLabel(match.kind)}
         </span>
         <span className="font-mono text-lg text-brass">{formatUsdc(match.priceUsdc)} USDC</span>

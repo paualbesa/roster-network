@@ -25,7 +25,7 @@ export default async function DemandPage() {
             {board ? ` ${board.totals.requestsThisWeek.toString()} requests this week across ${board.totals.needs.toString()} needs.` : ""}
           </p>
           <p className="mt-3 inline-flex items-center gap-2 border border-line/15 px-3 py-1 font-mono text-[11px] text-muted">
-            <span className="size-1.5 rounded-full bg-sage" aria-hidden="true" /> Sandbox · estimated earnings = requests × suggested price, not a guarantee
+            <span className="size-1.5 rounded-none bg-sage" aria-hidden="true" /> Sandbox · estimated earnings = requests × suggested price, not a guarantee
           </p>
         </div>
       </section>

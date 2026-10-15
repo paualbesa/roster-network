@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { relativeTime, sellRequest, trimUsdc, type ActivityFeed as Feed } from "@/lib/sell";
 
-const STATUS_TONE: Record<string, string> = { released: "text-sage", refunded: "text-brass-bright", timed_out: "text-brass-bright", held: "text-muted" };
+const STATUS_TONE: Record<string, string> = { released: "text-paper", refunded: "text-brass-bright", timed_out: "text-brass-bright", held: "text-muted" };
 
 export function ActivityFeed({ initial, limit = 12, compact = false }: { initial: Feed | null; limit?: number; compact?: boolean }) {
   const [feed, setFeed] = useState<Feed | null>(initial);
@@ -34,7 +34,7 @@ export function ActivityFeed({ initial, limit = 12, compact = false }: { initial
     <div className="border border-line/10 bg-panel">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/10 px-4 py-3">
         <p className="flex items-center gap-2 font-mono text-[11px] tracking-[0.16em] text-muted uppercase">
-          <span className="size-1.5 animate-pulse rounded-full bg-sage" aria-hidden="true" /> Live activity
+          <span className="size-1.5 bg-brass" aria-hidden="true" /> Live activity
         </p>
         <span className="border border-brass/50 px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-brass uppercase">Sandbox · mock USDC</span>
       </div>

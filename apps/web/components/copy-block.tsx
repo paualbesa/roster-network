@@ -24,7 +24,7 @@ export function CopyBlock({ label, code, badge, copyLabel = "Copy" }: Props) {
   }
 
   return (
-    <figure className="overflow-hidden border border-line/15 bg-ink shadow-[0_20px_60px_-30px_rgba(0,0,0,0.6)]">
+    <figure className="overflow-hidden border border-line/15 bg-ink">
       <figcaption className="flex items-center justify-between gap-3 border-b border-line/10 px-4 py-2.5 font-mono text-[11px] tracking-[0.16em] text-muted uppercase">
         <span className="flex items-center gap-2">
           {label}
