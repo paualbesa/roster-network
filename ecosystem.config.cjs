@@ -200,6 +200,7 @@ module.exports = {
         HOST: "127.0.0.1",
         PORT: "7001",
         ROSTER_MODE: "sandbox",
+        ROSTER_PUBLIC_API_URL: process.env.ROSTER_PUBLIC_API_URL?.trim() || "https://roster.network/roster-api",
         TZ: "Europe/Madrid",
         ALBESA_DATA_FILE: path.join(dataDir, "sandbox.json"),
         ROSTER_REPUTATION_FILE: path.join(dataDir, "reputation.json"),
