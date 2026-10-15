@@ -168,7 +168,7 @@ function Gate({
     <div className="relative mx-auto flex min-h-[calc(100vh-4.5rem)] max-w-lg flex-col justify-center px-4 py-16 sm:px-6">
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,rgba(196,163,106,0.16),transparent_68%)]"
+        className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,rgba(153,69,255,0.16),transparent_68%)]"
       />
       <div className="relative">
         <p className="font-mono text-[11px] tracking-[0.22em] text-brass uppercase">Admin</p>
