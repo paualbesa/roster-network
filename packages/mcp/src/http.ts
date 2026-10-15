@@ -17,6 +17,26 @@ export interface RemoteMcpHandlerOptions {
  * Authenticate with `Authorization: Bearer <sandbox API key>` (same key as the REST API).
  * Stateless JSON responses (`enableJsonResponse`) so each request carries its own auth.
  */
+/** Largest JSON-RPC body accepted on the hosted endpoint. */
+export const MCP_MAX_BODY_BYTES = 256 * 1024;
+
+/** Client-address headers forwarded to the API so per-address limits apply per caller, not per MCP process. */
+const CLIENT_ADDRESS_HEADERS = ["cf-connecting-ip", "x-forwarded-for", "x-real-ip"] as const;
+
+function withClientAddress(base: typeof fetch, incoming: Headers): typeof fetch {
+  const forwarded: [string, string][] = [];
+  for (const name of CLIENT_ADDRESS_HEADERS) {
+    const value = incoming.get(name);
+    if (value) forwarded.push([name, value.slice(0, 256)]);
+  }
+  if (forwarded.length === 0) return base;
+  return ((input: string | URL | Request, init?: RequestInit) => {
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    for (const [name, value] of forwarded) headers.set(name, value);
+    return base(input, { ...init, headers });
+  }) as typeof fetch;
+}
+
 export function createRemoteMcpFetchHandler(options: RemoteMcpHandlerOptions): (request: Request) => Promise<Response> {
   const baseUrl = options.apiBaseUrl.replace(/\/$/, "");
 
@@ -41,10 +61,15 @@ export function createRemoteMcpFetchHandler(options: RemoteMcpHandlerOptions): (
       );
     }
 
+    const declaredLength = Number(request.headers.get("content-length") ?? "0");
+    if (Number.isFinite(declaredLength) && declaredLength > MCP_MAX_BODY_BYTES) {
+      return payloadTooLarge(request);
+    }
+
     const server = createRosterMcpServer({
       apiKey,
       baseUrl,
-      ...(options.fetch ? { fetch: options.fetch } : {}),
+      fetch: withClientAddress(options.fetch ?? globalThis.fetch.bind(globalThis), request.headers),
       ...(options.env ? { env: options.env } : {}),
     } satisfies RosterMcpOptions);
 
@@ -59,6 +84,7 @@ export function createRemoteMcpFetchHandler(options: RemoteMcpHandlerOptions): (
       let bodyBuf = Buffer.alloc(0);
       if (request.method !== "GET" && request.method !== "HEAD") {
         bodyBuf = Buffer.from(await request.arrayBuffer());
+        if (bodyBuf.length > MCP_MAX_BODY_BYTES) return payloadTooLarge(request);
         const text = bodyBuf.toString("utf8").trim();
         parsedBody = text ? JSON.parse(text) : undefined;
       }
@@ -78,6 +104,18 @@ export function createRemoteMcpFetchHandler(options: RemoteMcpHandlerOptions): (
       await transport.close().catch(() => undefined);
     }
   };
+}
+
+function payloadTooLarge(request: Request): Response {
+  return jsonResponse(
+    413,
+    {
+      jsonrpc: "2.0",
+      error: { code: -32600, message: `Request body must be at most ${(MCP_MAX_BODY_BYTES / 1024).toString()} KB.` },
+      id: null,
+    },
+    request,
+  );
 }
 
 export function readBearer(header: string | null): string | null {

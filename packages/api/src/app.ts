@@ -350,9 +350,11 @@ export function createApp(options: AppOptions = {}): Hono<AppEnv> {
       try {
         body.solana = await wallets.status();
       } catch (error) {
+        // Never echo the raw error: RPC errors can include the provider URL (and its API key).
+        console.error(JSON.stringify({ t: new Date().toISOString(), msg: "solana_status_failed" }), error);
         body.solana = {
           rail: "solana-devnet",
-          error: error instanceof Error ? error.message : "status unavailable",
+          error: "status unavailable",
           label: "devnet · Roster test SPL (not mainnet)",
         };
       }
