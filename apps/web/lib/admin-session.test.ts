@@ -48,6 +48,12 @@ describe("admin proxy headers", () => {
     expect(jobs.get("authorization")).toBe("Bearer user-key");
   });
 
+  it("forwards x402 payment headers", () => {
+    const forwarded = buildProxyHeaders(new Headers({ "x-payment": "abc", "payment-signature": "def" }), ["x402", "listings", "cap_1"]);
+    expect(forwarded.get("x-payment")).toBe("abc");
+    expect(forwarded.get("payment-signature")).toBe("def");
+  });
+
   it("prefers an explicit admin header over the cookie", () => {
     const headers = new Headers({
       cookie: `${ADMIN_COOKIE_NAME}=from-cookie`,

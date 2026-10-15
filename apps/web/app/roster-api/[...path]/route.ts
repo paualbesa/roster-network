@@ -17,6 +17,10 @@ const FORWARD_RESPONSE = [
   "idempotent-replayed",
   "cache-control",
   "content-disposition",
+  "payment-required",
+  "x-payment-response",
+  "payment-response",
+  "access-control-expose-headers",
 ] as const;
 
 async function proxy(request: Request, context: RouteContext): Promise<Response> {
