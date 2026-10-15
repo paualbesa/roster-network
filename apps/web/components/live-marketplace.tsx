@@ -10,7 +10,7 @@ export async function LiveMarketplace() {
         <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
           <div>
             <p className="font-mono text-[11px] tracking-[0.22em] text-brass uppercase">
-              <span className="mr-2 inline-block size-2 rounded-full bg-sage align-middle" aria-hidden="true" />
+              <span className="mr-2 inline-block size-2 rounded-none bg-sage align-middle" aria-hidden="true" />
               Live in the sandbox
             </p>
             <h2 id="marketplace-title" className="mt-4 max-w-3xl font-serif text-4xl leading-[1.05] tracking-[-0.03em] md:text-5xl">

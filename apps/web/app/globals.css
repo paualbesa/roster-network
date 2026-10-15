@@ -6,16 +6,25 @@
   --font-serif: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-  --color-ink: #07080c;
-  --color-panel: #0e1018;
-  --color-panel-2: #151826;
-  --color-paper: #f1f2f7;
-  --color-muted: #9ba1b6;
-  --color-brass: #14f195;
-  --color-brass-bright: #6cf8bd;
-  --color-sage: #b693ff;
-  --color-violet: #9945ff;
-  --color-line: #c9cde0;
+  --color-ink: #0c0c0b;
+  --color-panel: #131312;
+  --color-panel-2: #1b1b19;
+  --color-paper: #eceae4;
+  --color-muted: #8d8b84;
+  /* One accent. Legacy token names kept so every page picks it up. */
+  --color-brass: #ff5b1f;
+  --color-brass-bright: #ff7c4a;
+  --color-sage: #eceae4;
+  --color-violet: #ff5b1f;
+  --color-line: #eceae4;
+
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 1px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius-2xl: 2px;
+  --radius-3xl: 2px;
 }
 
 @layer base {
@@ -87,79 +96,47 @@
   }
 }
 
-/* ---------- Redesign: display type, gradients, background ---------- */
+/* ---------- Editorial v3: monochrome, hairlines, one accent ---------- */
 .font-serif {
   font-weight: 600;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.035em;
+}
+
+.font-mono,
+code,
+pre,
+table {
+  font-variant-numeric: tabular-nums;
 }
 
 h1 em,
 h2 em {
   font-style: normal;
-  background: linear-gradient(90deg, #b693ff 0%, #9945ff 35%, #14f195 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--color-brass);
 }
 
-.text-gradient {
-  background: linear-gradient(90deg, #b693ff 0%, #9945ff 35%, #14f195 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.bg-grid {
-  background-image:
-    linear-gradient(to right, rgba(201, 205, 224, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(201, 205, 224, 0.06) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(ellipse at 50% 0%, #000 30%, transparent 75%);
-}
-
-.mesh {
-  position: absolute;
-  inset: -20% -10% auto -10%;
-  height: 120%;
-  filter: blur(80px);
-  opacity: 0.55;
-  background:
-    radial-gradient(40% 40% at 20% 30%, rgba(153, 69, 255, 0.55), transparent 70%),
-    radial-gradient(35% 35% at 80% 20%, rgba(20, 241, 149, 0.35), transparent 70%),
-    radial-gradient(30% 30% at 60% 70%, rgba(59, 130, 246, 0.3), transparent 70%);
-  animation: mesh-drift 18s ease-in-out infinite alternate;
-}
-
-@keyframes mesh-drift {
-  0% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(3%, -2%, 0) scale(1.05); }
-  100% { transform: translate3d(-3%, 2%, 0) scale(1); }
-}
+.text-gradient { color: var(--color-brass); }
+.bg-grid, .mesh { display: none; }
 
 .glow-card {
-  background: linear-gradient(180deg, rgba(21, 24, 38, 0.85), rgba(14, 16, 24, 0.85));
-  border: 1px solid rgba(201, 205, 224, 0.1);
-  box-shadow: 0 0 0 1px rgba(153, 69, 255, 0.05), 0 30px 80px -40px rgba(153, 69, 255, 0.45);
-  border-radius: 16px;
+  background: var(--color-ink);
+  border: 1px solid rgba(236, 234, 228, 0.14);
 }
 
-/* Flow diagram */
-.flow-packet { offset-rotate: 0deg; }
-.flow-step { opacity: 0.35; transition: opacity 0.3s; animation: flow-step 8s infinite; }
-.flow-step-1 { animation-delay: 0s; }
-.flow-step-2 { animation-delay: 2s; }
-.flow-step-3 { animation-delay: 4s; }
-.flow-step-4 { animation-delay: 6s; }
-@keyframes flow-step {
-  0%, 24% { opacity: 1; }
-  26%, 100% { opacity: 0.35; }
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
-.dash-flow { stroke-dasharray: 4 6; animation: dash 1.2s linear infinite; }
-@keyframes dash { to { stroke-dashoffset: -20; } }
-
-@media (prefers-reduced-motion: reduce) {
-  .mesh, .dash-flow, .flow-step { animation: none; }
-  .flow-step { opacity: 1; }
-  .flow-moving { display: none; }
+.rule-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
 }

@@ -35,7 +35,7 @@ export default async function SellPage({ searchParams }: { searchParams: Promise
               See what agents are asking for on the <Link href="/demand" className="text-paper underline decoration-line/30 underline-offset-4 hover:text-brass">demand board</Link>.
             </p>
           </div>
-          <aside className="border border-brass/40 bg-panel p-6">
+          <aside className="border-l-2 border-brass bg-panel p-6">
             <p className="font-mono text-[11px] tracking-[0.16em] text-brass uppercase">Founding sellers</p>
             {founding ? (
               <>
@@ -54,12 +54,12 @@ export default async function SellPage({ searchParams }: { searchParams: Promise
         </div>
       </section>
       <div className="mx-auto max-w-6xl px-6 py-12">
-        <ol className="mb-10 grid gap-px border border-line/10 bg-line/10 md:grid-cols-3">
+        <ol className="mb-10 divide-y divide-line/15 border-y border-line/15">
           {STEPS.map((step, index) => (
-            <li key={step.title} className="bg-panel p-5">
-              <p className="font-mono text-[11px] text-brass">0{(index + 1).toString()}</p>
-              <h2 className="mt-2 font-serif text-xl tracking-[-0.02em]">{step.title}</h2>
-              <p className="mt-2 text-sm leading-6 text-muted">{step.body}</p>
+            <li key={step.title} className="grid gap-1 py-4 md:grid-cols-[3rem_14rem_minmax(0,1fr)] md:gap-4">
+              <p className="font-mono text-[12px] text-brass">0{(index + 1).toString()}</p>
+              <h2 className="font-serif text-lg tracking-[-0.02em]">{step.title}</h2>
+              <p className="max-w-2xl text-sm leading-6 text-muted">{step.body}</p>
             </li>
           ))}
         </ol>
